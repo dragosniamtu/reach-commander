@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AngularProjectDirectory>$(MSBuildProjectDirectory)\..\..\client\reach-commander-ui</AngularProjectDirectory>
+    <BuildAngularOnPublish Condition="'$(BuildAngularOnPublish)' == ''">true</BuildAngularOnPublish>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,10 +17,16 @@
     <ProjectReference Include="..\ReachCommander.Infrastructure\ReachCommander.Infrastructure.csproj" />
   </ItemGroup>
 
+  <Target Name="BuildAngularForPublish" BeforeTargets="ComputeFilesToPublish"
+          Condition="'$(BuildAngularOnPublish)' == 'true'">
+    <Exec Command="npm ci" WorkingDirectory="$(AngularProjectDirectory)" />
+    <Exec Command="npm run build" WorkingDirectory="$(AngularProjectDirectory)" />
+  </Target>
+
   <Target Name="CopyAngularAssets" AfterTargets="ComputeFilesToPublish"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\..\client\reach-commander-ui\dist\reach-commander-ui\browser')">
+          Condition="Exists('$(AngularProjectDirectory)\dist\reach-commander-ui\browser')">
     <ItemGroup>
-      <ClientAsset Include="$(MSBuildProjectDirectory)\..\..\client\reach-commander-ui\dist\reach-commander-ui\browser\**\*" />
+      <ClientAsset Include="$(AngularProjectDirectory)\dist\reach-commander-ui\browser\**\*" />
       <ResolvedFileToPublish Include="@(ClientAsset)" Exclude="@(ResolvedFileToPublish)">
         <RelativePath>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

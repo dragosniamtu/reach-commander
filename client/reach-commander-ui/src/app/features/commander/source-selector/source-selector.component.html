@@ -5,6 +5,7 @@
       class="source-button"
       [class.selected]="source.id === selectedSourceId()"
       [class.unavailable]="!source.isAvailable"
+      [attr.data-testid]="'source-' + source.id"
       [attr.aria-pressed]="source.id === selectedSourceId()"
       [attr.aria-label]="description(source)"
       [title]="description(source)"

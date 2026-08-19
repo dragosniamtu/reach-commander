@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ReachCommander.Application.Sources;
+using ReachCommander.Application.Files;
 using ReachCommander.Infrastructure.Configuration;
+using ReachCommander.Infrastructure.Security;
 
 namespace ReachCommander.Infrastructure;
 
@@ -15,6 +17,7 @@ public static class DependencyInjection
             .AddOptions<ReachCommanderOptions>()
             .Bind(configuration.GetSection(ReachCommanderOptions.SectionName));
         services.AddSingleton<ISourceCatalog, JsonSourceCatalog>();
+        services.AddSingleton<IPathSecurityService, PathSecurityService>();
         return services;
     }
 }

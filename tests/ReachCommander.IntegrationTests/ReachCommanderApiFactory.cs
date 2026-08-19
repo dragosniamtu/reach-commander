@@ -1,12 +1,18 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ReachCommander.Application.SystemMetrics;
 
 namespace ReachCommander.IntegrationTests;
 
 public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 {
+    private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
+
     public ReachCommanderApiFactory()
     {
         WorkspaceRoot = Path.Combine(
@@ -74,6 +80,11 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public string WebRoot { get; }
 
+    public void SetHardwareSnapshot(HardwareMetricsSnapshot snapshot) =>
+        _hardwareMetrics.Set(snapshot);
+
+    public void SetHardwareNotReady() => _hardwareMetrics.SetNotReady();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -83,7 +94,13 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ReachCommander:SourcesPath"] = ConfigurationPath,
+                ["HardwareMetrics:Enabled"] = "false",
             });
+        });
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHardwareMetricsSnapshotProvider>();
+            services.AddSingleton<IHardwareMetricsSnapshotProvider>(_hardwareMetrics);
         });
     }
 
@@ -104,6 +121,36 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private sealed class TestHardwareMetricsSnapshotProvider : IHardwareMetricsSnapshotProvider
+    {
+        private readonly object _gate = new();
+        private HardwareMetricsSnapshot? _snapshot;
+
+        public HardwareMetricsSnapshot GetCurrent()
+        {
+            lock (_gate)
+            {
+                return _snapshot ?? throw new HardwareMetricsNotReadyException();
+            }
+        }
+
+        public void Set(HardwareMetricsSnapshot snapshot)
+        {
+            lock (_gate)
+            {
+                _snapshot = snapshot;
+            }
+        }
+
+        public void SetNotReady()
+        {
+            lock (_gate)
+            {
+                _snapshot = null;
+            }
         }
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.Sources;
+using ReachCommander.Application.SystemMetrics;
 
 namespace ReachCommander.Api.Errors;
 
@@ -73,6 +74,11 @@ public sealed class FileAccessExceptionHandler(
             "Source unavailable",
             "source_unavailable",
             error.Message),
+        HardwareMetricsNotReadyException => new(
+            StatusCodes.Status503ServiceUnavailable,
+            "Hardware metrics not ready",
+            "metrics_not_ready",
+            "Hardware metrics have not completed their first sample."),
         _ => new(
             StatusCodes.Status500InternalServerError,
             "Unexpected server error",

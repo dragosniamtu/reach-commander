@@ -24,17 +24,20 @@ internal static class MetricNormalizer
 
     public static string Label(string? value, string fallback)
     {
-        var cleaned = new string((value ?? string.Empty)
-            .Where(character => !char.IsControl(character))
-            .ToArray()).Trim();
+        var cleaned = CleanLabel(value);
 
         if (cleaned.Length == 0)
         {
-            cleaned = fallback;
+            cleaned = CleanLabel(fallback);
         }
 
         return cleaned.Length <= MaximumLabelLength
             ? cleaned
             : cleaned[..MaximumLabelLength];
     }
+
+    private static string CleanLabel(string? value) => new string(
+        (value ?? string.Empty)
+            .Where(character => !char.IsControl(character))
+            .ToArray()).Trim();
 }

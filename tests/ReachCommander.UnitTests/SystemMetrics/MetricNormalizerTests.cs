@@ -27,6 +27,12 @@ public sealed class MetricNormalizerTests
     }
 
     [Fact]
+    public void Label_sanitizes_the_fallback_too()
+    {
+        Assert.Equal("Fan 1", MetricNormalizer.Label(null, " \0Fan 1 "));
+    }
+
+    [Fact]
     public void Non_negative_integer_rejects_values_that_are_unsafe_in_json_clients()
     {
         Assert.Equal(0, MetricNormalizer.NonNegative(0));

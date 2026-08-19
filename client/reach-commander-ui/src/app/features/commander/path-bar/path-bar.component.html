@@ -1,0 +1,18 @@
+<div class="path-shell">
+  <span class="root-mark" aria-hidden="true">/</span>
+  @if (editing()) {
+    <input
+      #editor
+      class="path-input"
+      aria-label="Logical directory path"
+      spellcheck="false"
+      autocomplete="off"
+      [value]="draft()"
+      (input)="updateDraft($event)"
+      (keydown)="handleKey($event)"
+      (blur)="commit()"
+    />
+  } @else {
+    <button type="button" class="path-display" title="Edit path (Ctrl+L)" (click)="focusEditor()">{{ path() }}</button>
+  }
+</div>

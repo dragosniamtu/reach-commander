@@ -1,1 +1,65 @@
-/* You can add global styles to this file, and also import other style files */
+:root {
+  color-scheme: dark;
+  --font-ui: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+  --app-bg: #090d12;
+  --surface-1: #0d131a;
+  --surface-2: #111922;
+  --surface-3: #17212c;
+  --surface-4: #202d3a;
+  --line: #23313f;
+  --line-strong: #33475a;
+  --text-1: #eef7fb;
+  --text-2: #c5d3dc;
+  --text-3: #8294a3;
+  --text-4: #566977;
+  --accent: #21c7d9;
+  --accent-soft: #62ddea;
+  --accent-text: #88f3ff;
+  --accent-dim: rgb(33 199 217 / .12);
+  --focus-ring: rgb(33 199 217 / .22);
+  --success: #38d996;
+  --warning: #f5b94c;
+  --danger: #ff6177;
+  --danger-text: #ffc4cc;
+  --danger-dim: rgb(255 97 119 / .14);
+  --folder: #e5b85b;
+  --file: #6ea9d5;
+  --row-hover: rgb(255 255 255 / .035);
+  --selection: rgb(29 111 139 / .52);
+  --selection-text: #f2fbff;
+  --shadow: 0 8px 26px rgb(0 0 0 / .34);
+}
+
+* { box-sizing: border-box; }
+html, body { min-width: 680px; min-height: 100%; margin: 0; background: var(--app-bg); }
+body { color: var(--text-1); font-family: var(--font-ui); overflow: hidden; }
+button, input { font: inherit; }
+button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { color: var(--selection-text); background: var(--selection); }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --app-bg: #dce5eb;
+    --surface-1: #f7fafc;
+    --surface-2: #edf2f5;
+    --surface-3: #e4ebef;
+    --surface-4: #d6e1e7;
+    --line: #c6d1d8;
+    --line-strong: #9eb0bb;
+    --text-1: #15212a;
+    --text-2: #30414e;
+    --text-3: #617582;
+    --text-4: #82939d;
+    --accent: #087e91;
+    --accent-soft: #0a91a6;
+    --accent-text: #056779;
+    --accent-dim: rgb(8 126 145 / .12);
+    --focus-ring: rgb(8 126 145 / .2);
+    --row-hover: rgb(12 55 74 / .05);
+    --selection: rgb(26 135 160 / .24);
+    --selection-text: #102a34;
+    --shadow: 0 8px 24px rgb(35 55 70 / .15);
+  }
+}

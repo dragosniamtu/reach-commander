@@ -1,0 +1,58 @@
+<section
+  class="panel"
+  [class.active]="active()"
+  [attr.aria-label]="side() + ' file panel'"
+  [attr.data-testid]="side() + '-panel'"
+  tabindex="0"
+  (focusin)="store.activatePanel(side())"
+  (pointerdown)="store.activatePanel(side())"
+>
+  <header class="panel-heading">
+    <div>
+      <span class="side-label">{{ side() }}</span>
+      <strong>{{ currentSource()?.name ?? 'Source' }}</strong>
+    </div>
+    <span class="mode">{{ currentSource()?.isReadOnly ? 'READ ONLY' : 'READ' }}</span>
+  </header>
+
+  <app-source-selector
+    [sources]="sources()"
+    [selectedSourceId]="panel().sourceId"
+    (sourceSelected)="store.selectSource(side(), $event)"
+  />
+  <app-directory-tabs
+    [tabs]="panel().tabs"
+    [activeTabId]="panel().activeTabId"
+    (tabSelected)="store.activateTab(side(), $event)"
+    (tabClosed)="closeTab($event)"
+    (tabCreated)="store.createTab(side())"
+  />
+  <app-path-bar [path]="activeTab()?.path ?? '/'" (pathCommitted)="store.setPathFromEditor(side(), $event)" />
+  <app-quick-filter [value]="panel().filter" (valueChanged)="store.setFilter(side(), $event)" />
+
+  <div class="content-state">
+    @if (panel().loading) {
+      <div class="loading" role="status"><span></span> Reading directory…</div>
+    }
+    @if (panel().errorCode) {
+      <div class="error-state" role="alert">
+        <strong>Source unavailable</strong>
+        <span>{{ errorMessage() }}</span>
+        <button type="button" (click)="store.refresh(side())">Retry</button>
+      </div>
+    } @else {
+      <app-file-table
+        [panel]="panel()"
+        (sortRequested)="store.sortBy(side(), $event)"
+        (rowSelected)="selectRow($event)"
+        (rowOpened)="openRow($event)"
+      />
+    }
+  </div>
+
+  <footer class="panel-status">
+    <span>{{ panel().entries.length }} items</span>
+    <span>{{ panel().selectedItems.size }} selected</span>
+    <span class="path-status">{{ activeTab()?.path ?? '/' }}</span>
+  </footer>
+</section>

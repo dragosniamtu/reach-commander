@@ -3,6 +3,7 @@ import { CommanderApiPort, SourceDto } from '../api/api.models';
 import { DirectoryTab, PanelSide, PanelState } from './commander.models';
 import { PanelPersistence, PersistedPanelState } from './panel-persistence';
 import { normalizeLogicalPath, parentLogicalPath } from './path-utils';
+import { buildVisibleRows } from './file-table.viewmodel';
 
 @Injectable({ providedIn: 'root' })
 export class CommanderStore {
@@ -126,6 +127,140 @@ export class CommanderStore {
 
   setPathFromEditor(side: PanelSide, path: string): Promise<void> {
     return this.navigateTo(side, path);
+  }
+
+  sortBy(side: PanelSide, column: PanelState['sortColumn']): void {
+    const state = this.panel(side)();
+    const sortDirection = state.sortColumn === column && state.sortDirection === 'ascending'
+      ? 'descending'
+      : 'ascending';
+    this.updatePanel(side, { ...state, sortColumn: column, sortDirection });
+    this.persist();
+  }
+
+  setFilter(side: PanelSide, filter: string): void {
+    const state = { ...this.panel(side)(), filter };
+    const rowCount = buildVisibleRows(state).length;
+    const cursorIndex = rowCount === 0 ? -1 : Math.min(Math.max(state.cursorIndex, 0), rowCount - 1);
+    this.updatePanel(side, { ...state, cursorIndex });
+    this.persist();
+  }
+
+  moveCursor(side: PanelSide, amount: number): void {
+    const state = this.panel(side)();
+    const rowCount = buildVisibleRows(state).length;
+    if (rowCount === 0) {
+      this.updatePanel(side, { ...state, cursorIndex: -1 });
+      return;
+    }
+
+    const cursorIndex = Math.min(
+      Math.max((state.cursorIndex < 0 ? 0 : state.cursorIndex) + amount, 0),
+      rowCount - 1,
+    );
+    this.updatePanel(side, { ...state, cursorIndex });
+  }
+
+  moveCursorPage(side: PanelSide, direction: -1 | 1): void {
+    this.moveCursor(side, direction * 10);
+  }
+
+  moveCursorBoundary(side: PanelSide, boundary: 'home' | 'end'): void {
+    const state = this.panel(side)();
+    const rowCount = buildVisibleRows(state).length;
+    this.updatePanel(side, {
+      ...state,
+      cursorIndex: rowCount === 0 ? -1 : boundary === 'home' ? 0 : rowCount - 1,
+    });
+  }
+
+  toggleCursorSelection(side: PanelSide): void {
+    const state = this.panel(side)();
+    const rows = buildVisibleRows(state);
+    const row = rows[state.cursorIndex];
+    if (!row) {
+      return;
+    }
+
+    const selectedItems = new Set(state.selectedItems);
+    if (!row.isParent) {
+      if (selectedItems.has(row.relativePath)) {
+        selectedItems.delete(row.relativePath);
+      } else {
+        selectedItems.add(row.relativePath);
+      }
+    }
+
+    this.updatePanel(side, {
+      ...state,
+      selectedItems,
+      selectionAnchor: row.isParent ? state.selectionAnchor : state.cursorIndex,
+      cursorIndex: Math.min(state.cursorIndex + 1, rows.length - 1),
+    });
+  }
+
+  selectAllVisible(side: PanelSide): void {
+    const state = this.panel(side)();
+    const selectedItems = new Set(
+      buildVisibleRows(state)
+        .filter((row) => !row.isParent)
+        .map((row) => row.relativePath),
+    );
+    this.updatePanel(side, { ...state, selectedItems });
+  }
+
+  selectWithPointer(
+    side: PanelSide,
+    rowIndex: number,
+    mode: 'replace' | 'toggle' | 'range',
+  ): void {
+    const state = this.panel(side)();
+    const rows = buildVisibleRows(state);
+    const row = rows[rowIndex];
+    if (!row) {
+      return;
+    }
+
+    if (row.isParent) {
+      this.updatePanel(side, { ...state, cursorIndex: rowIndex });
+      return;
+    }
+
+    let selectedItems = new Set(state.selectedItems);
+    if (mode === 'replace') {
+      selectedItems = new Set([row.relativePath]);
+    } else if (mode === 'toggle') {
+      if (selectedItems.has(row.relativePath)) {
+        selectedItems.delete(row.relativePath);
+      } else {
+        selectedItems.add(row.relativePath);
+      }
+    } else {
+      const anchor = state.selectionAnchor ?? rowIndex;
+      const start = Math.min(anchor, rowIndex);
+      const end = Math.max(anchor, rowIndex);
+      selectedItems = new Set(
+        rows.slice(start, end + 1)
+          .filter((candidate) => !candidate.isParent)
+          .map((candidate) => candidate.relativePath),
+      );
+    }
+
+    this.updatePanel(side, {
+      ...state,
+      cursorIndex: rowIndex,
+      selectedItems,
+      selectionAnchor: mode === 'range' ? state.selectionAnchor ?? rowIndex : rowIndex,
+    });
+  }
+
+  clearSelection(side: PanelSide): void {
+    const state = this.panel(side)();
+    this.updatePanel(side, {
+      ...state,
+      selectedItems: new Set<string>(),
+      selectionAnchor: null,
+    });
   }
 
   initialize(): Promise<void> {
@@ -259,7 +394,7 @@ export class CommanderStore {
         entries,
         loading: false,
         errorCode: null,
-        cursorIndex: entries.length > 0 ? 0 : -1,
+        cursorIndex: buildVisibleRows({ ...current, entries }).length > 0 ? 0 : -1,
       });
     } catch {
       const current = this.panel(side)();

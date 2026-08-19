@@ -1,0 +1,39 @@
+<div class="table-scroll">
+  <table aria-label="Directory contents">
+    <colgroup><col class="name-col"/><col class="ext-col"/><col class="size-col"/><col class="date-col"/><col class="attr-col"/></colgroup>
+    <thead>
+      <tr>
+        <th [attr.aria-sort]="ariaSort('name')"><button type="button" data-sort="name" (click)="sortRequested.emit('name')">Name</button></th>
+        <th [attr.aria-sort]="ariaSort('extension')"><button type="button" data-sort="extension" (click)="sortRequested.emit('extension')">Ext</button></th>
+        <th [attr.aria-sort]="ariaSort('size')"><button type="button" data-sort="size" (click)="sortRequested.emit('size')">Size</button></th>
+        <th [attr.aria-sort]="ariaSort('modifiedAt')"><button type="button" data-sort="modifiedAt" (click)="sortRequested.emit('modifiedAt')">Modified</button></th>
+        <th [attr.aria-sort]="ariaSort('attributes')"><button type="button" data-sort="attributes" (click)="sortRequested.emit('attributes')">Attr</button></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (row of rows(); track row.relativePath; let rowIndex = $index) {
+        <tr
+          [class.cursor]="panel().cursorIndex === rowIndex"
+          [class.selected]="isSelected(row)"
+          [class.parent]="row.isParent"
+          [attr.aria-selected]="isSelected(row)"
+          [attr.data-path]="row.relativePath"
+          (click)="select(rowIndex, $event)"
+          (dblclick)="rowOpened.emit(row)"
+        >
+          <td class="name-cell">
+            <span class="type-icon" [class.folder]="row.type === 'directory'" aria-hidden="true">
+              @if (row.isParent) { ↑ } @else if (row.type === 'directory') { ◆ } @else { ▪ }
+            </span>
+            <span class="file-name" [title]="row.name">{{ row.name }}</span>
+            @if (row.isSymbolicLink) { <span class="link-mark" title="Symbolic link">↗</span> }
+          </td>
+          <td class="muted">{{ row.extension ?? '' }}</td>
+          <td class="size-cell">{{ row.size | fileSize }}</td>
+          <td class="muted">{{ row.modifiedAt ? (row.modifiedAt | date:'yyyy-MM-dd HH:mm') : '' }}</td>
+          <td class="muted attr-cell" [title]="row.attributes">{{ row.attributes }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

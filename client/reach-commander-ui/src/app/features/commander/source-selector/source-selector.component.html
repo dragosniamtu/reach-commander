@@ -1,0 +1,24 @@
+<div class="source-strip" role="group" aria-label="Filesystem sources">
+  @for (source of sources(); track source.id) {
+    <button
+      type="button"
+      class="source-button"
+      [class.selected]="source.id === selectedSourceId()"
+      [class.unavailable]="!source.isAvailable"
+      [attr.aria-pressed]="source.id === selectedSourceId()"
+      [attr.aria-label]="description(source)"
+      [title]="description(source)"
+      [disabled]="!source.isAvailable"
+      (click)="sourceSelected.emit(source.id)"
+    >
+      <span class="source-led" aria-hidden="true"></span>
+      <span>{{ source.name }}</span>
+      @if (!source.isAvailable) {
+        <span class="warning" aria-hidden="true">!</span>
+      }
+      @if (source.isReadOnly) {
+        <span class="read-only" aria-hidden="true">RO</span>
+      }
+    </button>
+  }
+</div>

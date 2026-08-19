@@ -1,0 +1,22 @@
+<div class="tabs" role="tablist" aria-label="Directory tabs">
+  @for (tab of tabs(); track tab.id) {
+    <div class="tab-shell" [class.active]="tab.id === activeTabId()">
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        [attr.aria-selected]="tab.id === activeTabId()"
+        [attr.tabindex]="tab.id === activeTabId() ? 0 : -1"
+        [title]="tab.path"
+        (click)="tabSelected.emit(tab.id)"
+      >{{ tab.label }}</button>
+      <button
+        type="button"
+        class="close"
+        [attr.aria-label]="'Close ' + tab.label + ' tab'"
+        (click)="tabClosed.emit(tab.id)"
+      >×</button>
+    </div>
+  }
+  <button type="button" class="new-tab" aria-label="Create directory tab" (click)="tabCreated.emit()">+</button>
+</div>

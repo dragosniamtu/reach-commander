@@ -1,0 +1,10 @@
+:host { display: block; min-width: 0; }
+.tabs { display: flex; align-items: end; gap: 2px; min-height: 31px; overflow-x: auto; padding: 4px 7px 0; background: var(--surface-1); border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.tab-shell { display: flex; align-items: center; height: 26px; min-width: 62px; max-width: 180px; border: 1px solid transparent; border-bottom: 0; border-radius: 4px 4px 0 0; background: transparent; }
+.tab-shell.active { border-color: var(--line-strong); background: var(--surface-3); box-shadow: inset 0 2px 0 var(--accent); }
+.tab { min-width: 0; flex: 1; overflow: hidden; padding: 0 5px 0 8px; border: 0; color: var(--text-3); background: transparent; font: 500 12px/1 var(--font-ui); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.active .tab { color: var(--text-1); }
+.close, .new-tab { border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
+.close { width: 21px; height: 21px; border-radius: 3px; }
+.close:hover, .new-tab:hover { color: var(--text-1); background: var(--surface-4); }
+.new-tab { width: 27px; height: 26px; flex: 0 0 auto; font-size: 18px; }

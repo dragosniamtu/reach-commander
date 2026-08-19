@@ -1,10 +1,13 @@
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
+import { CommanderApiPort, FileEntryDto, SourceDto } from './core/api/api.models';
 
 describe('App', () => {
   beforeEach(async () => {
+    localStorage.clear();
     await TestBed.configureTestingModule({
       imports: [App],
+      providers: [{ provide: CommanderApiPort, useClass: AppTestApi }],
     }).compileComponents();
   });
 
@@ -14,10 +17,36 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render title', async () => {
+  it('renders the ReachCommander dual-pane shell', async () => {
     const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, reach-commander-ui');
+    expect(compiled.textContent).toContain('ReachCommander');
+    expect(compiled.querySelectorAll('app-commander-panel')).toHaveLength(2);
   });
 });
+
+class AppTestApi extends CommanderApiPort {
+  async getSources(): Promise<readonly SourceDto[]> {
+    return [{
+      id: 'downloads',
+      name: 'Downloads',
+      isAvailable: true,
+      isReadOnly: false,
+      totalBytes: 100,
+      usedBytes: 25,
+      freeBytes: 75,
+      defaultLeft: true,
+      defaultRight: true,
+    }];
+  }
+
+  async listFiles(): Promise<readonly FileEntryDto[]> {
+    return [];
+  }
+
+  async getInfo(): Promise<FileEntryDto> {
+    throw new Error('Not used');
+  }
+}

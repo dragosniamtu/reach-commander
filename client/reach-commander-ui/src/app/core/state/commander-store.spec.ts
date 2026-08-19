@@ -138,6 +138,58 @@ describe('CommanderStore', () => {
     expect(store.rightPanel().tabs[0]?.path).toBe('/Movies');
     expect(store.activePanel()).toBe('right');
   });
+
+  it('toggles selection with Insert and advances the cursor', async () => {
+    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    api.entries.set('downloads:/', [entry('one.txt'), entry('two.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    store.toggleCursorSelection('left');
+
+    expect([...store.leftPanel().selectedItems]).toEqual(['/one.txt']);
+    expect(store.leftPanel().cursorIndex).toBe(1);
+  });
+
+  it('selects all visible real entries and excludes the parent row', async () => {
+    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    api.entries.set('downloads:/Complete', [entry('one.txt'), entry('two.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    await store.navigateTo('left', '/Complete');
+
+    store.selectAllVisible('left');
+
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/one.txt', '/two.txt']);
+  });
+
+  it('supports plain, toggle, and range pointer selection', async () => {
+    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    store.selectWithPointer('left', 0, 'replace');
+    store.selectWithPointer('left', 2, 'range');
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/alpha.txt', '/beta.txt', '/gamma.txt']);
+
+    store.selectWithPointer('left', 1, 'toggle');
+    expect(store.leftPanel().selectedItems.has('/beta.txt')).toBe(false);
+  });
+
+  it('clamps the cursor after filtering and keeps the opposite pane untouched', async () => {
+    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.moveCursorBoundary('left', 'end');
+    const rightBefore = store.rightPanel();
+
+    store.setFilter('left', 'alpha');
+
+    expect(store.leftPanel().cursorIndex).toBe(0);
+    expect(store.rightPanel()).toBe(rightBefore);
+  });
 });
 
 function persistedPanel(sourceId: string, path: string) {

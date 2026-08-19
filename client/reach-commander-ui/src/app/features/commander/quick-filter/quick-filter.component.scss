@@ -1,0 +1,8 @@
+:host { display: block; }
+.filter-shell { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--surface-1); color: var(--text-3); }
+svg { width: 14px; height: 14px; fill: currentColor; }
+input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: 12px/1 var(--font-ui); }
+input::placeholder { color: var(--text-4); }
+button { width: 22px; height: 22px; border: 0; border-radius: 3px; color: var(--text-3); background: transparent; cursor: pointer; }
+button:hover { color: var(--text-1); background: var(--surface-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }

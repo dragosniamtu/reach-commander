@@ -1,4 +1,9 @@
-import { CommanderApiPort, FileEntryDto, SourceDto } from '../api/api.models';
+import {
+  CommanderApiPort,
+  FileEntryDto,
+  SourceDto,
+  SystemMetricsDto,
+} from '../api/api.models';
 import { CommanderStore } from './commander-store';
 
 describe('CommanderStore', () => {
@@ -249,6 +254,21 @@ class FakeCommanderApi extends CommanderApiPort {
 
   constructor(private readonly configuredSources: readonly SourceDto[]) {
     super();
+  }
+
+  async getSystemMetrics(): Promise<SystemMetricsDto> {
+    return {
+      sampledAt: new Date().toISOString(),
+      state: 'disabled',
+      hostUptimeSeconds: null,
+      cpu: null,
+      memory: null,
+      storage: [],
+      gpus: [],
+      fans: [],
+      network: null,
+      collectors: [],
+    };
   }
 
   async getSources(): Promise<readonly SourceDto[]> {

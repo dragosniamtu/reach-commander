@@ -1,12 +1,16 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { CommanderApiPort, FileEntryDto, SourceDto } from './api.models';
+import { CommanderApiPort, FileEntryDto, SourceDto, SystemMetricsDto } from './api.models';
 
 @Injectable({ providedIn: 'root' })
 export class ReachCommanderApi extends CommanderApiPort {
   constructor(private readonly http: HttpClient) {
     super();
+  }
+
+  getSystemMetrics(): Promise<SystemMetricsDto> {
+    return firstValueFrom(this.http.get<SystemMetricsDto>('/api/system-metrics'));
   }
 
   getSources(): Promise<readonly SourceDto[]> {

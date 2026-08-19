@@ -1,0 +1,31 @@
+{
+  "sources": [
+    {
+      "id": "downloads",
+      "name": "Downloads",
+      "path": "/sources/downloads",
+      "enabled": true,
+      "readOnly": true,
+      "defaultLeft": true,
+      "defaultRight": false
+    },
+    {
+      "id": "media",
+      "name": "Media",
+      "path": "/sources/media",
+      "enabled": true,
+      "readOnly": true,
+      "defaultLeft": false,
+      "defaultRight": true
+    },
+    {
+      "id": "usb",
+      "name": "USB",
+      "path": "/sources/usb",
+      "enabled": true,
+      "readOnly": true,
+      "defaultLeft": false,
+      "defaultRight": false
+    }
+  ]
+}

@@ -55,6 +55,11 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         }));
 
         ConfigurationPath = configurationPath;
+        WebRoot = Path.Combine(WorkspaceRoot, "wwwroot");
+        Directory.CreateDirectory(WebRoot);
+        File.WriteAllText(
+            Path.Combine(WebRoot, "index.html"),
+            "<!doctype html><html><body>ReachCommander test shell</body></html>");
     }
 
     public string WorkspaceRoot { get; }
@@ -67,9 +72,12 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public string ConfigurationPath { get; }
 
+    public string WebRoot { get; }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseWebRoot(WebRoot);
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>

@@ -26,8 +26,15 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.Map("/api/{**unmatched}", () => Results.Problem(
+    statusCode: StatusCodes.Status404NotFound,
+    title: "API route not found",
+    extensions: new Dictionary<string, object?> { ["code"] = "route_not_found" }));
+app.MapFallbackToFile("index.html");
 
 await app.Services
     .GetRequiredService<ISourceCatalog>()

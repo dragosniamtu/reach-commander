@@ -1,0 +1,22 @@
+services:
+  reachcommander:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reachcommander:local
+    container_name: reachcommander
+    user: "1000:1000"
+    ports:
+      - "8092:8080"
+    volumes:
+      - ./config:/config:ro
+      - ./dev-sources/downloads:/sources/downloads:ro
+      - ./dev-sources/media:/sources/media:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

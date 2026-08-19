@@ -16,6 +16,7 @@ coverage/
 
 # Local source fixtures
 dev-sources/**
+!dev-sources/**/
 !dev-sources/**/.gitkeep
 
 # Editors and operating systems

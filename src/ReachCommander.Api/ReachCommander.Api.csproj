@@ -15,4 +15,15 @@
     <ProjectReference Include="..\ReachCommander.Infrastructure\ReachCommander.Infrastructure.csproj" />
   </ItemGroup>
 
+  <Target Name="CopyAngularAssets" AfterTargets="ComputeFilesToPublish"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\..\client\reach-commander-ui\dist\reach-commander-ui\browser')">
+    <ItemGroup>
+      <ClientAsset Include="$(MSBuildProjectDirectory)\..\..\client\reach-commander-ui\dist\reach-commander-ui\browser\**\*" />
+      <ResolvedFileToPublish Include="@(ClientAsset)" Exclude="@(ResolvedFileToPublish)">
+        <RelativePath>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
 </Project>

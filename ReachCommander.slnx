@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ReachCommander.Api/ReachCommander.Api.csproj" />
+    <Project Path="src/ReachCommander.Application/ReachCommander.Application.csproj" />
+    <Project Path="src/ReachCommander.Domain/ReachCommander.Domain.csproj" />
+    <Project Path="src/ReachCommander.Infrastructure/ReachCommander.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ReachCommander.IntegrationTests/ReachCommander.IntegrationTests.csproj" />
+    <Project Path="tests/ReachCommander.UnitTests/ReachCommander.UnitTests.csproj" />
+  </Folder>
+</Solution>

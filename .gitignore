@@ -1,0 +1,27 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+artifacts/
+
+# Angular and Node
+**/node_modules/
+**/dist/
+**/.angular/
+coverage/
+
+# Playwright
+**/playwright-report/
+**/test-results/
+
+# Local source fixtures
+dev-sources/**
+!dev-sources/**/.gitkeep
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db

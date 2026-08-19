@@ -1,0 +1,44 @@
+import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { ReachCommanderApi } from './reach-commander-api';
+
+describe('ReachCommanderApi', () => {
+  let api: ReachCommanderApi;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [ReachCommanderApi, provideHttpClient(), provideHttpClientTesting()],
+    });
+    api = TestBed.inject(ReachCommanderApi);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('sends only source id and logical path when listing files', async () => {
+    const result = api.listFiles('media', '/Movies & TV');
+    const request = http.expectOne(
+      (candidate) => candidate.url === '/api/files' &&
+        candidate.params.get('sourceId') === 'media' &&
+        candidate.params.get('path') === '/Movies & TV',
+    );
+
+    expect(request.request.method).toBe('GET');
+    expect(request.request.params.keys().sort()).toEqual(['path', 'sourceId']);
+    request.flush([]);
+
+    await expect(result).resolves.toEqual([]);
+  });
+
+  it('requests source metadata from the stable API route', async () => {
+    const result = api.getSources();
+    const request = http.expectOne('/api/sources');
+
+    expect(request.request.method).toBe('GET');
+    request.flush([]);
+
+    await expect(result).resolves.toEqual([]);
+  });
+});

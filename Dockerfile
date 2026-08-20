@@ -26,6 +26,7 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     ReachCommander__SourcesPath=/config/sources.json
 EXPOSE 8080
 COPY --from=server-build --chown=1000:1000 /app/publish/ ./
+RUN mkdir -p /host/proc/net /host/sys
 USER 1000:1000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://127.0.0.1:8080/health || exit 1

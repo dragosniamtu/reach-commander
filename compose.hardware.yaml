@@ -1,0 +1,26 @@
+services:
+  reachcommander:
+    environment:
+      HardwareMetrics__LinuxProcRoot: /host/proc
+      HardwareMetrics__LinuxSysRoot: /host/sys
+    volumes:
+      - type: bind
+        source: /proc/stat
+        target: /host/proc/stat
+        read_only: true
+      - type: bind
+        source: /proc/meminfo
+        target: /host/proc/meminfo
+        read_only: true
+      - type: bind
+        source: /proc/uptime
+        target: /host/proc/uptime
+        read_only: true
+      - type: bind
+        source: /proc/net/dev
+        target: /host/proc/net/dev
+        read_only: true
+      - type: bind
+        source: /sys
+        target: /host/sys
+        read_only: true

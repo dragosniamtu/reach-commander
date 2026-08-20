@@ -1,0 +1,6 @@
+services:
+  reachcommander:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID}"

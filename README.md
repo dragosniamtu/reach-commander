@@ -12,6 +12,7 @@ ReachCommander is a self-hosted, browser-based dual-pane file manager inspired b
 - Dense details tables with directories first, sortable columns, capacity, read-only, and unavailable-source states.
 - Centralized Total Commander-style keyboard handling and a permanent function-key bar.
 - Read-only source discovery, directory listing, and file-information APIs.
+- Live CPU, memory, storage, GPU, thermal, fan, network, and uptime telemetry when the host exposes it.
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
@@ -134,6 +135,43 @@ The supplied container runs as UID/GID `1000:1000`, drops all Linux capabilities
 
 An optional USB source is already shown in `config/sources.json`; because it has no default bind mount, it demonstrates the disabled/unavailable state. The administrator remains responsible for mounting removable media on the host and binding it to `/sources/usb:ro`.
 
+## Hardware monitoring
+
+The control at the right side of the top bar samples hardware every five seconds and opens a detailed, read-only panel. `GET /api/system-metrics` returns the latest sample. A sample older than 15 seconds is marked stale; unsupported or inaccessible sensors remain explicitly unavailable instead of failing the endpoint. ReachCommander stores no telemetry history and provides no fan, GPU, clock, voltage, or power controls.
+
+For native Windows development, run the API normally:
+
+```powershell
+$env:ReachCommander__SourcesPath = (Resolve-Path .\config\sources.local.json).Path
+dotnet run --project src/ReachCommander.Api
+```
+
+The metrics describe the Windows workstation. Hardware and drivers vary, so temperatures, fan speeds, power, or GPU memory may be unavailable. Docker Desktop instead reports the Linux container/VM view and cannot expose the complete Windows sensor inventory; use the native Windows process when full workstation telemetry matters.
+
+On Ubuntu, a native `dotnet ReachCommander.Api.dll` process reads the host's procfs and sysfs directly. The default hardened Compose deployment remains usable without extra host access, but its metrics describe only the container-visible environment. To opt in to read-only host CPU, memory, uptime, network, thermal, fan, storage, and DRM inventory views, add the hardware override:
+
+```bash
+docker compose -f compose.yaml -f compose.hardware.yaml up -d --build
+```
+
+`compose.hardware.yaml` mounts only `/proc/stat`, `/proc/meminfo`, `/proc/uptime`, `/proc/net/dev`, and `/sys`, all read-only. Omit this override if container-scoped metrics are sufficient. The base deployment stays unprivileged: it keeps its read-only root filesystem, drops every Linux capability, uses no host PID namespace, and has no Docker socket access.
+
+For Intel or AMD GPU activity, add the DRI device and the host render-group ID:
+
+```bash
+RENDER_GID="$(getent group render | cut -d: -f3)" docker compose -f compose.yaml -f compose.hardware.yaml -f compose.hardware.dri.yaml up -d --build
+```
+
+This exposes `/dev/dri` and only the render group needed to read supported DRM counters. Omit `compose.hardware.dri.yaml` when no compatible device is present. For NVIDIA, install NVIDIA Container Toolkit on the Ubuntu host and use its runtime injection:
+
+```bash
+docker compose -f compose.yaml -f compose.hardware.yaml -f compose.hardware.nvidia.yaml up -d --build
+```
+
+Omit the NVIDIA override if the toolkit, device, or compatible NVML library is unavailable; the rest of the metrics continue normally. No vendor command-line tools are invoked.
+
+Hardware telemetry reveals capacity, utilization, network-interface names, and device inventory. Keep ReachCommander on a trusted network and protect it with the same authenticated HTTPS reverse proxy or other deployment access controls used for the file browser.
+
 ## Local development
 
 Create a local source file whose paths are absolute for your operating system; do not commit machine-specific paths. For example, save `config/sources.local.json` with roots you are comfortable exposing.
@@ -203,6 +241,7 @@ Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source button
 GET /api/sources
 GET /api/files?sourceId=media&path=/Movies
 GET /api/files/info?sourceId=media&path=/Movies/Gladiator%20II.mkv
+GET /api/system-metrics
 GET /health
 ```
 

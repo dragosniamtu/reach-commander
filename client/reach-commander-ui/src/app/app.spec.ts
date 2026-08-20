@@ -82,4 +82,16 @@ class AppTestApi extends CommanderApiPort {
   uploadFiles(): Observable<UploadEvent> {
     return EMPTY;
   }
+
+  async previewBatchRename(): Promise<never> {
+    throw new Error('Not used by this test');
+  }
+
+  async executeBatchRename(): Promise<never> {
+    throw new Error('Not used by this test');
+  }
+
+  async undoBatchRename(): Promise<never> {
+    throw new Error('Not used by this test');
+  }
 }

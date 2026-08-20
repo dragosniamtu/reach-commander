@@ -313,4 +313,16 @@ class FakeCommanderApi extends CommanderApiPort {
   uploadFiles(): Observable<UploadEvent> {
     return EMPTY;
   }
+
+  async previewBatchRename(): Promise<never> {
+    throw new Error('Not used by these tests');
+  }
+
+  async executeBatchRename(): Promise<never> {
+    throw new Error('Not used by these tests');
+  }
+
+  async undoBatchRename(): Promise<never> {
+    throw new Error('Not used by these tests');
+  }
 }

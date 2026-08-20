@@ -11,6 +11,9 @@ import { Injectable } from '@angular/core';
 import { filter, firstValueFrom, map, Observable } from 'rxjs';
 import {
   CommanderApiPort,
+  BatchRenameOperationDto,
+  BatchRenamePreviewDto,
+  BatchRenamePreviewRequestDto,
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
@@ -75,6 +78,30 @@ export class ReachCommanderApi extends CommanderApiPort {
               kind: 'completed',
               result: event.body ?? missingUploadResult(),
             },
+      ),
+    );
+  }
+
+  previewBatchRename(request: BatchRenamePreviewRequestDto): Promise<BatchRenamePreviewDto> {
+    return firstValueFrom(
+      this.http.post<BatchRenamePreviewDto>('/api/batch-renames/preview', request),
+    );
+  }
+
+  executeBatchRename(planId: string): Promise<BatchRenameOperationDto> {
+    return firstValueFrom(
+      this.http.post<BatchRenameOperationDto>(
+        `/api/batch-renames/${encodeURIComponent(planId)}/execute`,
+        {},
+      ),
+    );
+  }
+
+  undoBatchRename(operationId: string): Promise<BatchRenameOperationDto> {
+    return firstValueFrom(
+      this.http.post<BatchRenameOperationDto>(
+        `/api/batch-renames/${encodeURIComponent(operationId)}/undo`,
+        {},
       ),
     );
   }

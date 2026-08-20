@@ -226,6 +226,18 @@ class FakeUploadApi extends CommanderApiPort {
     });
   }
 
+  async previewBatchRename(): Promise<never> {
+    throw new Error('Not used by this test');
+  }
+
+  async executeBatchRename(): Promise<never> {
+    throw new Error('Not used by this test');
+  }
+
+  async undoBatchRename(): Promise<never> {
+    throw new Error('Not used by this test');
+  }
+
   async getSystemMetrics(): Promise<SystemMetricsDto> {
     throw new Error('Not used');
   }

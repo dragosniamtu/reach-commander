@@ -58,6 +58,78 @@ export interface UploadTarget {
   readonly directoryPath: string;
 }
 
+export type BatchRenameCaseMode =
+  'unchanged' | 'lowercase' | 'uppercase' | 'capitalizeWords' | 'sentenceCase';
+export type BatchRenamePreviewStatus = 'ready' | 'unchanged' | 'invalid' | 'conflict' | 'stale';
+export type BatchRenameOperationStatus = 'completed' | 'failed' | 'recoveryRequired' | 'undone';
+export type BatchRenameRowResult =
+  'completed' | 'unchanged' | 'failed' | 'rolledBack' | 'recoveryRequired';
+
+export interface BatchRenameRulesDto {
+  readonly nameMask: string;
+  readonly extensionMask: string;
+  readonly searchFor: string;
+  readonly replaceWith: string;
+  readonly useRegex: boolean;
+  readonly matchCase: boolean;
+  readonly replaceInExtension: boolean;
+  readonly caseMode: BatchRenameCaseMode;
+  readonly counterStart: number;
+  readonly counterStep: number;
+  readonly counterDigits: number;
+}
+
+export interface BatchRenamePreviewRequestDto {
+  readonly sourceId: string;
+  readonly directoryPath: string;
+  readonly entryPaths: readonly string[];
+  readonly rules: BatchRenameRulesDto;
+}
+
+export interface BatchRenamePreviewRowDto {
+  readonly sourcePath: string;
+  readonly oldName: string;
+  readonly oldExtension: string | null;
+  readonly newName: string;
+  readonly type: FileEntryType;
+  readonly size: number | null;
+  readonly modifiedAt: string;
+  readonly status: BatchRenamePreviewStatus;
+  readonly message: string | null;
+}
+
+export interface BatchRenamePreviewDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly rows: readonly BatchRenamePreviewRowDto[];
+  readonly canExecute: boolean;
+  readonly changedCount: number;
+  readonly unchangedCount: number;
+  readonly invalidCount: number;
+}
+
+export interface BatchRenameOperationRowDto {
+  readonly oldPath: string;
+  readonly newPath: string;
+  readonly currentPath: string;
+  readonly oldName: string;
+  readonly newName: string;
+  readonly currentName: string;
+  readonly type: FileEntryType;
+  readonly result: BatchRenameRowResult;
+  readonly message: string | null;
+}
+
+export interface BatchRenameOperationDto {
+  readonly operationId: string;
+  readonly status: BatchRenameOperationStatus;
+  readonly rows: readonly BatchRenameOperationRowDto[];
+  readonly compensationAttempted: boolean;
+  readonly recoveryRequired: boolean;
+  readonly undoAvailable: boolean;
+  readonly undoExpiresAt: string | null;
+}
+
 export type UploadEvent =
   | {
       readonly kind: 'progress';
@@ -157,4 +229,12 @@ export abstract class CommanderApiPort {
   abstract getUploadLimits(): Promise<UploadLimitsDto>;
 
   abstract uploadFiles(target: UploadTarget, files: readonly File[]): Observable<UploadEvent>;
+
+  abstract previewBatchRename(
+    request: BatchRenamePreviewRequestDto,
+  ): Promise<BatchRenamePreviewDto>;
+
+  abstract executeBatchRename(planId: string): Promise<BatchRenameOperationDto>;
+
+  abstract undoBatchRename(operationId: string): Promise<BatchRenameOperationDto>;
 }

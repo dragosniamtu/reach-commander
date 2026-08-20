@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/ReachCommander.ArchiveProtocol/ReachCommander.ArchiveProtocol.csproj" />
+    <Project Path="src/ReachCommander.ArchiveWorker/ReachCommander.ArchiveWorker.csproj" />
     <Project Path="src/ReachCommander.Api/ReachCommander.Api.csproj" />
     <Project Path="src/ReachCommander.Application/ReachCommander.Application.csproj" />
     <Project Path="src/ReachCommander.Domain/ReachCommander.Domain.csproj" />

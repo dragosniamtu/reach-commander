@@ -19,6 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ReachCommander.ArchiveProtocol\ReachCommander.ArchiveProtocol.csproj" />
+    <ProjectReference Include="..\..\src\ReachCommander.ArchiveWorker\ReachCommander.ArchiveWorker.csproj" />
     <ProjectReference Include="..\..\src\ReachCommander.Domain\ReachCommander.Domain.csproj" />
     <ProjectReference Include="..\..\src\ReachCommander.Application\ReachCommander.Application.csproj" />
     <ProjectReference Include="..\..\src\ReachCommander.Infrastructure\ReachCommander.Infrastructure.csproj" />

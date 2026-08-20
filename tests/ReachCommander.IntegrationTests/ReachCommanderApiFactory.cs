@@ -20,10 +20,12 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             $"reachcommander-api-tests-{Guid.NewGuid():N}");
         MediaRoot = Path.Combine(WorkspaceRoot, "media");
         DownloadsRoot = Path.Combine(WorkspaceRoot, "downloads");
+        ArchiveRoot = Path.Combine(WorkspaceRoot, "archive");
         MissingUsbRoot = Path.Combine(WorkspaceRoot, "usb-missing");
 
         Directory.CreateDirectory(Path.Combine(MediaRoot, "Movies"));
         Directory.CreateDirectory(Path.Combine(DownloadsRoot, "Complete"));
+        Directory.CreateDirectory(ArchiveRoot);
         File.WriteAllText(Path.Combine(MediaRoot, "Movies", "Gladiator II.mkv"), "video-data");
 
         var configurationPath = Path.Combine(WorkspaceRoot, "sources.json");
@@ -51,6 +53,14 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 },
                 new
                 {
+                    id = "archive",
+                    name = "Archive",
+                    path = ArchiveRoot,
+                    enabled = true,
+                    readOnly = true,
+                },
+                new
+                {
                     id = "usb",
                     name = "USB",
                     path = MissingUsbRoot,
@@ -74,6 +84,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public string DownloadsRoot { get; }
 
+    public string ArchiveRoot { get; }
+
     public string MissingUsbRoot { get; }
 
     public string ConfigurationPath { get; }
@@ -95,6 +107,10 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             {
                 ["ReachCommander:SourcesPath"] = ConfigurationPath,
                 ["HardwareMetrics:Enabled"] = "false",
+                ["Uploads:MaxFileBytes"] = "8",
+                ["Uploads:MaxBatchBytes"] = "12",
+                ["Uploads:MaxFilesPerBatch"] = "2",
+                ["Uploads:MaxConcurrentBatches"] = "2",
             });
         });
         builder.ConfigureTestServices(services =>

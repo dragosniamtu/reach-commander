@@ -80,14 +80,17 @@ internal sealed class UploadService : IUploadService, IDisposable
 
         var staged = new List<StagedUpload>();
         var committed = new List<StagedUpload>();
+        var phase = "prepare";
         try
         {
             var batchId = Guid.NewGuid();
             var requestedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var totalBytes = 0L;
             var declaredBytes = 0L;
+            phase = "capacity";
             var availableBytes = _fileSystem.GetAvailableBytes(destination.PhysicalPath);
 
+            phase = "read-parts";
             await foreach (var part in files.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
                 if (staged.Count >= _options.MaxFilesPerBatch)
@@ -108,6 +111,7 @@ internal sealed class UploadService : IUploadService, IDisposable
 
                 ValidateDeclaredLength(part, fileName, ref declaredBytes, availableBytes);
                 var finalPath = Path.Combine(destination.PhysicalPath, fileName);
+                phase = "stage";
                 var stagedContent = await StageAsync(
                     part.Content,
                     destination.PhysicalPath,
@@ -123,6 +127,7 @@ internal sealed class UploadService : IUploadService, IDisposable
                     finalPath,
                     JoinLogicalPath(destination.LogicalPath, fileName),
                     stagedContent.Size));
+                phase = "read-parts";
             }
 
             if (staged.Count == 0)
@@ -130,15 +135,22 @@ internal sealed class UploadService : IUploadService, IDisposable
                 throw new UploadEmptyException();
             }
 
+            phase = "revalidate";
             var revalidated = await _pathSecurity
                 .ResolveAsync(destination.Source.Id, destination.LogicalPath, cancellationToken)
                 .ConfigureAwait(false);
             EnsureWritable(revalidated);
             if (!PhysicalPathsEqual(destination.PhysicalPath, revalidated.PhysicalPath))
             {
+                _logger.LogWarning(
+                    "Upload storage validation failed for source {SourceId} directory {LogicalDirectory} during {Phase}: destination_changed.",
+                    destination.Source.Id,
+                    destination.LogicalPath,
+                    phase);
                 throw new UploadStorageUnavailableException();
             }
 
+            phase = "conflict-check";
             var existingNames = _fileSystem
                 .EnumerateDirectory(revalidated.PhysicalPath)
                 .Select(entry => entry.Name)
@@ -160,6 +172,7 @@ internal sealed class UploadService : IUploadService, IDisposable
                 staged.Count,
                 totalBytes);
 
+            phase = "finalize";
             foreach (var item in staged)
             {
                 try
@@ -196,8 +209,15 @@ internal sealed class UploadService : IUploadService, IDisposable
             CleanupOrThrow(staged, committed);
             throw new UploadSourceReadOnlyException(destination.Source.Id);
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            _logger.LogWarning(
+                "Upload I/O failed for source {SourceId} directory {LogicalDirectory} during {Phase} with {ExceptionType} ({HResult}).",
+                destination.Source.Id,
+                destination.LogicalPath,
+                phase,
+                exception.GetType().Name,
+                exception.HResult);
             CleanupOrThrow(staged, committed);
             throw new UploadStorageUnavailableException();
         }
@@ -218,6 +238,10 @@ internal sealed class UploadService : IUploadService, IDisposable
 
         if (!_fileSystem.DirectoryExists(resolved.PhysicalPath))
         {
+            _logger.LogWarning(
+                "Upload storage validation failed for source {SourceId} directory {LogicalDirectory}: directory_missing.",
+                resolved.Source.Id,
+                resolved.LogicalPath);
             throw new UploadStorageUnavailableException();
         }
     }

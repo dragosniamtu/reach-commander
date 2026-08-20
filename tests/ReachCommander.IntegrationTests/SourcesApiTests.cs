@@ -17,8 +17,11 @@ public sealed class SourcesApiTests(ReachCommanderApiFactory factory)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(sources);
-        Assert.Equal(3, sources.Length);
+        Assert.Equal(4, sources.Length);
         Assert.True(Assert.Single(sources, source => source.Id == "media").IsAvailable);
+        var archive = Assert.Single(sources, source => source.Id == "archive");
+        Assert.True(archive.IsAvailable);
+        Assert.True(archive.IsReadOnly);
         var usb = Assert.Single(sources, source => source.Id == "usb");
         Assert.False(usb.IsAvailable);
         Assert.True(usb.IsReadOnly);

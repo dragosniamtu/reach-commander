@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ReachCommander.Api.Errors;
+using ReachCommander.Api.Uploads;
 using ReachCommander.Application.Sources;
 using ReachCommander.Infrastructure;
 
@@ -15,6 +16,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<FileAccessExceptionHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
+builder.Services.AddTransient<MultipartUploadReader>();
 builder.Services.AddReachCommanderInfrastructure(builder.Configuration);
 
 var app = builder.Build();

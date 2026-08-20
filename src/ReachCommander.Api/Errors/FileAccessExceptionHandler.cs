@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.Sources;
 using ReachCommander.Application.SystemMetrics;
+using ReachCommander.Application.Uploads;
 
 namespace ReachCommander.Api.Errors;
 
@@ -38,6 +39,14 @@ public sealed class FileAccessExceptionHandler(
             Instance = httpContext.Request.Path,
         };
         details.Extensions["code"] = descriptor.Code;
+        if (exception is UploadNameConflictException conflict)
+        {
+            details.Extensions["fileNames"] = conflict.FileNames;
+        }
+        else if (exception is UploadCleanupRequiredException cleanup)
+        {
+            details.Extensions["fileNames"] = cleanup.FileNames;
+        }
 
         return await problemDetails.TryWriteAsync(new ProblemDetailsContext
         {
@@ -79,12 +88,65 @@ public sealed class FileAccessExceptionHandler(
             "Hardware metrics not ready",
             "metrics_not_ready",
             "Hardware metrics have not completed their first sample."),
+        UploadEmptyException error => UploadError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Upload batch is empty"),
+        UploadNameInvalidException error => UploadError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Invalid upload filename"),
+        UploadMalformedRequestException error => UploadError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Malformed upload request"),
+        UploadSourceReadOnlyException error => UploadError(
+            error,
+            StatusCodes.Status403Forbidden,
+            "Source is read-only"),
+        UploadNameConflictException error => UploadError(
+            error,
+            StatusCodes.Status409Conflict,
+            "Upload filename conflict"),
+        UploadFileTooLargeException error => UploadError(
+            error,
+            StatusCodes.Status413PayloadTooLarge,
+            "Upload file is too large"),
+        UploadBatchTooLargeException error => UploadError(
+            error,
+            StatusCodes.Status413PayloadTooLarge,
+            "Upload batch is too large"),
+        UploadTooManyFilesException error => UploadError(
+            error,
+            StatusCodes.Status413PayloadTooLarge,
+            "Upload contains too many files"),
+        UploadUnsupportedMediaTypeException error => UploadError(
+            error,
+            StatusCodes.Status415UnsupportedMediaType,
+            "Unsupported upload media type"),
+        UploadStorageUnavailableException error => UploadError(
+            error,
+            StatusCodes.Status503ServiceUnavailable,
+            "Upload storage unavailable"),
+        UploadCancelledException error => UploadError(
+            error,
+            StatusCodes.Status499ClientClosedRequest,
+            "Upload cancelled"),
+        UploadCleanupRequiredException error => UploadError(
+            error,
+            StatusCodes.Status500InternalServerError,
+            "Upload cleanup required"),
         _ => new(
             StatusCodes.Status500InternalServerError,
             "Unexpected server error",
             "unexpected_error",
             "The request could not be completed."),
     };
+
+    private static ErrorDescriptor UploadError(
+        UploadException error,
+        int status,
+        string title) => new(status, title, error.Code, error.Detail);
 
     private sealed record ErrorDescriptor(int Status, string Title, string Code, string Detail);
 }

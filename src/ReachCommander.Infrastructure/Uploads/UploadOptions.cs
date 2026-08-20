@@ -13,6 +13,8 @@ public sealed class UploadOptions
     public int MaxFilesPerBatch { get; init; } = 100;
 
     public int MaxConcurrentBatches { get; init; } = 2;
+
+    public long GetMaximumRequestBodyBytes() => UploadRequestLimit.Calculate(this);
 }
 
 internal sealed class UploadOptionsValidator : IValidateOptions<UploadOptions>
@@ -43,7 +45,7 @@ internal sealed class UploadOptionsValidator : IValidateOptions<UploadOptions>
 
         try
         {
-            _ = UploadRequestLimit.Calculate(options);
+            _ = options.GetMaximumRequestBodyBytes();
         }
         catch (OverflowException)
         {

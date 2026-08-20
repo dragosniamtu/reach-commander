@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using ReachCommander.Application.Sources;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.SystemMetrics;
+using ReachCommander.Application.Uploads;
 using ReachCommander.Infrastructure.Configuration;
 using ReachCommander.Infrastructure.FileSystem;
 using ReachCommander.Infrastructure.Security;
@@ -11,6 +12,8 @@ using ReachCommander.Infrastructure.SystemMetrics;
 using ReachCommander.Infrastructure.SystemMetrics.Gpu;
 using ReachCommander.Infrastructure.SystemMetrics.Linux;
 using ReachCommander.Infrastructure.SystemMetrics.Windows;
+using ReachCommander.Infrastructure.Mutations;
+using ReachCommander.Infrastructure.Uploads;
 
 namespace ReachCommander.Infrastructure;
 
@@ -26,6 +29,15 @@ public static class DependencyInjection
         services.AddSingleton<ISourceCatalog, JsonSourceCatalog>();
         services.AddSingleton<IPathSecurityService, PathSecurityService>();
         services.AddSingleton<IFileBrowser, LocalFileBrowser>();
+        services
+            .AddOptions<UploadOptions>()
+            .Bind(configuration.GetSection(UploadOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<UploadOptions>, UploadOptionsValidator>();
+        services.AddSingleton<UploadFilenameValidator>();
+        services.AddSingleton<DirectoryMutationLock>();
+        services.AddSingleton<IUploadFileSystem, LocalUploadFileSystem>();
+        services.AddSingleton<IUploadService, UploadService>();
         services
             .AddOptions<HardwareMetricsOptions>()
             .Bind(configuration.GetSection(HardwareMetricsOptions.SectionName))

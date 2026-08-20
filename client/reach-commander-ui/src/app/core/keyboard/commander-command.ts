@@ -12,6 +12,7 @@ export type CommanderCommand =
   | { readonly type: 'multi-rename' }
   | { readonly type: 'escape' }
   | { readonly type: 'focus-path' }
+  | { readonly type: 'focus-search' }
   | { readonly type: 'refresh' }
   | { readonly type: 'new-tab' }
   | { readonly type: 'close-tab' }

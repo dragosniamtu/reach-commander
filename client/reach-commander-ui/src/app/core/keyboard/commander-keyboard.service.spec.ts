@@ -29,6 +29,7 @@ describe('CommanderKeyboardService', () => {
     ['Insert', {}, { type: 'toggle-selection' }],
     ['Escape', {}, { type: 'escape' }],
     ['a', { ctrlKey: true }, { type: 'select-all' }],
+    ['f', { ctrlKey: true }, { type: 'focus-search' }],
     ['l', { ctrlKey: true }, { type: 'focus-path' }],
     ['m', { ctrlKey: true }, { type: 'multi-rename' }],
     ['r', { ctrlKey: true }, { type: 'refresh' }],
@@ -50,11 +51,17 @@ describe('CommanderKeyboardService', () => {
     document.body.append(input);
     const letter = keyEvent('a');
     const escape = keyEvent('Escape');
+    const focusSearch = keyEvent('f', { ctrlKey: true });
+    const multiRename = keyEvent('m', { ctrlKey: true });
 
     input.dispatchEvent(letter);
+    input.dispatchEvent(focusSearch);
+    input.dispatchEvent(multiRename);
     input.dispatchEvent(escape);
 
     expect(letter.defaultPrevented).toBe(false);
+    expect(focusSearch.defaultPrevented).toBe(false);
+    expect(multiRename.defaultPrevented).toBe(false);
     expect(commands).toEqual([{ type: 'escape' }]);
     input.remove();
   });

@@ -32,8 +32,6 @@
     [path]="activeTab()?.path ?? '/'"
     (pathCommitted)="store.setPathFromEditor(side(), $event)"
   />
-  <app-quick-filter [value]="panel().filter" (valueChanged)="store.setFilter(side(), $event)" />
-
   <div class="content-state">
     @if (panel().loading) {
       <div class="loading" role="status"><span></span> Reading directory…</div>

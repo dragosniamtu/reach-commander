@@ -13,18 +13,11 @@ import { FileTableRow } from '../file-table/file-table.viewmodel';
 import { SourceSelectorComponent } from '../source-selector/source-selector.component';
 import { DirectoryTabsComponent } from '../directory-tabs/directory-tabs.component';
 import { PathBarComponent } from '../path-bar/path-bar.component';
-import { QuickFilterComponent } from '../quick-filter/quick-filter.component';
 import { FileTableComponent, PointerSelection } from '../file-table/file-table.component';
 
 @Component({
   selector: 'app-commander-panel',
-  imports: [
-    SourceSelectorComponent,
-    DirectoryTabsComponent,
-    PathBarComponent,
-    QuickFilterComponent,
-    FileTableComponent,
-  ],
+  imports: [SourceSelectorComponent, DirectoryTabsComponent, PathBarComponent, FileTableComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-panel.component.html',
   styleUrl: './commander-panel.component.scss',

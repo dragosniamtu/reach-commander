@@ -42,6 +42,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     clearSelection: vi.fn(),
     createMultiRenameContext: vi.fn(() => null),
     activatePanel: vi.fn(),
+    setFilter: vi.fn(),
   };
   const upload = {
     state: signal<UploadState>(closedUploadState()),
@@ -210,6 +211,62 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.componentInstance.closeMultiRename();
     await Promise.resolve();
     expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it('renders active panel context and routes toolbar search to that side', () => {
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(
+      panel({
+        sourceId: 'downloads',
+        tabs: [{ id: 'left', label: '/', sourceId: 'downloads', path: '/incoming' }],
+        activeTabId: 'left',
+        filter: '*.txt',
+      }),
+    );
+    store.rightPanel.set(
+      panel({
+        sourceId: 'media',
+        tabs: [{ id: 'right', label: '/', sourceId: 'media', path: '/Movies' }],
+        activeTabId: 'right',
+        filter: '*.mkv',
+      }),
+    );
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="active-panel-context"]').textContent,
+    ).toContain('LEFT · Downloads');
+    const search = fixture.nativeElement.querySelector(
+      '[aria-label="Search active panel"]',
+    ) as HTMLInputElement;
+    expect(search.value).toBe('*.txt');
+    search.value = '*.zip';
+    search.dispatchEvent(new Event('input'));
+    expect(store.setFilter).toHaveBeenCalledWith('left', '*.zip');
+
+    store.activePanel.set('right');
+    fixture.detectChanges();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[aria-label="Search active panel"]',
+        ) as HTMLInputElement
+      ).value,
+    ).toBe('*.mkv');
+  });
+
+  it('places toolbar between brand and metrics actions and focuses search with Ctrl+F', async () => {
+    const topbar = fixture.nativeElement.querySelector('.topbar') as HTMLElement;
+
+    expect(topbar.children[0]?.classList.contains('brand-block')).toBe(true);
+    expect(topbar.children[1]?.tagName).toBe('APP-ACTIVE-PANEL-TOOLBAR');
+    expect(topbar.children[2]?.classList.contains('top-actions')).toBe(true);
+
+    fixture.componentInstance.execute({ type: 'focus-search' });
+    await Promise.resolve();
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe(
+      'Search active panel',
+    );
   });
 });
 

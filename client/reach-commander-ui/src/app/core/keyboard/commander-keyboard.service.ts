@@ -50,6 +50,8 @@ export function mapKeyboardEvent(event: KeyboardEvent): CommanderCommand | null 
     switch (event.key.toLocaleLowerCase()) {
       case 'a':
         return { type: 'select-all' };
+      case 'f':
+        return { type: 'focus-search' };
       case 'l':
         return { type: 'focus-path' };
       case 'm':

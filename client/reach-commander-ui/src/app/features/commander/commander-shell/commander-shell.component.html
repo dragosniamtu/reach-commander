@@ -4,6 +4,13 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
       <div><strong>ReachCommander</strong><span>DUAL-PANE FILE OPERATIONS</span></div>
     </div>
+    <app-active-panel-toolbar
+      [context]="toolbarContext()"
+      [filter]="activeState().filter"
+      (filterChanged)="setActiveFilter($event)"
+      (renameRequested)="openMultiRename()"
+      (filesSelected)="reviewUpload($event)"
+    />
     <div class="top-actions">
       <span class="read-mode"><i></i> CONTROLLED FILE OPERATIONS</span>
       <button type="button" disabled title="Transfers arrive in Milestone 3">Transfers</button>

@@ -23,6 +23,10 @@ import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metri
 import { UploadDialogComponent } from '../../uploads/upload-dialog.component';
 import { MultiRenameStore } from '../../../core/state/multi-rename-store';
 import { MultiRenameDialogComponent } from '../../multi-rename/multi-rename-dialog.component';
+import {
+  ActivePanelToolbarComponent,
+  ActivePanelToolbarContext,
+} from '../active-panel-toolbar/active-panel-toolbar.component';
 
 @Component({
   selector: 'app-commander-shell',
@@ -33,6 +37,7 @@ import { MultiRenameDialogComponent } from '../../multi-rename/multi-rename-dial
     SystemMetricsDetailsComponent,
     UploadDialogComponent,
     MultiRenameDialogComponent,
+    ActivePanelToolbarComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -51,10 +56,27 @@ export class CommanderShellComponent implements OnInit {
   readonly activeState = computed(() =>
     this.store.activePanel() === 'left' ? this.store.leftPanel() : this.store.rightPanel(),
   );
+  readonly activeSource = computed(() =>
+    this.store.sources().find((source) => source.id === this.activeState().sourceId),
+  );
+  readonly activeTab = computed(() =>
+    this.activeState().tabs.find((tab) => tab.id === this.activeState().activeTabId),
+  );
+  readonly toolbarContext = computed<ActivePanelToolbarContext>(() => ({
+    side: this.store.activePanel(),
+    sourceName: this.activeSource()?.name ?? 'Source',
+    logicalPath: this.activeTab()?.path ?? '/',
+    available: this.activeSource()?.isAvailable ?? false,
+    readOnly: this.activeSource()?.isReadOnly ?? true,
+    hasRenameTargets: this.store.createMultiRenameContext(this.store.activePanel()) !== null,
+    uploadPending: this.uploadStore.isPending(),
+  }));
 
   @ViewChild('leftPanel') private leftPanel?: CommanderPanelComponent;
   @ViewChild('rightPanel') private rightPanel?: CommanderPanelComponent;
   @ViewChild(SystemMetricsWidgetComponent) metricsWidget?: SystemMetricsWidgetComponent;
+  @ViewChild(ActivePanelToolbarComponent)
+  private activeToolbar?: ActivePanelToolbarComponent;
 
   private readonly keyboard = inject(CommanderKeyboardService);
   private readonly destroyRef = inject(DestroyRef);
@@ -133,6 +155,9 @@ export class CommanderShellComponent implements OnInit {
         break;
       case 'focus-path':
         this.focusPath(side);
+        break;
+      case 'focus-search':
+        this.focusSearch();
         break;
       case 'refresh':
         void this.store.refresh(side);
@@ -228,6 +253,15 @@ export class CommanderShellComponent implements OnInit {
       return;
     }
 
+    if (!context.isAvailable) {
+      this.commandStatus.set(`${context.sourceName} is unavailable.`);
+      return;
+    }
+    if (context.isReadOnly) {
+      this.commandStatus.set(`${context.sourceName} is read-only.`);
+      return;
+    }
+
     this.menuOpen.set(false);
     this.commandStatus.set(null);
     this.multiRename.open(context);
@@ -242,6 +276,14 @@ export class CommanderShellComponent implements OnInit {
   async handleRenameFilesystemChanged(side: PanelSide): Promise<void> {
     this.store.clearSelection(side);
     await this.store.refresh(side);
+  }
+
+  setActiveFilter(value: string): void {
+    this.store.setFilter(this.store.activePanel(), value);
+  }
+
+  focusSearch(): void {
+    queueMicrotask(() => this.activeToolbar?.focusSearch());
   }
 
   handleFunctionKey(key: CommanderFunctionKey): void {

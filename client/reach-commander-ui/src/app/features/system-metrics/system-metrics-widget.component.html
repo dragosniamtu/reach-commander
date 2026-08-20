@@ -1,0 +1,31 @@
+<button
+  #trigger
+  type="button"
+  class="metrics-trigger"
+  data-testid="system-metrics-trigger"
+  [attr.data-state]="effectiveState()"
+  [attr.data-severity]="severity()"
+  [attr.aria-expanded]="expanded()"
+  aria-haspopup="dialog"
+  [attr.aria-label]="ariaSummary()"
+  (click)="openDetails.emit()"
+>
+  <span class="metrics-summary">
+    @if (snapshot(); as current) {
+      <span class="wide-summary">
+        <span>{{ cpuLabel(current.cpu) }}</span>
+        <span class="separator">|</span>
+        <span>RAM {{ percent(current.memory?.utilizationPercent) }}</span>
+        <span class="separator">|</span>
+        <span>STORAGE {{ percent(storageUtilization()) }}</span>
+        <span class="separator">|</span>
+        <span>GPU {{ percent(gpuUtilization()) }}</span>
+      </span>
+      <span class="compact-summary">System · {{ stateLabel() }}</span>
+    } @else {
+      <span>System · {{ stateLabel() }}</span>
+    }
+  </span>
+  <span class="state-label" aria-hidden="true">{{ stateLabel() }}</span>
+</button>
+<span class="visually-hidden" aria-live="polite">{{ announcement() }}</span>

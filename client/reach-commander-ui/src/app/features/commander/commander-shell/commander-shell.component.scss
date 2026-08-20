@@ -9,7 +9,7 @@
 .brand-mark { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 25px; height: 23px; padding: 4px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent-dim); }
 .brand-mark i { background: var(--accent); }
 .brand-mark i:last-child { opacity: .48; }
-.top-actions { gap: 6px; }
+.top-actions { gap: 6px; min-width: 0; }
 .top-actions button { height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-4); background: var(--surface-3); }
 .read-mode { display: flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--text-4); font: 700 8px/1 var(--font-ui); letter-spacing: .08em; }
 .read-mode i, .status-led { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 7px var(--success); }
@@ -36,4 +36,7 @@
   .panes { grid-template-columns: 1fr; grid-template-rows: minmax(430px, 1fr) 7px minmax(430px, 1fr); }
   .divider span { width: 42px; height: 1px; }
   .read-mode, .shortcut-hint { display: none !important; }
+}
+@media (max-width: 760px) {
+  .top-actions > button { display: none; }
 }

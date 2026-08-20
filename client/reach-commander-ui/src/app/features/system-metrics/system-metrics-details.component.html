@@ -1,0 +1,121 @@
+<div class="metrics-backdrop" (click)="backdropClick($event)">
+  <section
+    class="metrics-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="system-metrics-title"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+  >
+    <header class="panel-header">
+      <div>
+        <h2 id="system-metrics-title">System metrics</h2>
+        <p><span class="state" [attr.data-state]="effectiveState()">{{ effectiveState() }}</span> · sampled {{ sampledAge() }}</p>
+      </div>
+      <button #closeButton type="button" class="close-button" aria-label="Close system metrics" (click)="close()">Close</button>
+    </header>
+
+    <div class="metrics-scroll">
+      @if (snapshot(); as current) {
+        <section class="overview" aria-labelledby="metrics-overview-title">
+          <h3 id="metrics-overview-title">Overview</h3>
+          <dl>
+            <div><dt>State</dt><dd>{{ effectiveState() }}</dd></div>
+            <div><dt>Sample age</dt><dd>{{ sampledAge() }}</dd></div>
+            <div><dt>Uptime</dt><dd>{{ uptime(current.hostUptimeSeconds) }}</dd></div>
+          </dl>
+        </section>
+
+        <div class="metric-grid">
+          <section aria-labelledby="metrics-cpu-title">
+            <h3 id="metrics-cpu-title">CPU</h3>
+            <div class="reading"><span>Utilization</span><strong>{{ percentage(current.cpu?.utilizationPercent) }}</strong></div>
+            @if (current.cpu?.utilizationPercent !== null && current.cpu?.utilizationPercent !== undefined) {
+              <progress max="100" [value]="current.cpu!.utilizationPercent!" aria-label="CPU utilization" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="current.cpu!.utilizationPercent"></progress>
+            }
+            <div class="reading"><span>Temperature</span><strong>{{ temperature(current.cpu?.temperatureCelsius) }}</strong></div>
+          </section>
+
+          <section aria-labelledby="metrics-memory-title">
+            <h3 id="metrics-memory-title">Memory</h3>
+            <div class="reading"><span>Used / total</span><strong>{{ current.memory?.usedBytes ?? null | fileSize }} / {{ current.memory?.totalBytes ?? null | fileSize }}</strong></div>
+            <div class="reading"><span>Utilization</span><strong>{{ percentage(current.memory?.utilizationPercent) }}</strong></div>
+            @if (current.memory?.utilizationPercent !== null && current.memory?.utilizationPercent !== undefined) {
+              <progress max="100" [value]="current.memory!.utilizationPercent!" aria-label="Memory utilization" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="current.memory!.utilizationPercent"></progress>
+            }
+          </section>
+        </div>
+
+        <section aria-labelledby="metrics-storage-title">
+          <h3 id="metrics-storage-title">Storage</h3>
+          <div class="item-list">
+            @for (source of current.storage; track source.sourceId) {
+              <article>
+                <header><strong>{{ source.name }}</strong><span>{{ source.isAvailable ? 'available' : 'unavailable' }}</span></header>
+                <div class="reading"><span>Used / free / total</span><strong>{{ source.usedBytes | fileSize }} / {{ source.freeBytes | fileSize }} / {{ source.totalBytes | fileSize }}</strong></div>
+                <div class="reading"><span>Utilization</span><strong>{{ percentage(source.utilizationPercent) }}</strong></div>
+                @if (source.utilizationPercent !== null) {
+                  <progress max="100" [value]="source.utilizationPercent" [attr.aria-label]="source.name + ' storage utilization'" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="source.utilizationPercent"></progress>
+                }
+              </article>
+            } @empty {
+              <p class="empty-reading">No storage readings · —</p>
+            }
+          </div>
+        </section>
+
+        <section aria-labelledby="metrics-graphics-title">
+          <h3 id="metrics-graphics-title">Graphics</h3>
+          <div class="item-list">
+            @for (gpu of current.gpus; track gpu.id) {
+              <article>
+                <header><strong>{{ gpu.vendor }} · {{ gpu.name }}</strong><span>{{ gpu.alarm || gpu.fault ? 'critical' : 'available' }}</span></header>
+                <div class="reading"><span>Utilization</span><strong>{{ percentage(gpu.utilizationPercent) }}</strong></div>
+                <div class="reading"><span>Memory</span><strong>{{ gpu.memoryUsedBytes | fileSize }} / {{ gpu.memoryTotalBytes | fileSize }}</strong></div>
+                <div class="reading"><span>Temperature</span><strong>{{ temperature(gpu.temperatureCelsius) }}</strong></div>
+              </article>
+            } @empty {
+              <p class="empty-reading">No graphics readings · —</p>
+            }
+          </div>
+        </section>
+
+        <div class="metric-grid lower-grid">
+          <section aria-labelledby="metrics-fans-title">
+            <h3 id="metrics-fans-title">Fans</h3>
+            <div class="item-list compact-list">
+              @for (fan of current.fans; track fan.id) {
+                <div class="reading"><span>{{ fan.name }}</span><strong>{{ fan.revolutionsPerMinute === null ? '—' : fan.revolutionsPerMinute + ' RPM' }}</strong></div>
+              } @empty {
+                <p class="empty-reading">No fan readings · —</p>
+              }
+            </div>
+          </section>
+
+          <section aria-labelledby="metrics-network-title">
+            <h3 id="metrics-network-title">Network</h3>
+            <div class="reading"><span>Receive</span><strong>{{ current.network?.receiveBytesPerSecond ?? null | byteRate }}</strong></div>
+            <div class="reading"><span>Transmit</span><strong>{{ current.network?.transmitBytesPerSecond ?? null | byteRate }}</strong></div>
+          </section>
+        </div>
+
+        @if (unavailableCollectors().length > 0) {
+          <section aria-labelledby="metrics-collectors-title">
+            <h3 id="metrics-collectors-title">Collector availability</h3>
+            <div class="collector-list">
+              @for (collector of unavailableCollectors(); track collector.collector) {
+                <div><strong>{{ collector.collector }}</strong><span>{{ collector.state }}</span><code>{{ collector.code ?? '—' }}</code></div>
+              }
+            </div>
+          </section>
+        }
+      } @else {
+        <section class="not-ready" aria-labelledby="metrics-loading-title">
+          <h3 id="metrics-loading-title">Hardware readings</h3>
+          <p>Waiting for the first sample.</p>
+          <strong>—</strong>
+        </section>
+      }
+    </div>
+  </section>
+</div>

@@ -8,8 +8,24 @@
       <span class="read-mode"><i></i> READ-ONLY FOUNDATION</span>
       <button type="button" disabled title="Transfers arrive in Milestone 3">Transfers</button>
       <button type="button" disabled title="Settings arrive in a later milestone" aria-label="Settings">⚙</button>
+      <app-system-metrics-widget
+        [snapshot]="metricsStore.effectiveSnapshot()"
+        [effectiveState]="metricsStore.effectiveState() ?? 'loading'"
+        [expanded]="metricsOpen()"
+        (openDetails)="openMetrics()"
+      />
     </div>
   </header>
+
+  @if (metricsOpen()) {
+    <app-system-metrics-details
+      [snapshot]="metricsStore.effectiveSnapshot()"
+      [effectiveState]="metricsStore.effectiveState() ?? 'loading'"
+      [nowEpochMilliseconds]="metricsStore.state().nowEpochMilliseconds"
+      [opener]="metricsWidget?.triggerElement ?? null"
+      (closed)="closeMetrics()"
+    />
+  }
 
   @if (initializationError()) {
     <div class="fatal-error" role="alert">{{ initializationError() }}</div>

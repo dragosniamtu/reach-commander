@@ -1,0 +1,18 @@
+:host { display: block; min-width: 0; }
+.metrics-trigger { display: flex; align-items: center; gap: 8px; max-width: 610px; height: 30px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-2); background: var(--surface-3); font: 600 10px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
+.metrics-trigger:hover { color: var(--text-1); border-color: var(--accent-soft); background: var(--surface-4); }
+.metrics-trigger[aria-expanded="true"] { color: var(--accent-text); border-color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.metrics-trigger[data-severity="warning"] { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 65%, var(--line)); }
+.metrics-trigger[data-severity="danger"] { color: var(--danger-text); border-color: var(--danger); background: var(--danger-dim); }
+.metrics-summary, .wide-summary { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.separator { color: var(--line-strong); }
+.state-label { padding-left: 8px; border-left: 1px solid var(--line); color: var(--text-4); font-family: var(--font-ui); font-size: 9px; text-transform: uppercase; }
+.metrics-trigger[data-state="healthy"] .state-label { color: var(--success); }
+.metrics-trigger[data-state="partial"] .state-label,
+.metrics-trigger[data-state="stale"] .state-label { color: var(--warning); }
+.compact-summary { display: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 1120px) {
+  .wide-summary, .state-label { display: none; }
+  .compact-summary { display: inline; }
+}

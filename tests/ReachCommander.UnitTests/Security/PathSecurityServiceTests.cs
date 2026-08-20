@@ -114,6 +114,72 @@ public sealed class PathSecurityServiceTests : IDisposable
             () => _service.ResolveAsync("media", "/escape-link/private", CancellationToken.None).AsTask());
     }
 
+    [Fact]
+    public async Task ResolveChildAsync_returns_a_confined_path_for_a_missing_child()
+    {
+        var resolved = await _service.ResolveChildAsync(
+            "media",
+            "/Movies",
+            "renamed.mkv",
+            CancellationToken.None);
+
+        Assert.Equal("/Movies/renamed.mkv", resolved.LogicalPath);
+        Assert.Equal(
+            System.IO.Path.Combine(_sourceRoot, "Movies", "renamed.mkv"),
+            resolved.PhysicalPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("../escape")]
+    [InlineData("sub/name")]
+    [InlineData("sub\\name")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("C:drive")]
+    [InlineData("nul\0name")]
+    public async Task ResolveChildAsync_rejects_non_component_names(string childName)
+    {
+        await Assert.ThrowsAsync<InvalidLogicalPathException>(() =>
+            _service.ResolveChildAsync(
+                "media",
+                "/Movies",
+                childName,
+                CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task ResolveChildAsync_does_not_follow_the_final_child_link()
+    {
+        var outside = _temporary.CreateDirectory("child-link-outside");
+        var link = System.IO.Path.Combine(_sourceRoot, "Movies", "linked");
+        if (!TryCreateDirectoryLink(link, outside))
+        {
+            return;
+        }
+
+        var resolved = await _service.ResolveChildAsync(
+            "media",
+            "/Movies",
+            "linked",
+            CancellationToken.None);
+
+        Assert.Equal(System.IO.Path.GetFullPath(link), resolved.PhysicalPath);
+    }
+
+    [Fact]
+    public async Task ResolveChildAsync_rejects_a_parent_that_is_not_a_directory()
+    {
+        File.WriteAllText(System.IO.Path.Combine(_sourceRoot, "file.txt"), "file");
+
+        await Assert.ThrowsAsync<InvalidLogicalPathException>(() =>
+            _service.ResolveChildAsync(
+                "media",
+                "/file.txt",
+                "child",
+                CancellationToken.None).AsTask());
+    }
+
     public void Dispose() => _temporary.Dispose();
 
     private static PathSecurityService CreateService(string sourceRoot)

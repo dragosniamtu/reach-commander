@@ -44,6 +44,31 @@ public sealed partial class PathSecurityService(ISourceCatalog sourceCatalog) : 
         return new ResolvedSourcePath(source, normalized, current);
     }
 
+    public async ValueTask<ResolvedSourcePath> ResolveChildAsync(
+        string sourceId,
+        string parentLogicalPath,
+        string childName,
+        CancellationToken cancellationToken)
+    {
+        ValidateChildName(childName, parentLogicalPath);
+        var parent = await ResolveAsync(sourceId, parentLogicalPath, cancellationToken);
+        if (!Directory.Exists(parent.PhysicalPath))
+        {
+            throw new InvalidLogicalPathException(
+                parent.LogicalPath,
+                "the parent is not a directory");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var candidate = Path.GetFullPath(Path.Combine(parent.PhysicalPath, childName));
+        var canonicalRoot = ResolveAbsolutePath(parent.Source.RootPath, cancellationToken);
+        EnsureWithin(canonicalRoot, candidate, parent.LogicalPath);
+        var logicalPath = parent.LogicalPath == "/"
+            ? $"/{childName}"
+            : $"{parent.LogicalPath}/{childName}";
+        return new ResolvedSourcePath(parent.Source, logicalPath, candidate);
+    }
+
     private static string Normalize(string logicalPath)
     {
         if (string.IsNullOrEmpty(logicalPath))
@@ -92,6 +117,22 @@ public sealed partial class PathSecurityService(ISourceCatalog sourceCatalog) : 
 
     private static IEnumerable<string> Segments(string normalized) =>
         normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+    private static void ValidateChildName(string childName, string parentLogicalPath)
+    {
+        if (string.IsNullOrEmpty(childName) ||
+            childName is "." or ".." ||
+            childName.Contains('/') ||
+            childName.Contains('\\') ||
+            childName.Contains(':') ||
+            childName.Contains('\0') ||
+            Path.IsPathRooted(childName))
+        {
+            throw new InvalidLogicalPathException(
+                parentLogicalPath,
+                "the child name must be one non-rooted path component");
+        }
+    }
 
     private static string ResolveAbsolutePath(string absolutePath, CancellationToken cancellationToken)
     {

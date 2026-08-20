@@ -457,5 +457,12 @@ public sealed class UploadServiceTests
             var index = Math.Min(Interlocked.Increment(ref _index) - 1, physicalPaths.Count - 1);
             return ValueTask.FromResult(new ResolvedSourcePath(source, "/Movies", physicalPaths[index]));
         }
+
+        public ValueTask<ResolvedSourcePath> ResolveChildAsync(
+            string sourceId,
+            string parentLogicalPath,
+            string childName,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

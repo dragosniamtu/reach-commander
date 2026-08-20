@@ -1,0 +1,112 @@
+<div class="extraction-backdrop" data-testid="archive-extraction-dialog">
+  <dialog
+    #dialog
+    class="extraction-dialog"
+    aria-modal="true"
+    aria-labelledby="archive-extraction-title"
+    aria-describedby="archive-extraction-description"
+    tabindex="-1"
+    autofocus
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+    (cancel)="handleNativeCancel($event)"
+  >
+    <header>
+      <div>
+        <span class="eyebrow">Controlled file operation</span>
+        <h2 id="archive-extraction-title">Extract archive</h2>
+        <p id="archive-extraction-description">Review the archive and captured destination before extraction.</p>
+      </div>
+      <button type="button" aria-label="Close archive extraction" [disabled]="!terminal() && store.state().phase !== 'review'" (click)="requestClose()">×</button>
+    </header>
+
+    @if (store.state().context; as context) {
+      <section class="route-summary" aria-label="Extraction route">
+        <div><span>Archive</span><code>{{ context.sourceName }}:{{ context.archivePath }}!{{ context.internalDirectory }}</code></div>
+        <div><span>Destination</span><code>{{ context.destinationSourceName }}:{{ context.destinationPath }}</code></div>
+      </section>
+    }
+
+    <div class="dialog-body">
+      @if (store.state().phase === 'previewing' || store.state().phase === 'starting') {
+        <section class="center-state" role="status" aria-live="polite">
+          <strong>{{ store.state().phase === 'previewing' ? 'Inspecting archive…' : 'Starting extraction…' }}</strong>
+          <div class="indeterminate" data-testid="indeterminate-progress"></div>
+        </section>
+      } @else if (store.state().phase === 'review' && store.state().preview; as preview) {
+        <section class="review-grid">
+          <dl>
+            <div><dt>Verified format</dt><dd>{{ formatLabel(preview.format) }}</dd></div>
+            <div><dt>Volumes</dt><dd>{{ preview.volumeCount }} {{ preview.volumeCount === 1 ? 'volume' : 'volumes' }}</dd></div>
+            <div><dt>Files</dt><dd>{{ preview.fileCount }}</dd></div>
+            <div><dt>Directories</dt><dd>{{ preview.directoryCount }}</dd></div>
+            <div><dt>Unpacked size</dt><dd>{{ preview.totalExtractedBytes === null ? 'Unknown' : (preview.totalExtractedBytes | fileSize) }}</dd></div>
+          </dl>
+          <div class="roots"><strong>Selected roots</strong><ul>@for (root of preview.selectedRoots; track root) { <li><code>{{ root }}</code></li> }</ul></div>
+        </section>
+        @if (issues().length > 0) {
+          <section class="issues" aria-live="assertive">
+            <h3>Extraction is blocked</h3>
+            <ul>
+              @for (issue of issues(); track issue.code + $index) {
+                <li #firstIssue [attr.tabindex]="$first ? -1 : null"><strong>{{ issue.message }}</strong>@if (issue.logicalPaths.length) { <small>{{ issue.logicalPaths.join(', ') }}</small> }</li>
+              }
+            </ul>
+          </section>
+        }
+        @if (store.state().error; as error) {
+          <p class="error" role="alert">{{ error.detail }}</p>
+        }
+      } @else if (store.state().operation; as operation) {
+        @if (store.state().phase === 'running' || store.state().phase === 'cancelling') {
+          <section class="progress-state" aria-live="polite">
+            <span class="state-chip">{{ operationLabel(operation.state) }}</span>
+            <h3>{{ operation.currentEntryName ?? 'Preparing files…' }}</h3>
+            <p>{{ operation.completedFiles }} of {{ operation.totalFiles }} files · {{ operation.extractedBytes | fileSize }}@if (operation.totalBytes !== null) { of {{ operation.totalBytes | fileSize }} }</p>
+            @if (operation.totalBytes !== null && operation.percent !== null) {
+              <progress max="100" [value]="operation.percent" [attr.aria-label]="operation.percent + '% extracted'"></progress>
+            } @else {
+              <div class="indeterminate" data-testid="indeterminate-progress" role="progressbar" aria-label="Extraction progress is unknown"></div>
+            }
+          </section>
+        } @else if (store.state().phase === 'completed') {
+          <section class="center-state success" aria-live="polite"><strong>Extraction completed</strong><p>{{ operation.completedFiles }} files · {{ operation.extractedBytes | fileSize }}</p></section>
+        } @else if (store.state().phase === 'cancelled') {
+          <section class="center-state"><strong>Extraction cancelled</strong><p>Partial staging data was removed safely.</p></section>
+        } @else if (store.state().phase === 'recoveryRequired') {
+          <section class="recovery" aria-live="assertive">
+            <strong>Administrator recovery required</strong>
+            <p>{{ operation.errorDetail }}</p>
+            <p>Do not delete these recovery entries until they have been inspected:</p>
+            <ul>@for (name of operation.recoveryNames; track name) { <li><code>{{ name }}</code></li> }</ul>
+          </section>
+        } @else {
+          <section class="failure" aria-live="assertive"><strong>Extraction failed</strong><p>{{ operation.errorDetail ?? store.state().error?.detail }}</p><small>Compensation: {{ operation.compensationState }}</small></section>
+        }
+      } @else if (store.state().error; as error) {
+        <section class="failure" aria-live="assertive"><strong>Extraction could not be reviewed</strong><p>{{ error.detail }}</p></section>
+      }
+    </div>
+
+    <footer>
+      <span aria-live="polite">{{ statusLabel() }}</span>
+      <div>
+        @if (store.state().phase === 'review') {
+          <button type="button" autofocus (click)="requestClose()">Cancel</button>
+          @if (store.state().error && !store.canExecute()) {
+            <button type="button" class="primary" (click)="reviewAgain()">Review again</button>
+          } @else {
+            <button type="button" class="primary" [disabled]="!store.canExecute()" (click)="start()">Extract</button>
+          }
+        } @else if (store.canCancel()) {
+          <button type="button" (click)="cancel()">Cancel extraction</button>
+        } @else if (store.state().phase === 'failed' || store.state().phase === 'recoveryRequired') {
+          <button type="button" (click)="reviewAgain()">Review again</button>
+          <button type="button" (click)="requestClose()">Close</button>
+        } @else if (terminal()) {
+          <button type="button" autofocus (click)="requestClose()">Close</button>
+        }
+      </div>
+    </footer>
+  </dialog>
+</div>

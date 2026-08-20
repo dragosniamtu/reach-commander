@@ -27,6 +27,9 @@ import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metri
 import { UploadDialogComponent } from '../../uploads/upload-dialog.component';
 import { MultiRenameStore } from '../../../core/state/multi-rename-store';
 import { MultiRenameDialogComponent } from '../../multi-rename/multi-rename-dialog.component';
+import { ArchiveExtractionStore } from '../../../core/state/archive-extraction-store';
+import { captureArchiveExtractionContext } from '../../../core/state/archive-extraction.models';
+import { ArchiveExtractionDialogComponent } from '../../archive-extraction/archive-extraction-dialog.component';
 import {
   ActivePanelToolbarComponent,
   ActivePanelToolbarContext,
@@ -42,6 +45,7 @@ import {
     UploadDialogComponent,
     MultiRenameDialogComponent,
     ActivePanelToolbarComponent,
+    ArchiveExtractionDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -52,11 +56,13 @@ export class CommanderShellComponent implements OnInit {
   readonly metricsStore = inject(SystemMetricsStore);
   readonly uploadStore = inject(UploadStore);
   readonly multiRename = inject(MultiRenameStore);
+  readonly archiveExtraction = inject(ArchiveExtractionStore);
   readonly commandStatus = signal<string | null>(null);
   readonly initializationError = signal<string | null>(null);
   readonly menuOpen = signal(false);
   readonly metricsOpen = signal(false);
   readonly uploadOpener = signal<HTMLElement | null>(null);
+  readonly extractionOpener = signal<HTMLElement | null>(null);
   readonly activeState = computed(() =>
     this.store.activePanel() === 'left' ? this.store.leftPanel() : this.store.rightPanel(),
   );
@@ -69,6 +75,12 @@ export class CommanderShellComponent implements OnInit {
       return tab && source.id === locationSourceId(tab.location);
     }),
   );
+  readonly extractionContext = computed(() => {
+    const side = this.store.activePanel();
+    const active = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
+    const opposite = side === 'left' ? this.store.rightPanel() : this.store.leftPanel();
+    return captureArchiveExtractionContext(side, active, opposite, this.store.sources());
+  });
   readonly toolbarContext = computed<ActivePanelToolbarContext>(() => ({
     side: this.store.activePanel(),
     sourceName: this.activeSource()?.name ?? 'Source',
@@ -80,6 +92,8 @@ export class CommanderShellComponent implements OnInit {
     archive: this.activeTab()?.location.kind === 'archive',
     hasRenameTargets: this.store.createMultiRenameContext(this.store.activePanel()) !== null,
     uploadPending: this.uploadStore.isPending(),
+    extractAvailable: this.extractionContext().context !== null,
+    extractDisabledReason: this.extractionContext().error,
   }));
 
   @ViewChild('leftPanel') private leftPanel?: CommanderPanelComponent;
@@ -97,6 +111,9 @@ export class CommanderShellComponent implements OnInit {
       this.keyboard.stop();
       this.metricsStore.stop();
     });
+    this.archiveExtraction.setCompletionHandler((source, destination) => {
+      void Promise.all([this.store.refresh(source), this.store.refresh(destination)]);
+    });
   }
 
   ngOnInit(): void {
@@ -108,6 +125,13 @@ export class CommanderShellComponent implements OnInit {
   }
 
   execute(command: CommanderCommand): void {
+    if (this.archiveExtraction.state().phase !== 'closed') {
+      if (command.type === 'escape') {
+        this.handleExtractionEscape();
+      }
+      return;
+    }
+
     if (this.multiRename.state().open) {
       if (
         command.type === 'escape' &&
@@ -290,6 +314,37 @@ export class CommanderShellComponent implements OnInit {
     queueMicrotask(() => (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
   }
 
+  openArchiveExtraction(): void {
+    const result = this.extractionContext();
+    if (!result.context) {
+      this.commandStatus.set(result.error ?? 'Select a supported archive to extract.');
+      return;
+    }
+
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.extractionOpener.set(
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+    void this.archiveExtraction.open(result.context);
+  }
+
+  closeArchiveExtraction(): void {
+    const state = this.archiveExtraction.state();
+    if (state.phase === 'running' || state.phase === 'starting' ||
+        state.phase === 'previewing' || state.phase === 'cancelling') {
+      return;
+    }
+
+    const opener = this.extractionOpener();
+    const side = state.context?.sourcePanelSide ?? this.store.activePanel();
+    this.archiveExtraction.close();
+    this.extractionOpener.set(null);
+    queueMicrotask(() => opener?.isConnected
+      ? opener.focus()
+      : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+  }
+
   async handleRenameFilesystemChanged(side: PanelSide): Promise<void> {
     this.store.clearSelection(side);
     await this.store.refresh(side);
@@ -310,7 +365,48 @@ export class CommanderShellComponent implements OnInit {
       return;
     }
 
+    if (key === 'F5') {
+      if (this.extractionContext().context || this.hasArchiveExtractionIntent()) {
+        this.openArchiveExtraction();
+      } else {
+        this.commandStatus.set('F5 is reserved for a future copy operation.');
+      }
+      return;
+    }
+
     this.commandStatus.set(`${key} is reserved for Milestone 2.`);
+  }
+
+  private handleExtractionEscape(): void {
+    const phase = this.archiveExtraction.state().phase;
+    if (phase === 'review' || phase === 'completed' || phase === 'cancelled' ||
+        phase === 'failed' || phase === 'recoveryRequired') {
+      this.closeArchiveExtraction();
+    } else if (
+      phase === 'running' &&
+      this.archiveExtraction.canCancel() &&
+      window.confirm('Cancel the archive extraction?')
+    ) {
+      void this.archiveExtraction.cancel();
+    }
+  }
+
+  private hasArchiveExtractionIntent(): boolean {
+    const panel = this.activeState();
+    const tab = panel.tabs.find((candidate) => candidate.id === panel.activeTabId);
+    if (tab?.location.kind === 'archive') {
+      return true;
+    }
+
+    const rows = buildVisibleRows(panel);
+    const candidates = panel.selectedItems.size > 0
+      ? rows.filter((row) => !row.isParent && panel.selectedItems.has(row.relativePath))
+      : rows[panel.cursorIndex] && !rows[panel.cursorIndex]!.isParent
+        ? [rows[panel.cursorIndex]!]
+        : [];
+    return candidates.some((candidate) =>
+      candidate.archiveFormatHint !== null || candidate.archiveRole !== null,
+    );
   }
 
   private openCursor(side: PanelSide): void {

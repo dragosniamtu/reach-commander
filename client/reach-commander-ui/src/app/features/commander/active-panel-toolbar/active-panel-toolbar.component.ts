@@ -17,6 +17,8 @@ export interface ActivePanelToolbarContext {
   readonly archive: boolean;
   readonly hasRenameTargets: boolean;
   readonly uploadPending: boolean;
+  readonly extractAvailable: boolean;
+  readonly extractDisabledReason: string | null;
 }
 
 @Component({
@@ -30,6 +32,7 @@ export class ActivePanelToolbarComponent {
   readonly filter = input.required<string>();
   readonly renameRequested = output<void>();
   readonly filesSelected = output<readonly File[]>();
+  readonly extractRequested = output<void>();
   readonly filterChanged = output<string>();
 
   @ViewChild('searchInput', { read: ElementRef })
@@ -71,6 +74,12 @@ export class ActivePanelToolbarComponent {
       return 'Another upload is currently in progress.';
     }
     return null;
+  }
+
+  requestExtraction(): void {
+    if (this.context().extractAvailable) {
+      this.extractRequested.emit();
+    }
   }
 
   requestRename(): void {

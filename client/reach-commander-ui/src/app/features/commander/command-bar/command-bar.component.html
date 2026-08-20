@@ -1,6 +1,6 @@
 <span id="future-command-description" class="sr-only">Available in a future ReachCommander milestone</span>
 <nav class="command-bar" aria-label="Function key commands">
-  @for (action of actions; track action.key) {
+  @for (action of actions(); track action.key) {
     <button
       type="button"
       [attr.data-key]="action.key"

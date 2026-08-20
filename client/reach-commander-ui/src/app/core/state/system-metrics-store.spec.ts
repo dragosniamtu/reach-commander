@@ -157,6 +157,11 @@ class FakeMetricsApi extends CommanderApiPort {
   async undoBatchRename(): Promise<never> {
     throw new Error('Not used by this test');
   }
+
+  async previewArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
+  async executeArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
+  async getArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
+  async cancelArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
 }
 
 function deferred<T>(): {

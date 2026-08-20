@@ -13,6 +13,9 @@ import {
   CommanderApiPort,
   ArchiveDirectoryDto,
   ArchiveFormat,
+  ArchiveExtractionOperationDto,
+  ArchiveExtractionPreviewDto,
+  ArchiveExtractionPreviewRequestDto,
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
@@ -139,6 +142,40 @@ export class ReachCommanderApi extends CommanderApiPort {
       this.http.post<BatchRenameOperationDto>(
         `/api/batch-renames/${encodeURIComponent(operationId)}/undo`,
         {},
+      ),
+    );
+  }
+
+  previewArchiveExtraction(
+    request: ArchiveExtractionPreviewRequestDto,
+  ): Promise<ArchiveExtractionPreviewDto> {
+    return firstValueFrom(
+      this.http.post<ArchiveExtractionPreviewDto>('/api/archive-extractions/preview', request),
+    );
+  }
+
+  executeArchiveExtraction(planId: string): Promise<ArchiveExtractionOperationDto> {
+    return firstValueFrom(
+      this.http.post<ArchiveExtractionOperationDto>(
+        `/api/archive-extractions/${encodeURIComponent(planId)}/execute`,
+        null,
+      ),
+    );
+  }
+
+  getArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto> {
+    return firstValueFrom(
+      this.http.get<ArchiveExtractionOperationDto>(
+        `/api/archive-extractions/${encodeURIComponent(operationId)}`,
+      ),
+    );
+  }
+
+  cancelArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto> {
+    return firstValueFrom(
+      this.http.post<ArchiveExtractionOperationDto>(
+        `/api/archive-extractions/${encodeURIComponent(operationId)}/cancel`,
+        null,
       ),
     );
   }

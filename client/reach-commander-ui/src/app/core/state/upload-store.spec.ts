@@ -256,6 +256,11 @@ class FakeUploadApi extends CommanderApiPort {
   async getInfo(): Promise<FileEntryDto> {
     throw new Error('Not used');
   }
+
+  async previewArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
+  async executeArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
+  async getArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
+  async cancelArchiveExtraction(): Promise<never> { throw new Error('Not used by this test'); }
 }
 
 interface UploadRequest {

@@ -6,6 +6,9 @@ import { HttpEventType } from '@angular/common/http';
 import { firstValueFrom, toArray } from 'rxjs';
 import {
   ArchiveDirectoryDto,
+  ArchiveExtractionOperationDto,
+  ArchiveExtractionPreviewDto,
+  ArchiveExtractionPreviewRequestDto,
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
@@ -208,7 +211,96 @@ describe('ReachCommanderApi', () => {
     undoRequest.flush(undone);
     await expect(undo).resolves.toEqual(undone);
   });
+
+  it('posts only logical archive extraction preview values', async () => {
+    const body: ArchiveExtractionPreviewRequestDto = {
+      sourceId: 'media library',
+      archivePath: '/Family & Friends/photos.7z',
+      internalDirectory: '/Family',
+      entryPaths: ['/Family/2025'],
+      extractAll: false,
+      destinationSourceId: 'archive disk',
+      destinationPath: '/Photos & Videos',
+    };
+    const expected = archivePreviewResponse();
+
+    const result = api.previewArchiveExtraction(body);
+    const request = http.expectOne('/api/archive-extractions/preview');
+
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual(body);
+    expect(JSON.stringify(request.request.body)).not.toContain('physical');
+    request.flush(expected);
+    await expect(result).resolves.toEqual(expected);
+  });
+
+  it('uses encoded identifier-only extraction lifecycle routes and empty bodies', async () => {
+    const planId = 'plan/with spaces';
+    const operationId = 'operation/with spaces';
+    const expected = archiveOperationResponse();
+
+    const execute = api.executeArchiveExtraction(planId);
+    const executeRequest = http.expectOne('/api/archive-extractions/plan%2Fwith%20spaces/execute');
+    expect(executeRequest.request.method).toBe('POST');
+    expect(executeRequest.request.body).toBeNull();
+    executeRequest.flush(expected);
+    await expect(execute).resolves.toEqual(expected);
+
+    const status = api.getArchiveExtraction(operationId);
+    const statusRequest = http.expectOne('/api/archive-extractions/operation%2Fwith%20spaces');
+    expect(statusRequest.request.method).toBe('GET');
+    statusRequest.flush(expected);
+    await expect(status).resolves.toEqual(expected);
+
+    const cancel = api.cancelArchiveExtraction(operationId);
+    const cancelRequest = http.expectOne(
+      '/api/archive-extractions/operation%2Fwith%20spaces/cancel',
+    );
+    expect(cancelRequest.request.method).toBe('POST');
+    expect(cancelRequest.request.body).toBeNull();
+    cancelRequest.flush(expected);
+    await expect(cancel).resolves.toEqual(expected);
+  });
 });
+
+function archivePreviewResponse(): ArchiveExtractionPreviewDto {
+  return {
+    planId: 'plan-id',
+    expiresAt: '2026-08-20T08:10:00Z',
+    format: 'sevenZip',
+    volumeCount: 1,
+    selectedRoots: ['2025'],
+    fileCount: 1,
+    directoryCount: 1,
+    totalExtractedBytes: 12,
+    destinationSourceId: 'archive disk',
+    destinationPath: '/Photos & Videos',
+    conflicts: [],
+    violations: [],
+    canExecute: true,
+  };
+}
+
+function archiveOperationResponse(
+  overrides: Partial<ArchiveExtractionOperationDto> = {},
+): ArchiveExtractionOperationDto {
+  return {
+    operationId: 'operation-id',
+    state: 'extracting',
+    completedFiles: 0,
+    totalFiles: 1,
+    extractedBytes: 0,
+    totalBytes: 12,
+    percent: 0,
+    currentEntryName: 'photo.jpg',
+    canCancel: true,
+    compensationState: 'notRequired',
+    recoveryNames: [],
+    errorCode: null,
+    errorDetail: null,
+    ...overrides,
+  };
+}
 
 function previewRequest(): BatchRenamePreviewRequestDto {
   return {

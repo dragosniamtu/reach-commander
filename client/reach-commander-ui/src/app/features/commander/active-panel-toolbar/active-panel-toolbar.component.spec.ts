@@ -97,6 +97,24 @@ describe('ActivePanelToolbarComponent', () => {
     expect(rename.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('exposes the same extraction action and disabled reason as F5', () => {
+    const requested = vi.fn();
+    fixture.componentInstance.extractRequested.subscribe(requested);
+    setInputs(context({ extractAvailable: true, extractDisabledReason: null }), '');
+    fixture.detectChanges();
+    button('toolbar-extract').click();
+    expect(requested).toHaveBeenCalledOnce();
+
+    setInputs(context({
+      extractAvailable: false,
+      extractDisabledReason: 'Choose a writable destination.',
+    }), '');
+    fixture.detectChanges();
+    expect(button('toolbar-extract').disabled).toBe(true);
+    expect(button('toolbar-extract').closest('[role="group"]')?.getAttribute('title'))
+      .toContain('writable destination');
+  });
+
   function setInputs(toolbarContext: ActivePanelToolbarContext, filter: string): void {
     fixture.componentRef.setInput('context', toolbarContext);
     fixture.componentRef.setInput('filter', filter);
@@ -117,6 +135,8 @@ function context(overrides: Partial<ActivePanelToolbarContext> = {}): ActivePane
     archive: false,
     hasRenameTargets: true,
     uploadPending: false,
+    extractAvailable: false,
+    extractDisabledReason: 'Select a supported archive to extract.',
     ...overrides,
   };
 }

@@ -9,6 +9,7 @@
       [filter]="activeState().filter"
       (filterChanged)="setActiveFilter($event)"
       (renameRequested)="openMultiRename()"
+      (extractRequested)="openArchiveExtraction()"
       (filesSelected)="reviewUpload($event)"
     />
     <div class="top-actions">
@@ -50,6 +51,11 @@
       (closeRequested)="closeMultiRename()"
       (filesystemChanged)="handleRenameFilesystemChanged($event)"
     />
+  }
+
+
+  @if (archiveExtraction.state().phase !== 'closed') {
+    <app-archive-extraction-dialog (closeRequested)="closeArchiveExtraction()" />
   }
 
   @if (initializationError()) {
@@ -101,11 +107,14 @@
         ><kbd>Ctrl+M</kbd>
       </div>
       <p>
-        Multi-Rename is available with Ctrl+M. F4–F8 remain reserved for future single-item and
-        transfer operations.
+        Multi-Rename is available with Ctrl+M. F5 extracts an eligible archive or selected archive
+        entries into the opposite panel; the other file-operation keys remain reserved.
       </p>
     </section>
   }
 
-  <app-command-bar (commandSelected)="handleFunctionKey($event)" />
+  <app-command-bar
+    [extractEnabled]="extractionContext().context !== null"
+    (commandSelected)="handleFunctionKey($event)"
+  />
 </main>

@@ -144,6 +144,60 @@ export interface BatchRenameOperationDto {
   readonly undoExpiresAt: string | null;
 }
 
+export interface ArchiveExtractionPreviewRequestDto {
+  readonly sourceId: string;
+  readonly archivePath: string;
+  readonly internalDirectory: string;
+  readonly entryPaths: readonly string[];
+  readonly extractAll: boolean;
+  readonly destinationSourceId: string;
+  readonly destinationPath: string;
+}
+
+export interface ArchiveExtractionIssueDto {
+  readonly code: string;
+  readonly message: string;
+  readonly logicalPaths: readonly string[];
+}
+
+export interface ArchiveExtractionPreviewDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly format: ArchiveFormat;
+  readonly volumeCount: number;
+  readonly selectedRoots: readonly string[];
+  readonly fileCount: number;
+  readonly directoryCount: number;
+  readonly totalExtractedBytes: number | null;
+  readonly destinationSourceId: string;
+  readonly destinationPath: string;
+  readonly conflicts: readonly ArchiveExtractionIssueDto[];
+  readonly violations: readonly ArchiveExtractionIssueDto[];
+  readonly canExecute: boolean;
+}
+
+export type ArchiveExtractionOperationState =
+  'queued' | 'extracting' | 'finalizing' | 'completed' | 'cancelled' | 'failed' |
+  'recoveryRequired';
+export type ArchiveExtractionCompensationState =
+  'notRequired' | 'notStarted' | 'succeeded' | 'failed';
+
+export interface ArchiveExtractionOperationDto {
+  readonly operationId: string;
+  readonly state: ArchiveExtractionOperationState;
+  readonly completedFiles: number;
+  readonly totalFiles: number;
+  readonly extractedBytes: number;
+  readonly totalBytes: number | null;
+  readonly percent: number | null;
+  readonly currentEntryName: string | null;
+  readonly canCancel: boolean;
+  readonly compensationState: ArchiveExtractionCompensationState;
+  readonly recoveryNames: readonly string[];
+  readonly errorCode: string | null;
+  readonly errorDetail: string | null;
+}
+
 export type UploadEvent =
   | {
       readonly kind: 'progress';
@@ -257,4 +311,14 @@ export abstract class CommanderApiPort {
   abstract executeBatchRename(planId: string): Promise<BatchRenameOperationDto>;
 
   abstract undoBatchRename(operationId: string): Promise<BatchRenameOperationDto>;
+
+  abstract previewArchiveExtraction(
+    request: ArchiveExtractionPreviewRequestDto,
+  ): Promise<ArchiveExtractionPreviewDto>;
+
+  abstract executeArchiveExtraction(planId: string): Promise<ArchiveExtractionOperationDto>;
+
+  abstract getArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto>;
+
+  abstract cancelArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto>;
 }

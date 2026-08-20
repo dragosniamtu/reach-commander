@@ -639,4 +639,9 @@ class FakeCommanderApi extends CommanderApiPort {
   async undoBatchRename(): Promise<never> {
     throw new Error('Not used by these tests');
   }
+
+  async previewArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
+  async executeArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
+  async getArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
+  async cancelArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
 }

@@ -159,6 +159,11 @@ class FakeMultiRenameApi extends CommanderApiPort {
   uploadFiles(): Observable<UploadEvent> {
     return EMPTY;
   }
+
+  async previewArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
+  async executeArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
+  async getArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
+  async cancelArchiveExtraction(): Promise<never> { throw new Error('Not used by these tests'); }
 }
 
 function context(overrides: Partial<MultiRenameContext> = {}): MultiRenameContext {

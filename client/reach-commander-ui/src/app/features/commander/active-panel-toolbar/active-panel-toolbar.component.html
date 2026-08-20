@@ -11,6 +11,28 @@
     <code>{{ context().logicalPath }}</code>
   </div>
 
+  <span
+    class="action-wrapper"
+    role="group"
+    [attr.tabindex]="context().extractDisabledReason ? 0 : null"
+    [title]="context().extractDisabledReason ?? 'Extract selected archive contents'"
+  >
+    <button
+      type="button"
+      data-testid="toolbar-extract"
+      [disabled]="!context().extractAvailable"
+      (click)="requestExtraction()"
+    >
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
+        <path d="M10 3v9m-4-4 4 4 4-4M4 15v2h12v-2M5 3h10" vector-effect="non-scaling-stroke" />
+      </svg>
+      <span class="action-text">Extract</span>
+    </button>
+    @if (context().extractDisabledReason) {
+      <span class="sr-only">{{ context().extractDisabledReason }}</span>
+    }
+  </span>
+
   @let renameReason = renameDisabledReason();
   <span
     class="action-wrapper"

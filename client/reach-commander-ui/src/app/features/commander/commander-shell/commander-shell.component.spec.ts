@@ -10,6 +10,10 @@ import { UploadStore } from '../../../core/state/upload-store';
 import { UploadState } from '../../../core/state/upload.models';
 import { MultiRenameStore } from '../../../core/state/multi-rename-store';
 import { MultiRenameState } from '../../../core/state/multi-rename.models';
+import {
+  ArchiveExtractionState,
+  ArchiveExtractionStore,
+} from '../../../core/state/archive-extraction-store';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -63,6 +67,15 @@ describe('CommanderShellComponent system metrics integration', () => {
     execute: vi.fn(() => Promise.resolve(false)),
     undo: vi.fn(() => Promise.resolve(false)),
   };
+  const archiveExtraction = {
+    state: signal<ArchiveExtractionState>(closedArchiveExtractionState()),
+    canExecute: signal(false),
+    canCancel: signal(false),
+    open: vi.fn(() => Promise.resolve()),
+    close: vi.fn(),
+    cancel: vi.fn(() => Promise.resolve()),
+    setCompletionHandler: vi.fn(),
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -72,6 +85,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     store.activePanel.set('left');
     upload.state.set(closedUploadState());
     multiRename.state.set(closedMultiRenameState());
+    archiveExtraction.state.set(closedArchiveExtractionState());
     await TestBed.configureTestingModule({
       imports: [CommanderShellComponent],
       providers: [
@@ -80,6 +94,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: SystemMetricsStore, useValue: metrics },
         { provide: UploadStore, useValue: upload },
         { provide: MultiRenameStore, useValue: multiRename },
+        { provide: ArchiveExtractionStore, useValue: archiveExtraction },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -336,6 +351,109 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(upload.open).not.toHaveBeenCalled();
     expect(fixture.componentInstance.commandStatus()).toContain('read-only archive');
   });
+
+  it('routes F5 and the toolbar through one captured archive extraction context', () => {
+    const candidate = {
+      name: 'photos.7z', relativePath: '/photos.7z', type: 'file' as const, size: 12,
+      modifiedAt: null, extension: '7z', isReadOnly: false, isSymbolicLink: false,
+      attributes: 'Normal', archiveFormatHint: 'sevenZip' as const, archiveRole: 'single' as const,
+    };
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: '/', location: { kind: 'filesystem', sourceId: 'downloads', path: '/' } }],
+      activeTabId: 'left', entries: [candidate], cursorIndex: 0,
+    }));
+    store.rightPanel.set(panel({
+      tabs: [{ id: 'right', label: 'Photos', location: { kind: 'filesystem', sourceId: 'media', path: '/Photos' } }],
+      activeTabId: 'right',
+    }));
+    fixture.detectChanges();
+
+    const f5 = fixture.nativeElement.querySelector('[data-key="F5"]') as HTMLButtonElement;
+    expect(f5.disabled).toBe(false);
+    expect(f5.textContent).toContain('Extract');
+    fixture.componentInstance.handleFunctionKey('F5');
+
+    expect(archiveExtraction.open).toHaveBeenCalledWith(expect.objectContaining({
+      archivePath: '/photos.7z', extractAll: true, destinationPath: '/Photos',
+    }));
+
+    archiveExtraction.open.mockClear();
+    (fixture.nativeElement.querySelector('[data-testid="toolbar-extract"]') as HTMLButtonElement).click();
+    expect(archiveExtraction.open).toHaveBeenCalledOnce();
+  });
+
+  it('keeps physical F5 reserved when the focused filesystem row is not an archive', () => {
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: '/', location: { kind: 'filesystem', sourceId: 'downloads', path: '/' } }],
+      activeTabId: 'left', entries: [{
+        name: 'notes.txt', relativePath: '/notes.txt', type: 'file', size: 12,
+        modifiedAt: null, extension: 'txt', isReadOnly: false, isSymbolicLink: false,
+        attributes: 'Normal', archiveFormatHint: null, archiveRole: null,
+      }], cursorIndex: 0,
+    }));
+    store.rightPanel.set(panel({
+      tabs: [{ id: 'right', label: 'Media', location: { kind: 'filesystem', sourceId: 'media', path: '/' } }],
+      activeTabId: 'right',
+    }));
+    fixture.detectChanges();
+
+    fixture.componentInstance.handleFunctionKey('F5');
+
+    expect(archiveExtraction.open).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.commandStatus()).toContain('F5 is reserved');
+  });
+
+  it('restores focus to the F5 opener after the extraction dialog closes', async () => {
+    const candidate = {
+      name: 'photos.zip', relativePath: '/photos.zip', type: 'file' as const, size: 12,
+      modifiedAt: null, extension: 'zip', isReadOnly: false, isSymbolicLink: false,
+      attributes: 'Normal', archiveFormatHint: 'zip' as const, archiveRole: 'single' as const,
+    };
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: '/', location: { kind: 'filesystem', sourceId: 'downloads', path: '/' } }],
+      activeTabId: 'left', entries: [candidate], cursorIndex: 0,
+    }));
+    store.rightPanel.set(panel({
+      tabs: [{ id: 'right', label: 'Media', location: { kind: 'filesystem', sourceId: 'media', path: '/' } }],
+      activeTabId: 'right',
+    }));
+    fixture.detectChanges();
+    const opener = fixture.nativeElement.querySelector('[data-key="F5"]') as HTMLButtonElement;
+    opener.focus();
+    fixture.componentInstance.handleFunctionKey('F5');
+    const context = fixture.componentInstance.extractionContext().context!;
+    archiveExtraction.state.set({
+      ...closedArchiveExtractionState(), phase: 'review', context,
+    });
+    archiveExtraction.close.mockImplementationOnce(() =>
+      archiveExtraction.state.set(closedArchiveExtractionState()),
+    );
+    fixture.detectChanges();
+
+    fixture.componentInstance.closeArchiveExtraction();
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('blocks commander commands while extraction is modal and refreshes both captured panels', async () => {
+    archiveExtraction.state.set({
+      ...closedArchiveExtractionState(),
+      phase: 'running',
+    });
+    fixture.componentInstance.execute({ type: 'switch-panel' });
+    expect(store.activatePanel).not.toHaveBeenCalled();
+
+    const handler = archiveExtraction.setCompletionHandler.mock.calls.at(-1)?.[0];
+    expect(handler).toBeTypeOf('function');
+    await handler('left', 'right');
+    expect(store.refresh).toHaveBeenCalledWith('left');
+    expect(store.refresh).toHaveBeenCalledWith('right');
+  });
 });
 
 function panel(overrides: Partial<PanelState> = {}): PanelState {
@@ -419,5 +537,11 @@ function closedMultiRenameState(): MultiRenameState {
     disabledReason: null,
     errorCode: null,
     requestToken: 0,
+  };
+}
+
+function closedArchiveExtractionState(): ArchiveExtractionState {
+  return {
+    phase: 'closed', context: null, preview: null, operation: null, error: null, requestToken: 0,
   };
 }

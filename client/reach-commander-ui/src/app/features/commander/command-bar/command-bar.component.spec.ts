@@ -20,4 +20,13 @@ describe('CommandBarComponent', () => {
     expect(copy.getAttribute('aria-describedby')).toBeTruthy();
     expect(menu.disabled).toBe(false);
   });
+
+  it('changes F5 to Extract only when the shell has an extraction context', () => {
+    fixture.componentRef.setInput('extractEnabled', true);
+    fixture.detectChanges();
+    const extract: HTMLButtonElement = fixture.nativeElement.querySelector('[data-key="F5"]');
+
+    expect(extract.disabled).toBe(false);
+    expect(extract.textContent).toContain('Extract');
+  });
 });

@@ -5,6 +5,8 @@ using ReachCommander.Application.Sources;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Uploads;
+using ReachCommander.Application.BatchRenames;
+using ReachCommander.Infrastructure.BatchRenames;
 using ReachCommander.Infrastructure.Configuration;
 using ReachCommander.Infrastructure.FileSystem;
 using ReachCommander.Infrastructure.Security;
@@ -38,6 +40,14 @@ public static class DependencyInjection
         services.AddSingleton<DirectoryMutationLock>();
         services.AddSingleton<IUploadFileSystem, LocalUploadFileSystem>();
         services.AddSingleton<IUploadService, UploadService>();
+        services.AddSingleton<IBatchRenameFileSystem, LocalBatchRenameFileSystem>();
+        services.AddSingleton<RenameRuleEvaluator>();
+        services.AddSingleton<RenameNameValidator>();
+        services.AddSingleton<BatchRenamePlanStore>();
+        services.AddSingleton<BatchRenamePlanner>();
+        services.AddSingleton<BatchRenameRequestLock>();
+        services.AddSingleton<BatchRenameExecutor>();
+        services.AddSingleton<IBatchRenameService, BatchRenameService>();
         services
             .AddOptions<HardwareMetricsOptions>()
             .Bind(configuration.GetSection(HardwareMetricsOptions.SectionName))

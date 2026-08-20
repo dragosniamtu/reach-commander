@@ -58,6 +58,23 @@ internal sealed class BatchRenameTestFixture : IDisposable
             NullLogger<BatchRenameExecutor>.Instance);
     }
 
+    public BatchRenameService CreateService()
+    {
+        var planner = CreatePlanner(_paths, _fileSystem, 5_000);
+        var executor = new BatchRenameExecutor(
+            planner,
+            _paths,
+            _fileSystem,
+            new DirectoryMutationLock(),
+            NullLogger<BatchRenameExecutor>.Instance);
+        return new BatchRenameService(
+            planner,
+            PlanStore,
+            executor,
+            new BatchRenameRequestLock(),
+            Clock);
+    }
+
     public IBatchRenameFileSystem CreateFailingFileSystem(params int[] failOnMoveNumbers) =>
         new FailingBatchRenameFileSystem(_fileSystem, failOnMoveNumbers);
 

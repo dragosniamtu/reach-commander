@@ -1,6 +1,7 @@
 import { FileEntryDto } from '../api/api.models';
 import { PanelState } from './commander.models';
 import { parentLogicalPath } from './path-utils';
+import { matchesFileFilter } from './wildcard-filter';
 
 export interface FileTableRow extends FileEntryDto {
   readonly isParent: boolean;
@@ -17,11 +18,8 @@ export function buildVisibleRows(panel: PanelState): readonly FileTableRow[] {
     return [];
   }
 
-  const filter = panel.filter.trim().toLocaleLowerCase();
   const entries = panel.entries
-    .filter((entry) => !filter ||
-      entry.name.toLocaleLowerCase().includes(filter) ||
-      entry.extension?.toLocaleLowerCase().includes(filter))
+    .filter((entry) => matchesFileFilter(entry.name, entry.extension, panel.filter))
     .map<FileTableRow>((entry) => ({ ...entry, isParent: false }));
   const directories = entries.filter((entry) => entry.type === 'directory');
   const files = entries.filter((entry) => entry.type !== 'directory');
@@ -36,9 +34,7 @@ function comparator(panel: PanelState): (left: FileTableRow, right: FileTableRow
   const direction = panel.sortDirection === 'ascending' ? 1 : -1;
   return (left, right) => {
     const primary = compareColumn(left, right, panel.sortColumn);
-    return primary === 0
-      ? nameCollator.compare(left.name, right.name)
-      : primary * direction;
+    return primary === 0 ? nameCollator.compare(left.name, right.name) : primary * direction;
   };
 }
 

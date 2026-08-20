@@ -1,4 +1,5 @@
 using ReachCommander.Domain.Files;
+using ReachCommander.Domain.Archives;
 
 namespace ReachCommander.Api.Contracts;
 
@@ -11,7 +12,9 @@ public sealed record FileEntryDto(
     string? Extension,
     bool IsReadOnly,
     bool IsSymbolicLink,
-    string Attributes)
+    string Attributes,
+    ArchiveFormat? ArchiveFormatHint,
+    ArchiveRole? ArchiveRole)
 {
     public static FileEntryDto FromEntry(FileEntry entry) => new(
         entry.Name,
@@ -22,5 +25,7 @@ public sealed record FileEntryDto(
         entry.Extension,
         entry.IsReadOnly,
         entry.IsSymbolicLink,
-        entry.Attributes);
+        entry.Attributes,
+        entry.ArchiveFormatHint,
+        entry.ArchiveRole);
 }

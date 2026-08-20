@@ -40,6 +40,28 @@ public sealed class FilesApiTests(ReachCommanderApiFactory factory)
         Assert.Equal(10, entry.Size);
     }
 
+    [Fact]
+    public async Task List_files_returns_archive_interaction_metadata()
+    {
+        var archivePath = Path.Combine(factory.MediaRoot, "Movies", "photos.7z");
+        await File.WriteAllTextAsync(archivePath, "candidate only");
+        using var client = factory.CreateClient();
+
+        try
+        {
+            var entries = await client.GetFromJsonAsync<FileResponse[]>(
+                "/api/files?sourceId=media&path=%2FMovies");
+
+            var archive = Assert.Single(entries!, entry => entry.Name == "photos.7z");
+            Assert.Equal("sevenZip", archive.ArchiveFormatHint);
+            Assert.Equal("single", archive.ArchiveRole);
+        }
+        finally
+        {
+            File.Delete(archivePath);
+        }
+    }
+
     private sealed record FileResponse(
         string Name,
         string RelativePath,
@@ -49,5 +71,7 @@ public sealed class FilesApiTests(ReachCommanderApiFactory factory)
         string? Extension,
         bool IsReadOnly,
         bool IsSymbolicLink,
-        string Attributes);
+        string Attributes,
+        string? ArchiveFormatHint,
+        string? ArchiveRole);
 }

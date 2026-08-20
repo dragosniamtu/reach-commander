@@ -1,5 +1,6 @@
 using ReachCommander.Application.Files;
 using ReachCommander.Application.Sources;
+using ReachCommander.Domain.Archives;
 using ReachCommander.Domain.Files;
 using ReachCommander.Domain.Sources;
 using ReachCommander.Infrastructure.FileSystem;
@@ -77,6 +78,32 @@ public sealed class LocalFileBrowserTests : IDisposable
     }
 
     [Fact]
+    public async Task ListAsync_classifies_archive_candidates_with_directory_context()
+    {
+        foreach (var name in new[]
+                 {
+                     "legacy.rar",
+                     "legacy.r00",
+                     "classic.z01",
+                     "classic.zip",
+                     "single.rar",
+                     "single.zip",
+                 })
+        {
+            await File.WriteAllTextAsync(System.IO.Path.Combine(_sourceRoot, name), name);
+        }
+
+        var entries = await _browser.ListAsync("downloads", "/", CancellationToken.None);
+
+        AssertArchive(entries, "legacy.rar", ArchiveFormat.Rar, ArchiveRole.Primary);
+        AssertArchive(entries, "legacy.r00", ArchiveFormat.Rar, ArchiveRole.Secondary);
+        AssertArchive(entries, "classic.zip", ArchiveFormat.Zip, ArchiveRole.Primary);
+        AssertArchive(entries, "classic.z01", ArchiveFormat.Zip, ArchiveRole.Secondary);
+        AssertArchive(entries, "single.rar", ArchiveFormat.Rar, ArchiveRole.Single);
+        AssertArchive(entries, "single.zip", ArchiveFormat.Zip, ArchiveRole.Single);
+    }
+
+    [Fact]
     public async Task GetInfoAsync_returns_metadata_for_one_entry()
     {
         var directory = _temporary.CreateDirectory("downloads/Complete");
@@ -115,6 +142,17 @@ public sealed class LocalFileBrowserTests : IDisposable
     }
 
     public void Dispose() => _temporary.Dispose();
+
+    private static void AssertArchive(
+        IReadOnlyList<FileEntry> entries,
+        string name,
+        ArchiveFormat format,
+        ArchiveRole role)
+    {
+        var entry = Assert.Single(entries, candidate => candidate.Name == name);
+        Assert.Equal(format, entry.ArchiveFormatHint);
+        Assert.Equal(role, entry.ArchiveRole);
+    }
 
     private sealed class FakeSourceCatalog(SourceDefinition source) : ISourceCatalog
     {

@@ -1,5 +1,6 @@
 using ReachCommander.Application.Files;
 using ReachCommander.Domain.Files;
+using ReachCommander.Infrastructure.Archives.Classification;
 
 namespace ReachCommander.Infrastructure.FileSystem;
 
@@ -20,12 +21,20 @@ public sealed class LocalFileBrowser(IPathSecurityService pathSecurity) : IFileB
 
         try
         {
-            var entries = new List<FileEntry>();
             var directory = new DirectoryInfo(resolved.PhysicalPath);
-            foreach (var entry in directory.EnumerateFileSystemInfos())
+            var fileSystemEntries = directory.EnumerateFileSystemInfos().ToArray();
+            var siblingNames = fileSystemEntries
+                .Select(entry => entry.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var entries = new List<FileEntry>(fileSystemEntries.Length);
+            foreach (var entry in fileSystemEntries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                entries.Add(MapEntry(entry, resolved.LogicalPath, resolved.Source.IsReadOnly));
+                entries.Add(MapEntry(
+                    entry,
+                    resolved.LogicalPath,
+                    resolved.Source.IsReadOnly,
+                    siblingNames));
             }
 
             return entries.AsReadOnly();
@@ -52,7 +61,24 @@ public sealed class LocalFileBrowser(IPathSecurityService pathSecurity) : IFileB
             ? new DirectoryInfo(resolved.PhysicalPath)
             : new FileInfo(resolved.PhysicalPath);
 
-        var result = MapEntry(entry, ParentPath(resolved.LogicalPath), resolved.Source.IsReadOnly);
+        var parentDirectory = resolved.LogicalPath == "/"
+            ? null
+            : entry switch
+            {
+                FileInfo file => file.Directory,
+                DirectoryInfo directory => directory.Parent,
+                _ => null,
+            };
+        var siblingNames = parentDirectory is null
+            ? null
+            : parentDirectory.EnumerateFileSystemInfos()
+                .Select(candidate => candidate.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = MapEntry(
+            entry,
+            ParentPath(resolved.LogicalPath),
+            resolved.Source.IsReadOnly,
+            siblingNames);
         return resolved.LogicalPath == "/"
             ? result with { Name = resolved.Source.Name, RelativePath = "/" }
             : result with { RelativePath = resolved.LogicalPath };
@@ -61,7 +87,8 @@ public sealed class LocalFileBrowser(IPathSecurityService pathSecurity) : IFileB
     private static FileEntry MapEntry(
         FileSystemInfo entry,
         string parentLogicalPath,
-        bool sourceIsReadOnly)
+        bool sourceIsReadOnly,
+        IReadOnlySet<string>? siblingNames)
     {
         var attributes = entry.Attributes;
         var type = attributes.HasFlag(FileAttributes.Directory)
@@ -73,6 +100,11 @@ public sealed class LocalFileBrowser(IPathSecurityService pathSecurity) : IFileB
             ? GetExtension(entry.Name)
             : null;
         long? size = entry is FileInfo file ? file.Length : null;
+        var isSymbolicLink = entry.LinkTarget is not null ||
+            attributes.HasFlag(FileAttributes.ReparsePoint);
+        var archive = type == FileEntryType.File
+            ? ArchiveFilenameClassifier.Classify(entry.Name, isSymbolicLink, siblingNames)
+            : null;
 
         return new FileEntry(
             entry.Name,
@@ -82,8 +114,10 @@ public sealed class LocalFileBrowser(IPathSecurityService pathSecurity) : IFileB
             new DateTimeOffset(entry.LastWriteTimeUtc),
             extension,
             sourceIsReadOnly || attributes.HasFlag(FileAttributes.ReadOnly),
-            entry.LinkTarget is not null || attributes.HasFlag(FileAttributes.ReparsePoint),
-            attributes.ToString());
+            isSymbolicLink,
+            attributes.ToString(),
+            archive?.Format,
+            archive?.Role);
     }
 
     private static string? GetExtension(string name)

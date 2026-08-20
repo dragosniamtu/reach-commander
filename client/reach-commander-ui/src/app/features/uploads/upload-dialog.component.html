@@ -1,0 +1,219 @@
+<div class="upload-backdrop" (click)="backdropClick($event)">
+  <section
+    class="upload-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="upload-dialog-title"
+    cdkTrapFocus
+  >
+    <header class="dialog-header">
+      <div>
+        <span class="eyebrow">File operation</span>
+        <h2 id="upload-dialog-title">Add files</h2>
+      </div>
+      <button
+        #closeButton
+        type="button"
+        class="close-button"
+        aria-label="Close Add files"
+        [disabled]="!canClose()"
+        (click)="close()"
+      >
+        Close
+      </button>
+    </header>
+
+    @if (state().context; as context) {
+      <section class="destination" aria-labelledby="upload-destination-title">
+        <h3 id="upload-destination-title">Destination</h3>
+        <div>
+          <strong>{{ context.sourceName }}</strong>
+          <code>{{ context.directoryPath }}</code>
+          <span
+            >{{ state().files.length }} {{ state().files.length === 1 ? 'file' : 'files' }}</span
+          >
+        </div>
+      </section>
+    }
+
+    <div class="dialog-body">
+      @switch (state().phase) {
+        @case ('uploading') {
+          <section class="operation-state" aria-labelledby="upload-progress-title">
+            <span class="state-icon active" aria-hidden="true"></span>
+            <h3 id="upload-progress-title">Uploading files</h3>
+            @if (state().progressTotalBytes !== null) {
+              <progress
+                aria-label="Upload progress"
+                [max]="state().progressTotalBytes!"
+                [value]="state().progressLoadedBytes"
+              ></progress>
+              <p>
+                {{ state().progressLoadedBytes | fileSize }} of
+                {{ state().progressTotalBytes | fileSize }}
+              </p>
+            } @else {
+              <div
+                class="indeterminate-progress"
+                role="progressbar"
+                aria-label="Upload progress"
+              ></div>
+              <p>{{ state().progressLoadedBytes | fileSize }} sent</p>
+            }
+            <small>Keep this window open while the browser sends the selected files.</small>
+          </section>
+        }
+        @case ('finalizing') {
+          <section class="operation-state" aria-labelledby="upload-finalizing-title">
+            <span class="state-icon active" aria-hidden="true"></span>
+            <h3 id="upload-finalizing-title">Finalizing safely</h3>
+            <div
+              class="indeterminate-progress"
+              role="progressbar"
+              aria-label="Finalizing upload"
+            ></div>
+            <p>The server is checking conflicts and committing the complete batch.</p>
+            <small>This step cannot be interrupted.</small>
+          </section>
+        }
+        @case ('completed') {
+          <section
+            class="operation-state success"
+            aria-labelledby="upload-complete-title"
+            role="status"
+          >
+            <span class="state-icon success" aria-hidden="true"></span>
+            <h3 id="upload-complete-title">Upload complete</h3>
+            <p>
+              {{ state().result?.uploadedCount }} files ·
+              {{ state().result?.totalBytes ?? 0 | fileSize }}
+            </p>
+          </section>
+          <section class="result-list" aria-labelledby="upload-result-title">
+            <h3 id="upload-result-title">Added files</h3>
+            @for (file of state().result?.files ?? []; track file.relativePath) {
+              <div>
+                <span
+                  ><strong>{{ file.name }}</strong
+                  ><code>{{ file.relativePath }}</code></span
+                >
+                <span>{{ file.size | fileSize }}</span>
+              </div>
+            }
+          </section>
+        }
+        @default {
+          @if (state().phase === 'failed') {
+            <section class="message error" role="alert">
+              <strong>Upload not completed</strong>
+              <p>{{ state().errorMessage }}</p>
+            </section>
+          } @else if (state().phase === 'cancelled') {
+            <section class="message warning" role="status">
+              <strong>Upload cancelled</strong>
+              <p>No completed batch was reported. You can review the same files and try again.</p>
+            </section>
+          }
+
+          @if (state().preflightIssues.length > 0) {
+            <section class="message error" role="alert" aria-label="Upload validation issues">
+              <strong>Review the selection</strong>
+              <ul>
+                @for (issue of state().preflightIssues; track issue.code) {
+                  <li>{{ issue.message }}</li>
+                }
+              </ul>
+            </section>
+          }
+
+          <section class="file-list" aria-labelledby="upload-files-title">
+            <header>
+              <h3 id="upload-files-title">Selected files</h3>
+              <strong>{{ state().totalBytes | fileSize }}</strong>
+            </header>
+            <div class="file-table" role="list">
+              @for (file of state().files; track $index) {
+                <div role="listitem">
+                  <span
+                    ><strong>{{ file.name }}</strong
+                    ><small>{{ file.size | fileSize }}</small></span
+                  >
+                  <button
+                    type="button"
+                    data-testid="remove-upload-file"
+                    [attr.aria-label]="'Remove ' + file.name"
+                    (click)="removeFile($index)"
+                  >
+                    Remove
+                  </button>
+                </div>
+              } @empty {
+                <p>No files selected.</p>
+              }
+            </div>
+          </section>
+
+          <section class="limits" aria-labelledby="upload-limits-title">
+            <h3 id="upload-limits-title">Deployment limits</h3>
+            @if (state().limitsPending) {
+              <p>Loading upload limits…</p>
+            } @else if (state().limits; as limits) {
+              <ul>
+                <li>
+                  <strong>{{ limits.maxFileBytes | fileSize }}</strong> per file
+                </li>
+                <li>
+                  <strong>{{ limits.maxBatchBytes | fileSize }}</strong> per batch
+                </li>
+                <li>
+                  <strong>{{ limits.maxFilesPerBatch }}</strong> files per batch
+                </li>
+              </ul>
+            } @else {
+              <p role="alert">{{ state().errorMessage }}</p>
+            }
+          </section>
+        }
+      }
+    </div>
+
+    <footer class="dialog-footer">
+      @switch (state().phase) {
+        @case ('uploading') {
+          <button
+            type="button"
+            class="secondary"
+            data-testid="cancel-upload"
+            (click)="cancelUpload()"
+          >
+            Cancel upload
+          </button>
+        }
+        @case ('finalizing') {
+          <span>Committing batch…</span>
+          <button type="button" class="secondary" disabled>Finalizing</button>
+        }
+        @case ('completed') {
+          <button #primaryButton type="button" class="primary" (click)="close()">Close</button>
+        }
+        @default {
+          <button type="button" class="secondary" (click)="close()">Cancel</button>
+          <button
+            type="button"
+            class="primary"
+            data-testid="upload-primary"
+            #primaryButton
+            [disabled]="!canStart()"
+            (click)="start()"
+          >
+            {{
+              state().phase === 'failed' || state().phase === 'cancelled'
+                ? 'Try again'
+                : 'Add files'
+            }}
+          </button>
+        }
+      }
+    </footer>
+  </section>
+</div>

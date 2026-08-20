@@ -27,6 +27,10 @@
     />
   }
 
+  @if (uploadStore.state().phase !== 'closed') {
+    <app-upload-dialog [opener]="uploadOpener()" />
+  }
+
   @if (initializationError()) {
     <div class="fatal-error" role="alert">{{ initializationError() }}</div>
   }

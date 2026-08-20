@@ -4,12 +4,14 @@ import { CommanderCommand, CommanderFunctionKey } from '../../../core/keyboard/c
 import { CommanderKeyboardService } from '../../../core/keyboard/commander-keyboard.service';
 import { CommanderStore } from '../../../core/state/commander-store';
 import { SystemMetricsStore } from '../../../core/state/system-metrics-store';
+import { UploadStore } from '../../../core/state/upload-store';
 import { buildVisibleRows } from '../../../core/state/file-table.viewmodel';
 import { PanelSide } from '../../../core/state/commander.models';
 import { CommanderPanelComponent } from '../commander-panel/commander-panel.component';
 import { CommandBarComponent } from '../command-bar/command-bar.component';
 import { SystemMetricsWidgetComponent } from '../../system-metrics/system-metrics-widget.component';
 import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metrics-details.component';
+import { UploadDialogComponent } from '../../uploads/upload-dialog.component';
 
 @Component({
   selector: 'app-commander-shell',
@@ -18,6 +20,7 @@ import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metri
     CommandBarComponent,
     SystemMetricsWidgetComponent,
     SystemMetricsDetailsComponent,
+    UploadDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -26,10 +29,12 @@ import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metri
 export class CommanderShellComponent implements OnInit {
   readonly store = inject(CommanderStore);
   readonly metricsStore = inject(SystemMetricsStore);
+  readonly uploadStore = inject(UploadStore);
   readonly commandStatus = signal<string | null>(null);
   readonly initializationError = signal<string | null>(null);
   readonly menuOpen = signal(false);
   readonly metricsOpen = signal(false);
+  readonly uploadOpener = signal<HTMLElement | null>(null);
   readonly activeState = computed(() =>
     this.store.activePanel() === 'left' ? this.store.leftPanel() : this.store.rightPanel(),
   );
@@ -65,6 +70,13 @@ export class CommanderShellComponent implements OnInit {
       return;
     }
 
+    if (command.type === 'escape' && this.uploadStore.state().phase !== 'closed') {
+      if (!this.uploadStore.isPending()) {
+        this.closeUpload();
+      }
+      return;
+    }
+
     const side = this.store.activePanel();
     switch (command.type) {
       case 'move-cursor': this.store.moveCursor(side, command.amount); break;
@@ -95,6 +107,63 @@ export class CommanderShellComponent implements OnInit {
     }
     this.metricsOpen.set(false);
     queueMicrotask(() => this.metricsWidget?.focusTrigger());
+  }
+
+  reviewUpload(files: readonly File[]): void {
+    if (files.length === 0) {
+      return;
+    }
+
+    const side = this.store.activePanel();
+    const panel = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
+    const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId);
+    const source = this.store.sources().find((candidate) => candidate.id === activeTab?.sourceId);
+    if (!activeTab || !source) {
+      this.commandStatus.set('The active destination is unavailable.');
+      return;
+    }
+
+    if (!source.isAvailable) {
+      this.commandStatus.set(`${source.name} is unavailable.`);
+      return;
+    }
+
+    if (source.isReadOnly) {
+      this.commandStatus.set(`${source.name} is read-only.`);
+      return;
+    }
+
+    this.commandStatus.set(null);
+    this.menuOpen.set(false);
+    this.uploadOpener.set(
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+    this.uploadStore.open(
+      {
+        side,
+        sourceId: source.id,
+        sourceName: source.name,
+        directoryPath: activeTab.path,
+      },
+      files,
+      () => {
+        void this.store.refresh(side);
+      },
+    );
+  }
+
+  startUpload(): void {
+    this.uploadStore.start();
+  }
+
+  closeUpload(): void {
+    if (!this.uploadStore.close()) {
+      return;
+    }
+
+    const opener = this.uploadOpener();
+    this.uploadOpener.set(null);
+    queueMicrotask(() => opener?.focus());
   }
 
   handleFunctionKey(key: CommanderFunctionKey): void {

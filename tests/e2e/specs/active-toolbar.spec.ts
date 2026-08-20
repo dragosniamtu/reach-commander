@@ -12,7 +12,7 @@ test("tracks active-panel context and independent wildcard searches", async ({
 
   await expect(context).toHaveAttribute(
     "aria-label",
-    "left panel, Downloads, /",
+    "left panel, Downloads, Downloads:/",
   );
   await page.keyboard.press("Control+F");
   await expect(search).toBeFocused();
@@ -39,7 +39,7 @@ test("tracks active-panel context and independent wildcard searches", async ({
 
   await search.fill("download");
   await right.click();
-  await expect(context).toHaveAttribute("aria-label", "right panel, Media, /");
+  await expect(context).toHaveAttribute("aria-label", "right panel, Media, Media:/");
   await expect(search).toHaveValue("");
   await search.fill("movie");
   await left.click();
@@ -59,7 +59,7 @@ test("shows accessible source policies and captures operation destinations", asy
     /read\/write/i,
   );
   await expect(right.getByTestId("source-media")).toHaveAccessibleName(
-    /read-only/i,
+    /read\/write/i,
   );
   await expect(left.getByTestId("source-usb")).toHaveAccessibleName(
     /unavailable.*read-only/i,
@@ -81,7 +81,7 @@ test("shows accessible source policies and captures operation destinations", asy
   await expect(uploadDialog.locator(".destination")).toContainText("Downloads");
   await expect(page.getByTestId("active-panel-context")).toHaveAttribute(
     "aria-label",
-    "right panel, Media, /",
+    "right panel, Media, Media:/",
   );
   await left.dispatchEvent("pointerdown");
   await page.keyboard.press("Escape");

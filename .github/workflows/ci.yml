@@ -14,7 +14,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  backend:
+    name: Backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore .NET dependencies
+        run: dotnet restore ReachCommander.slnx
+
+      - name: Test .NET
+        run: dotnet test ReachCommander.slnx -c Release --no-restore --logger "trx;LogFileName=backend-${{ matrix.os }}.trx" --results-directory artifacts/test-results/${{ matrix.os }}
+
+      - name: Upload backend diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-diagnostics-${{ matrix.os }}
+          path: artifacts/test-results/${{ matrix.os }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  acceptance:
+    name: Frontend and browser acceptance (Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -47,9 +81,6 @@ jobs:
         run: npm ci
         working-directory: tests/e2e
 
-      - name: Test .NET
-        run: dotnet test ReachCommander.slnx -c Release --no-restore
-
       - name: Test Angular
         run: npm test -- --watch=false
         working-directory: client/reach-commander-ui
@@ -60,6 +91,14 @@ jobs:
 
       - name: Publish API
         run: dotnet publish src/ReachCommander.Api/ReachCommander.Api.csproj -c Release --no-restore -o artifacts/publish -p:BuildAngularOnPublish=false
+
+      - name: Verify bundled archive worker
+        run: |
+          test -f artifacts/publish/archive-worker/ReachCommander.ArchiveWorker.dll
+          test -f artifacts/publish/archive-worker/ReachCommander.ArchiveWorker.deps.json
+          test -f artifacts/publish/archive-worker/ReachCommander.ArchiveWorker.runtimeconfig.json
+          test -f artifacts/publish/archive-worker/SharpCompress.dll
+          test -f artifacts/publish/archive-worker/SharpCompress-LICENSE.txt
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -73,7 +112,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-diagnostics
+          name: acceptance-diagnostics-ubuntu
           path: |
             artifacts/playwright-results
             artifacts/playwright-report

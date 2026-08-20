@@ -55,7 +55,7 @@ test("read-only sources disable Add files with an explanation", async ({
   await page.goto("/");
 
   const right = page.getByTestId("right-panel");
-  await right.getByTestId("source-media").click();
+  await right.getByTestId("source-archive").click();
   await right.click();
 
   const addFiles = page.getByTestId("toolbar-add-files");

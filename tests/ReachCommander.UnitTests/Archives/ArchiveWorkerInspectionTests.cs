@@ -17,7 +17,9 @@ public sealed class ArchiveWorkerInspectionTests
 
     [Theory]
     [InlineData("Zip.deflate.zip", "zip", false)]
+    [InlineData("nested.zip", "zip", false)]
     [InlineData("7Zip.nonsolid.7z", "sevenZip", false)]
+    [InlineData("sample.7z", "sevenZip", false)]
     [InlineData("Rar.rar", "rar", false)]
     [InlineData("Rar.solid.rar", "rar", true)]
     public async Task Inspects_supported_single_volume_archives(
@@ -81,6 +83,10 @@ public sealed class ArchiveWorkerInspectionTests
         {
             "zip",
             ["Infozip.nocomp.multi.z01", "Infozip.nocomp.multi.zip"]
+        },
+        {
+            "zip",
+            ["split.zip.001", "split.zip.002", "split.zip.003"]
         },
     };
 

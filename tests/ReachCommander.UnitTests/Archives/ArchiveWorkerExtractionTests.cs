@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using ReachCommander.ArchiveProtocol;
 using ReachCommander.ArchiveWorker;
@@ -135,8 +136,39 @@ public sealed class ArchiveWorkerExtractionTests
         Assert.Equal(ArchiveFrameKind.Completed, frames[^1].Kind);
     }
 
+    [Fact]
+    public async Task Numbered_split_zip_reproduces_the_original_catalog_and_content_checksum()
+    {
+        var originalPath = Path.Combine(FixtureRoot, "nested.zip");
+        var splitPaths = new[]
+        {
+            Path.Combine(FixtureRoot, "split.zip.001"),
+            Path.Combine(FixtureRoot, "split.zip.002"),
+            Path.Combine(FixtureRoot, "split.zip.003"),
+        };
+        var originalCatalog = await InspectAsync([originalPath]);
+        var splitCatalog = await InspectAsync(splitPaths);
+
+        Assert.NotEmpty(splitCatalog);
+        Assert.Equal(
+            originalCatalog.Select(entry => (entry.Key, entry.Size)),
+            splitCatalog.Select(entry => (entry.Key, entry.Size)));
+        var indexes = splitCatalog
+            .Where(entry => !entry.IsDirectory)
+            .Select(entry => entry.Index)
+            .ToArray();
+        var original = await ExtractAsync([originalPath], indexes);
+        var split = await ExtractAsync(splitPaths, indexes);
+
+        Assert.Equal(PayloadChecksum(original), PayloadChecksum(split));
+    }
+
     private static async Task<IReadOnlyList<ArchiveFrame>> ExtractAsync(
         string archive,
+        IReadOnlyList<int> entryIndexes) => await ExtractAsync([archive], entryIndexes);
+
+    private static async Task<IReadOnlyList<ArchiveFrame>> ExtractAsync(
+        IReadOnlyList<string> archives,
         IReadOnlyList<int> entryIndexes)
     {
         await using var input = new MemoryStream();
@@ -146,7 +178,7 @@ public sealed class ArchiveWorkerExtractionTests
             new ArchiveExtractionRequest(
                 ArchiveFrameCodec.CurrentProtocolVersion,
                 "extraction-test",
-                [archive],
+                archives,
                 entryIndexes,
                 Limits()),
             default);
@@ -159,7 +191,11 @@ public sealed class ArchiveWorkerExtractionTests
         return await ReadFramesAsync(output);
     }
 
-    private static async Task<IReadOnlyList<ArchiveEntryFrame>> InspectAsync(string archive)
+    private static async Task<IReadOnlyList<ArchiveEntryFrame>> InspectAsync(string archive) =>
+        await InspectAsync([archive]);
+
+    private static async Task<IReadOnlyList<ArchiveEntryFrame>> InspectAsync(
+        IReadOnlyList<string> archives)
     {
         await using var input = new MemoryStream();
         await ArchiveFrameCodec.WriteJsonAsync(
@@ -168,7 +204,7 @@ public sealed class ArchiveWorkerExtractionTests
             new ArchiveInspectionRequest(
                 ArchiveFrameCodec.CurrentProtocolVersion,
                 "inspection-test",
-                [archive],
+                archives,
                 Limits()),
             default);
         input.Position = 0;
@@ -206,6 +242,12 @@ public sealed class ArchiveWorkerExtractionTests
 
     private static ArchiveWorkerLimits Limits() =>
         new(100_000, 500L * 1024 * 1024 * 1024);
+
+    private static string PayloadChecksum(IReadOnlyList<ArchiveFrame> frames) =>
+        Convert.ToHexString(SHA256.HashData(frames
+            .Where(frame => frame.Kind == ArchiveFrameKind.EntryData)
+            .SelectMany(frame => frame.Payload.ToArray())
+            .ToArray()));
 
     private static string CreateZip(
         string directory,

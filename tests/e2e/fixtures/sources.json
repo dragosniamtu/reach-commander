@@ -14,7 +14,7 @@
       "name": "Media",
       "path": "{{MEDIA_ROOT}}",
       "enabled": true,
-      "readOnly": true,
+      "readOnly": false,
       "defaultLeft": false,
       "defaultRight": true
     },

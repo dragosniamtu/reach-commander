@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -92,6 +93,9 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   mkdirSync(join(mediaRoot, 'Movies'), { recursive: true });
   mkdirSync(join(mediaRoot, 'Kids'), { recursive: true });
   mkdirSync(join(mediaRoot, 'TV'), { recursive: true });
+  mkdirSync(join(mediaRoot, 'Extracted'), { recursive: true });
+  mkdirSync(join(mediaRoot, 'Whole'), { recursive: true });
+  mkdirSync(join(mediaRoot, 'Conflicts', 'Family'), { recursive: true });
   mkdirSync(archiveRoot, { recursive: true });
   writeFileSync(join(downloadsRoot, 'Rename Lab', 'holiday-photo.jpg'), 'photo fixture\n');
   writeFileSync(join(downloadsRoot, 'Rename Lab', 'holiday-video.mp4'), 'video fixture\n');
@@ -102,7 +106,19 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   writeFileSync(join(downloadsRoot, 'report-1.pdf'), 'one digit report\n');
   writeFileSync(join(downloadsRoot, 'a+b[1].txt'), 'literal wildcard fixture\n');
   writeFileSync(join(mediaRoot, 'Movies', 'Gladiator II.mkv'), 'deterministic fixture\n');
+  writeFileSync(join(mediaRoot, 'Conflicts', 'root.txt'), 'conflict fixture\n');
   writeFileSync(join(archiveRoot, 'locked.txt'), 'read-only fixture\n');
+
+  const archiveFixtures = join(repositoryRoot, 'tests', 'fixtures', 'archives');
+  for (const name of ['nested.zip', 'sample.7z']) {
+    copyFileSync(join(archiveFixtures, name), join(downloadsRoot, name));
+  }
+  copyFileSync(join(archiveFixtures, 'nested.zip'), join(downloadsRoot, 'stale.zip'));
+  for (let part = 1; part <= 6; part++) {
+    const name = `Rar.multi.part${String(part).padStart(2, '0')}.rar`;
+    copyFileSync(join(archiveFixtures, name), join(downloadsRoot, name));
+  }
+  process.env['REACHCOMMANDER_E2E_DOWNLOADS_ROOT'] = downloadsRoot;
 
   const configuration = JSON.parse(
     readFileSync(join(e2eDirectory, 'fixtures', 'sources.json'), 'utf8'),

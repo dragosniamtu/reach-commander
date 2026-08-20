@@ -20,6 +20,7 @@ RUN dotnet restore src/ReachCommander.Api/ReachCommander.Api.csproj
 COPY src/ src/
 COPY --from=client-build /client/dist/reach-commander-ui/browser/ src/ReachCommander.Api/wwwroot/
 RUN dotnet publish src/ReachCommander.Api/ReachCommander.Api.csproj --configuration Release --no-restore --output /app/publish -p:BuildAngularOnPublish=false
+RUN test -f /app/publish/archive-worker/ReachCommander.ArchiveWorker.dll
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
 WORKDIR /app

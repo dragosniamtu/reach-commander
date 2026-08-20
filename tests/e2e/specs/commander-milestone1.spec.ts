@@ -20,14 +20,15 @@ test('operates two independent panes and restores the commander workspace', asyn
 
   await right.click();
   await page.keyboard.press('ArrowDown');
-  await expect(right.locator('tr[data-path="/Movies"]')).toHaveClass(/cursor/);
+  await expect(right.locator('tr[data-path="/Extracted"]')).toHaveClass(/cursor/);
+  await right.locator('tr[data-path="/Movies"]').click();
   await page.keyboard.press('Enter');
-  await expect(right.locator('.path-status')).toHaveText('/Movies');
+  await expect(right.locator('.path-status')).toHaveText('Media:/Movies');
   await expect(right.getByText('Gladiator II.mkv')).toBeVisible();
-  await expect(left.locator('.path-status')).toHaveText('/');
+  await expect(left.locator('.path-status')).toHaveText('Downloads:/');
 
   await page.keyboard.press('Backspace');
-  await expect(right.locator('.path-status')).toHaveText('/');
+  await expect(right.locator('.path-status')).toHaveText('Media:/');
   await page.keyboard.press('Tab');
   await expect(left).toHaveClass(/active/);
   await expect(right).not.toHaveClass(/active/);
@@ -50,9 +51,9 @@ test('operates two independent panes and restores the commander workspace', asyn
   await expect(left.getByText('Incomplete', { exact: true })).toBeVisible();
 
   await right.click();
-  await page.keyboard.press('ArrowDown');
+  await right.locator('tr[data-path="/Movies"]').click();
   await page.keyboard.press('Enter');
-  await expect(right.locator('.path-status')).toHaveText('/Movies');
+  await expect(right.locator('.path-status')).toHaveText('Media:/Movies');
   const persistedTabCount = await right.getByRole('tab').count();
   await page.keyboard.press('Control+T');
   await expect(right.getByRole('tab')).toHaveCount(persistedTabCount + 1);
@@ -62,7 +63,7 @@ test('operates two independent panes and restores the commander workspace', asyn
   await expect(right.getByTestId('source-media')).toHaveAttribute('aria-pressed', 'true');
   await left.click();
   await expect(page.getByRole('searchbox', { name: 'Search active panel' })).toHaveValue('inc');
-  await expect(right.locator('.path-status')).toHaveText('/Movies');
+  await expect(right.locator('.path-status')).toHaveText('Media:/Movies');
   await expect(right.getByRole('tab')).toHaveCount(persistedTabCount + 1);
   await expect(right.getByText('Gladiator II.mkv')).toBeVisible();
 });

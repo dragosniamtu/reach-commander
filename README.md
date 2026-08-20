@@ -6,7 +6,7 @@
 [![Angular 22](https://img.shields.io/badge/Angular-22-DD0031)](https://angular.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](Dockerfile)
 
-ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an Angular 22 interface with an ASP.NET Core 10 backend to deliver authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on Windows and Linux.
+ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an Angular 22 interface with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on Windows and Linux.
 
 ![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
 
@@ -19,6 +19,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - **Server-authoritative mutations:** previews are short-lived plans; execution revalidates paths, fingerprints, conflicts, source policy, and write access.
 - **Safe batch algorithms:** two-phase temporary renames support swaps, cycles, and case-only changes with compensation and one-level Undo.
 - **Streamed upload safety:** multipart files are bounded, staged beside their destination, committed all-or-nothing, and serialized with renames through a shared directory lock.
+- **Isolated archive handling:** ZIP, RAR, and 7z parsing runs in a bounded child worker; previews are immutable, extraction is conflict-safe, and the worker never receives destination paths.
 - **Cross-platform observability:** Windows and Linux collectors normalize CPU, memory, storage, GPU, temperature, fan, network, and uptime data without shelling out to vendor tools.
 - **Testable accessibility:** keyboard-first pane control, focus trapping/restoration, live regions, explicit RO/RW semantics, and deterministic browser acceptance at desktop and compact widths.
 
@@ -28,7 +29,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin publish, hardened Docker Compose, Windows and Ubuntu support |
-| Quality | 240 .NET tests, 136 Angular tests, 12 Playwright scenarios |
+| Quality | 477 cross-platform .NET tests, 187 Angular tests, and 18 real-browser scenarios |
 
 ## What ReachCommander includes
 
@@ -42,11 +43,13 @@ ReachCommander demonstrates more than a file-browser UI:
 - Read-only source discovery, directory listing, and file-information APIs.
 - Server-authoritative Multi-Rename previews, all-or-nothing execution, compensation, and one-level Undo.
 - Bounded streamed multi-file uploads with review, progress, cancellation, conflict rejection, and compensation.
+- Read-only virtual browsing for supported single and multi-volume ZIP, RAR, and 7z archives.
+- F5 extraction of selected archive entries or one focused unopened archive, with immutable review, live progress, cancellation, conflict blocking, and recovery guidance.
 - Live CPU, memory, storage, GPU, thermal, fan, network, and uptime telemetry when the host exposes it.
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
-Copy, move, delete, single-item F4 rename, downloads, file previews, authentication, thumbnails, archive operations, recursive search, and host device mounting are intentionally excluded from the current release.
+Copy, move, delete, single-item F4 rename, downloads, file previews, authentication, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
 
 ## Architecture
 
@@ -63,7 +66,8 @@ Browser
                       ├─ JSON source catalog
                       ├─ canonical path security
                       ├─ local filesystem browser
-                      └─ controlled rename/upload executors
+                      ├─ controlled rename/upload/extraction executors
+                      └─ bounded archive worker process
 ```
 
 The projects are organized as:
@@ -73,6 +77,8 @@ src/ReachCommander.Api             HTTP, Problem Details, health, SPA hosting
 src/ReachCommander.Application     source/file ports and access errors
 src/ReachCommander.Domain          immutable source and file concepts
 src/ReachCommander.Infrastructure  configuration, path security, filesystem
+src/ReachCommander.ArchiveProtocol bounded binary/JSON worker protocol
+src/ReachCommander.ArchiveWorker   isolated SharpCompress inspection/extraction
 client/reach-commander-ui           Angular commander UI
 tests/ReachCommander.UnitTests      isolated backend tests
 tests/ReachCommander.IntegrationTests HTTP/static-hosting tests
@@ -163,7 +169,9 @@ services:
       - /srv/media:/sources/media:ro
 ```
 
-The supplied container runs as UID/GID `1000:1000`, drops all Linux capabilities, enables `no-new-privileges`, uses a read-only root filesystem, and provides only a small `/tmp` tmpfs. Ensure UID 1000 can read the mounted host directories. The API listens on container port 8080 and Compose publishes host port 8092.
+The supplied container runs as UID/GID `1000:1000`, drops all Linux capabilities, enables `no-new-privileges`, uses a read-only root filesystem, and provides only a small `/tmp` tmpfs. Ensure UID 1000 can read the mounted host directories. Any destination enabled for rename, upload, or extraction must be configured with `readOnly: false`, mounted `:rw`, and writable by UID/GID 1000; application policy alone cannot grant host permission. The API listens on container port 8080 and Compose publishes host port 8092.
+
+The framework-dependent archive worker and SharpCompress 0.50.4 are published under `/app/archive-worker/` inside the image. No `unrar`, `7zip`, or other operating-system archive package is installed or invoked.
 
 The checked-in `config/sources.json` and `compose.yaml` intentionally keep every configured source read-only. To opt in one narrowly scoped source, make both changes in deployment-specific files:
 
@@ -306,7 +314,57 @@ The complete behavior and safety contract is recorded in the [active-panel opera
 
 Uploads stream multipart bodies and stage files beside their destination. Arbitrary file types are accepted as inert data—ReachCommander never executes uploaded content. Any invalid name, size/count violation, duplicate, or existing destination name rejects the entire batch; there is no overwrite, auto-rename, skip, merge, or partial-success mode. Handled failures remove staged and finalized additions before returning. An abrupt process/host failure can leave reserved `.reachcommander-upload-*.partial` files for an administrator to inspect and remove after confirming no upload process is active.
 
-The browser shows progress and permits cancellation while bytes are being sent. Finalization is intentionally non-cancellable. Folder upload, drag-and-drop, clipboard/URL import, resume, archive extraction, and a background transfer queue are not included.
+The browser shows progress and permits cancellation while bytes are being sent. Finalization is intentionally non-cancellable. Folder upload, drag-and-drop, clipboard/URL import, resume, and a background transfer queue are not included.
+
+## Archives
+
+Press `Enter` or double-click a supported primary archive to open it as a virtual folder. The pane displays `Archive · RO`, uses a source-qualified path such as `Downloads:/photos.zip!/Family`, and keeps search, sort, selection, tabs, refresh, and parent navigation available. Archive contents are always read-only: Add files and Multi-Rename remain disabled, and an archive-looking entry inside another archive remains an ordinary file because nested browsing is not supported.
+
+Supported inputs are:
+
+- single `.zip`, `.rar`, and `.7z` files;
+- modern RAR sets beginning with `.part01.rar`;
+- legacy RAR sets beginning with `.rar`, followed by `.r00`, `.r01`, and so on;
+- numbered split 7z sets beginning with `.7z.001`;
+- numbered raw split ZIP sets beginning with `.zip.001`;
+- classic split ZIP sets whose primary file is `.zip` and earlier parts are `.z01`, `.z02`, and so on.
+
+Open the primary name only. Focusing a secondary volume returns safe guidance naming its logical primary. Every part must be present, contiguous, within the same source directory, and inside the configured volume/count/byte limits. Password-protected archives are rejected; ReachCommander never asks for, stores, or forwards passwords.
+
+F5 has two extraction modes:
+
+- Inside an archive, selected visible entries are used; with no selection, the focused non-parent entry is used.
+- In a filesystem folder, one focused or selected primary/single archive extracts all root contents directly, without adding an archive-name wrapper directory.
+
+The opposite pane's current writable filesystem folder is captured immutably before preview. Preview validates current volume fingerprints, selected roots, paths, policy limits, free space when totals are known, and every destination name. Existing names or selected-root collisions block the complete operation: there is no overwrite, merge, skip, auto-rename, or partial-success mode. Execute revalidates the plan, serializes overlapping mutations, stages output under a hidden operation name, and publishes final names only after every requested entry succeeds. Staging cancellation is supported; finalization is intentionally non-cancellable.
+
+Archive parsing and decompression run in a separate framework-dependent worker process using SharpCompress 0.50.4 under its MIT license. The worker receives fixed, server-resolved archive volume paths and selected entry indexes, but never a destination path. It has no listener, network function, shell invocation, or dependency on system archive tools. The API bounds worker protocol frames, entries, compressed/extracted bytes, expansion ratio, path depth/length, managed memory, working set, inspection time, extraction time, cached catalogs, and concurrent operations on both Windows and Ubuntu.
+
+Archive defaults are configured under `Archives` in `appsettings.json` and can be overridden with ordinary ASP.NET Core keys such as `Archives__MaxEntries`:
+
+| Option | Default | Purpose |
+|---|---:|---|
+| `Enabled` | `true` | Enables archive browsing/extraction and worker launch |
+| `MaxEntries` | `100000` | Maximum catalog entries |
+| `MaxVolumes` | `100` | Maximum files in one volume set |
+| `MaxTotalCompressedBytes` | `536870912000` | Maximum compressed bytes across all volumes (500 GiB) |
+| `MaxTotalExtractedBytes` | `536870912000` | Maximum actual extracted bytes per operation (500 GiB) |
+| `MaxSingleExtractedFileBytes` | `214748364800` | Maximum actual bytes for one file (200 GiB) |
+| `MaxExpansionRatio` | `1000` | Maximum expanded-to-compressed ratio |
+| `MaxPathDepth` | `64` | Maximum archive path components |
+| `MaxPathCharacters` | `4096` | Maximum complete logical path length |
+| `MaxComponentCharacters` | `255` | Maximum single path-component length |
+| `MaxConcurrentExtractions` | `1` | Process-wide active extraction capacity |
+| `InspectionTimeout` | `00:00:30` | Worker catalog deadline |
+| `ExtractionTimeout` | `06:00:00` | Worker extraction deadline |
+| `WorkerManagedMemoryBytes` | `1073741824` | Managed-memory ceiling (1 GiB) |
+| `WorkerWorkingSetBytes` | `1610612736` | Working-set ceiling (1.5 GiB) |
+| `PlanLifetime` | `00:10:00` | Immutable preview lifetime |
+| `CatalogLifetime` | `00:05:00` | Catalog cache lifetime |
+| `MaxCachedCatalogs` | `16` | Maximum cached archive catalogs |
+| `MaxCachedEntries` | `250000` | Maximum entries across cached catalogs |
+
+If normal compensation cannot safely remove staging data, the UI reports only logical recovery basenames such as `.reachcommander-extract-{operationId}.partial` (or a quarantined derivative). Stop ReachCommander, inspect the reported entry inside the destination source, and move or remove it manually only after confirming no extraction process is active. ReachCommander deliberately never auto-deletes crash leftovers because a later process cannot prove ownership of an arbitrary replacement tree from a pathname alone.
 
 ## Keyboard and pointer controls
 
@@ -315,7 +373,7 @@ The browser shows progress and permits cancellation while bytes are being sent. 
 | `↑` / `↓` | Move cursor |
 | `PageUp` / `PageDown` | Move by a page |
 | `Home` / `End` | First / last visible item |
-| `Enter` | Open the cursor directory; files report that preview is future work |
+| `Enter` | Open the cursor directory or a supported primary archive |
 | `Backspace` | Remove one filter character, otherwise navigate to parent |
 | `Tab` | Switch active pane |
 | `Insert` | Toggle selection and advance cursor |
@@ -328,8 +386,9 @@ The browser shows progress and permits cancellation while bytes are being sent. 
 | `Ctrl+T` | Create a tab at the active path |
 | `Ctrl+W` | Close the active tab; the last tab is replaced with a root tab |
 | Type while a pane has focus | Append to its active-panel search |
+| `F5` | Extract eligible selected archive entries or one focused unopened archive into the opposite pane |
 | `F9` | Toggle the command reference menu |
-| `F3`–`F8` | Reserved/disabled until Milestone 2 |
+| `F3`, `F4`, `F6`–`F8` | Reserved/disabled until a later milestone |
 
 Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source buttons, toolbar actions, tabs, sortable headings, the path field, search, and F9 also work with pointer/touch input.
 
@@ -339,16 +398,21 @@ Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source button
 GET /api/sources
 GET /api/files?sourceId=media&path=/Movies
 GET /api/files/info?sourceId=media&path=/Movies/Gladiator%20II.mkv
+GET /api/archives/entries?sourceId=downloads&archivePath=/photos.zip&path=/Family
 GET /api/system-metrics
 GET /api/uploads/limits
 POST /api/uploads?sourceId=downloads&path=/Incoming
 POST /api/batch-renames/preview
 POST /api/batch-renames/{planId}/execute
 POST /api/batch-renames/{operationId}/undo
+POST /api/archive-extractions/preview
+POST /api/archive-extractions/{planId}/execute
+GET /api/archive-extractions/{operationId}
+POST /api/archive-extractions/{operationId}/cancel
 GET /health
 ```
 
-API errors use `application/problem+json` and stable codes. Common path/source codes are `invalid_path`, `path_forbidden`, `source_not_found`, `entry_not_found`, `source_read_only`, and `source_unavailable`. Rename adds `invalid_rename_rule`, `batch_too_large`, `rename_plan_not_found`, `rename_plan_expired`, `rename_plan_stale`, and `rename_recovery_required`. Upload adds `upload_empty`, `upload_name_invalid`, `upload_name_conflict`, `upload_file_too_large`, `upload_batch_too_large`, `upload_too_many_files`, `upload_unsupported_media_type`, `upload_malformed`, `upload_storage_unavailable`, and `upload_cleanup_required`. Unknown `/api/*` routes remain JSON 404 responses; client-side routes fall back to the Angular application.
+API errors use `application/problem+json` and stable codes. Common path/source codes are `invalid_path`, `path_forbidden`, `source_not_found`, `entry_not_found`, `source_read_only`, and `source_unavailable`. Rename adds `invalid_rename_rule`, `batch_too_large`, `rename_plan_not_found`, `rename_plan_expired`, `rename_plan_stale`, and `rename_recovery_required`. Upload adds `upload_empty`, `upload_name_invalid`, `upload_name_conflict`, `upload_file_too_large`, `upload_batch_too_large`, `upload_too_many_files`, `upload_unsupported_media_type`, `upload_malformed`, `upload_storage_unavailable`, and `upload_cleanup_required`. Archives add `archive_unsupported`, `archive_invalid`, `archive_encrypted`, `archive_volume_secondary`, `archive_volume_set_invalid`, `archive_entry_unsafe`, `archive_limit_exceeded`, `archive_plan_expired`, `archive_plan_stale`, `archive_destination_changed`, `archive_destination_conflict`, `archive_capacity_reached`, and `archive_recovery_required`. Unknown `/api/*` routes remain JSON 404 responses; client-side routes fall back to the Angular application.
 
 ## Security model
 
@@ -356,7 +420,7 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 - The backend rejects NUL characters, relative traversal, rooted paths, drive-qualified paths, and UNC paths.
 - Every request is resolved beneath its configured source. Existing path components are canonicalized one by one, symbolic links are resolved, and containment is checked after each resolution and on the final path.
 - A symlink that escapes its source is rejected even if the final target exists.
-- Only Multi-Rename and Add files expose write paths. Both require explicit `readOnly: false`, re-resolve logical paths beneath a configured source, reject symbolic-link targets, and serialize overlapping directory mutations.
+- Multi-Rename, Add files, and archive extraction are the only current write paths. All require explicit `readOnly: false`, re-resolve logical paths beneath a configured source, reject symbolic-link targets, and serialize overlapping directory mutations. The archive worker never receives the destination root or final names.
 - The checked-in sample bind mounts remain read-only, providing defense in depth until an administrator opts a narrow source into writes at both configuration and filesystem layers.
 - Filesystem exceptions are converted to stable, non-leaking Problem Details. Automated tests use temporary fixture trees, never developer data.
 
@@ -379,7 +443,7 @@ npm run build
 Pop-Location
 ```
 
-Playwright uses fresh temporary writable Downloads plus read-only Media/Archive roots and the real published application. It never points at personal or production folders:
+Playwright uses fresh temporary writable Downloads/Media roots plus a read-only Archive root and the real published application with its bundled worker. It never points at personal or production folders:
 
 ```powershell
 Push-Location tests/e2e
@@ -390,13 +454,14 @@ Pop-Location
 ```
 
 Failed Playwright runs retain screenshots, traces, and an HTML report under `artifacts/`.
+Archive fixture generation, immutable upstream provenance, expected catalogs, and all 37 SHA-256 hashes are documented in the [fixture inventory](tests/fixtures/archives/README.md). CI runs the complete backend suite on Windows and Ubuntu, then Angular, publish-layout, and Chromium acceptance on Ubuntu.
 
 ## Roadmap
 
-- **Milestone 2A — controlled active-panel operations (current):** Total Commander-inspired Multi-Rename, complete authoritative preview, one-level Undo, wildcard search, and bounded all-or-nothing uploads.
+- **Milestone 2A — controlled active-panel operations (current):** Total Commander-inspired Multi-Rename, complete authoritative preview, one-level Undo, wildcard search, bounded all-or-nothing uploads, read-only archive browsing, and controlled extraction.
 - **Milestone 2B — remaining safe mutations:** confirmation dialogs and secure F4 single rename, F5 copy, F6 move, F7 create directory, and F8 delete endpoints.
 - **Milestone 3 — resilient transfers:** queued jobs, `BackgroundService`, channels, SignalR progress, throughput/ETA, cancellation, failure recovery, and verified copy-then-delete cross-device moves.
 - **Milestone 4 — access control:** local users, password authentication, secure sessions, per-source permissions, read-only roles, settings, and feature flags.
-- **Milestone 5 — richer file workflows:** image/video/PDF/text previews, thumbnail mode, recursive search, downloads, archives, bookmarks, history, and favorites.
+- **Milestone 5 — richer file workflows:** image/video/PDF/text previews, thumbnail mode, recursive search, downloads, optional nested/password archive workflows, bookmarks, history, and favorites.
 
 The recommended next step is Milestone 2B as a separate security-reviewed slice: define each mutation's authorization/read-only invariants first, add temporary-filesystem tests, implement confirmation UX, then expose the function keys one operation at a time.

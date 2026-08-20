@@ -42,10 +42,16 @@ internal sealed partial class SharpCompressArchiveAdapter
         ValidateVolumeNames(files);
         try
         {
+            var names = files.Select(file => file.Name).ToArray();
+            using var combinedStream = IsNumberedSplit(names, ".zip.")
+                ? new ConcatenatedFileReadStream(files)
+                : null;
             var libraryFiles = IsClassicZip(files.Select(file => file.Name).ToArray())
                 ? [files[^1], .. files[..^1]]
                 : files;
-            using var archive = ArchiveFactory.OpenArchive(libraryFiles);
+            using var archive = combinedStream is null
+                ? ArchiveFactory.OpenArchive(libraryFiles)
+                : ArchiveFactory.OpenArchive(combinedStream);
             var format = MapFormat(archive.Type);
             var entries = ReadEntries(archive, request.Limits);
             if (!archive.IsComplete)
@@ -53,7 +59,10 @@ internal sealed partial class SharpCompressArchiveAdapter
                 throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
             }
 
-            ValidateConsumedVolumes(archive, files);
+            if (combinedStream is null)
+            {
+                ValidateConsumedVolumes(archive, files);
+            }
             return new ArchiveInspectionResult(format, archive.IsSolid, entries);
         }
         catch (WorkerFailure)
@@ -97,10 +106,16 @@ internal sealed partial class SharpCompressArchiveAdapter
         ValidateVolumeNames(files);
         try
         {
+            var names = files.Select(file => file.Name).ToArray();
+            using var combinedStream = IsNumberedSplit(names, ".zip.")
+                ? new ConcatenatedFileReadStream(files)
+                : null;
             var libraryFiles = IsClassicZip(files.Select(file => file.Name).ToArray())
                 ? [files[^1], .. files[..^1]]
                 : files;
-            using var archive = ArchiveFactory.OpenArchive(libraryFiles);
+            using var archive = combinedStream is null
+                ? ArchiveFactory.OpenArchive(libraryFiles)
+                : ArchiveFactory.OpenArchive(combinedStream);
             _ = MapFormat(archive.Type);
             if (archive.IsEncrypted)
             {
@@ -113,7 +128,10 @@ internal sealed partial class SharpCompressArchiveAdapter
                 throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
             }
 
-            ValidateConsumedVolumes(archive, files);
+            if (combinedStream is null)
+            {
+                ValidateConsumedVolumes(archive, files);
+            }
             var requested = request.EntryIndexes.ToHashSet();
             foreach (var index in requested)
             {

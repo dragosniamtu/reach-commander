@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            client/reach-commander-ui/package-lock.json
+            tests/e2e/package-lock.json
+
+      - name: Restore .NET dependencies
+        run: dotnet restore ReachCommander.slnx
+
+      - name: Install Angular dependencies
+        run: npm ci
+        working-directory: client/reach-commander-ui
+
+      - name: Install E2E dependencies
+        run: npm ci
+        working-directory: tests/e2e
+
+      - name: Test .NET
+        run: dotnet test ReachCommander.slnx -c Release --no-restore
+
+      - name: Test Angular
+        run: npm test -- --watch=false
+        working-directory: client/reach-commander-ui
+
+      - name: Build Angular
+        run: npm run build
+        working-directory: client/reach-commander-ui
+
+      - name: Publish API
+        run: dotnet publish src/ReachCommander.Api/ReachCommander.Api.csproj -c Release --no-restore -o artifacts/publish -p:BuildAngularOnPublish=false
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/e2e
+
+      - name: Run browser acceptance
+        run: npm test
+        working-directory: tests/e2e
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: |
+            artifacts/playwright-results
+            artifacts/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7

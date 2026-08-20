@@ -7,4 +7,8 @@
 .source-led { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 15%, transparent); }
 .unavailable .source-led { background: var(--warning); }
 .warning { color: var(--warning); font-weight: 800; }
-.read-only { padding: 2px 3px; border-radius: 2px; color: var(--text-3); background: var(--surface-1); font-size: 9px; letter-spacing: .04em; }
+.access-policy { display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px; border-radius: 2px; background: var(--surface-1); font-size: 9px; letter-spacing: .04em; }
+.access-policy svg { width: 11px; height: 11px; stroke-width: 1.4; }
+.access-policy.read-only { color: var(--warning); }
+.access-policy.writable { color: var(--success); }
+.access-policy b { font-size: inherit; }

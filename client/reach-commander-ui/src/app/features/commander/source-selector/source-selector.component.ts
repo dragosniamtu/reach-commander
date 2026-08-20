@@ -14,7 +14,7 @@ export class SourceSelectorComponent {
 
   description(source: SourceDto): string {
     if (!source.isAvailable) {
-      return `${source.name}: unavailable${source.isReadOnly ? ', read-only' : ''}`;
+      return `${source.name}: unavailable, ${source.isReadOnly ? 'read-only' : 'read/write'}`;
     }
 
     const capacity = source.totalBytes === null || source.freeBytes === null

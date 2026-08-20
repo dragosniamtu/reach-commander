@@ -13,6 +13,8 @@
 .error-state { display: grid; place-content: center; justify-items: center; gap: 8px; width: 100%; padding: 24px; color: var(--text-3); text-align: center; }
 .error-state strong { color: var(--warning); font-size: 13px; }.error-state span { max-width: 340px; font-size: 12px; }
 .error-state button { height: 28px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-1); background: var(--surface-3); cursor: pointer; }
+.empty-state { position: absolute; z-index: 1; inset: 44px 0 auto; color: var(--text-4); font: 11px/1 var(--font-ui); text-align: center; pointer-events: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 .panel-status { display: flex; gap: 14px; align-items: center; min-height: 27px; padding: 0 9px; border-top: 1px solid var(--line); color: var(--text-4); background: var(--surface-2); font: 10px/1 var(--font-mono); }
 .path-status { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes spin { to { transform: rotate(360deg); } }

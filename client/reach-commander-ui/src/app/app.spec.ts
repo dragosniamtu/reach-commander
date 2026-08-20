@@ -36,6 +36,9 @@ describe('App', () => {
 });
 
 class AppTestApi extends CommanderApiPort {
+  async listArchive(): Promise<never> {
+    throw new Error('Not used by this test.');
+  }
   async getSystemMetrics(): Promise<SystemMetricsDto> {
     return {
       sampledAt: new Date().toISOString(),

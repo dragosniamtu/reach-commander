@@ -115,6 +115,9 @@ describe('SystemMetricsStore', () => {
 });
 
 class FakeMetricsApi extends CommanderApiPort {
+  async listArchive(): Promise<never> {
+    throw new Error('Not used by these tests');
+  }
   metricsRequests = 0;
   metricsHandler: () => Promise<SystemMetricsDto> = () => Promise.resolve(systemMetricsResponse());
 

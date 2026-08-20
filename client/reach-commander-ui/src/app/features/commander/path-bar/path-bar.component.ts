@@ -8,12 +8,19 @@ import { ChangeDetectionStrategy, Component, ElementRef, input, output, signal, 
 })
 export class PathBarComponent {
   readonly path = input.required<string>();
+  readonly readOnly = input(false);
   readonly pathCommitted = output<string>();
   readonly editing = signal(false);
   readonly draft = signal('');
   private readonly editor = viewChild<ElementRef<HTMLInputElement>>('editor');
 
   focusEditor(): void {
+    if (this.readOnly()) {
+      const element = this.editor()?.nativeElement;
+      element?.focus();
+      element?.select();
+      return;
+    }
     this.draft.set(this.path());
     this.editing.set(true);
     setTimeout(() => {
@@ -38,6 +45,10 @@ export class PathBarComponent {
   }
 
   commit(): void {
+    if (this.readOnly()) {
+      this.editing.set(false);
+      return;
+    }
     this.editing.set(false);
     this.pathCommitted.emit(this.draft());
   }

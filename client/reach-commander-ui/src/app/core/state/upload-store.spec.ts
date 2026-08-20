@@ -194,6 +194,9 @@ describe('UploadStore', () => {
 });
 
 class FakeUploadApi extends CommanderApiPort {
+  async listArchive(): Promise<never> {
+    throw new Error('Not used by these tests');
+  }
   limits: UploadLimitsDto = {
     maxFileBytes: 10,
     maxBatchBytes: 20,

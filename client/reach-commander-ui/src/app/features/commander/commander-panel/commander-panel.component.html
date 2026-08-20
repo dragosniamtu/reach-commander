@@ -8,17 +8,20 @@
   (focusin)="store.activatePanel(side())"
   (pointerdown)="store.activatePanel(side())"
 >
+  <span class="sr-only panel-announcer" aria-live="polite" aria-atomic="true">
+    {{ statusAnnouncement() }}
+  </span>
   <header class="panel-heading">
     <div>
       <span class="side-label">{{ side() }}</span>
       <strong>{{ currentSource()?.name ?? 'Source' }}</strong>
     </div>
-    <span class="mode">{{ currentSource()?.isReadOnly ? 'READ ONLY' : 'READ' }}</span>
+    <span class="mode">{{ isArchive() ? 'Archive · RO' : currentSource()?.isReadOnly ? 'READ ONLY' : 'READ' }}</span>
   </header>
 
   <app-source-selector
     [sources]="sources()"
-    [selectedSourceId]="panel().sourceId"
+    [selectedSourceId]="activeTab()?.location?.sourceId ?? ''"
     (sourceSelected)="store.selectSource(side(), $event)"
   />
   <app-directory-tabs
@@ -29,20 +32,28 @@
     (tabCreated)="store.createTab(side())"
   />
   <app-path-bar
-    [path]="activeTab()?.path ?? '/'"
+    [path]="pathBarPath()"
+    [readOnly]="isArchive()"
     (pathCommitted)="store.setPathFromEditor(side(), $event)"
   />
   <div class="content-state">
     @if (panel().loading) {
-      <div class="loading" role="status"><span></span> Reading directory…</div>
+      <div class="loading"><span></span> Reading directory…</div>
     }
     @if (panel().errorCode) {
-      <div class="error-state" role="alert">
-        <strong>Source unavailable</strong>
-        <span>{{ errorMessage() }}</span>
-        <button type="button" (click)="store.refresh(side())">Retry</button>
+      <div class="error-state">
+        <strong>{{ errorTitle() }}</strong>
+        <span>{{ panel().errorDetail ?? errorMessage() }}</span>
+        @if (isArchive()) {
+          <button type="button" (click)="store.returnArchiveToParent(side())">Return to parent folder</button>
+        } @else {
+          <button type="button" (click)="store.refresh(side())">Retry</button>
+        }
       </div>
     } @else {
+      @if (!panel().loading && panel().entries.length === 0) {
+        <div class="empty-state">This location is empty.</div>
+      }
       <app-file-table
         [panel]="panel()"
         (sortRequested)="store.sortBy(side(), $event)"
@@ -55,6 +66,6 @@
   <footer class="panel-status">
     <span>{{ panel().entries.length }} items</span>
     <span>{{ panel().selectedItems.size }} selected</span>
-    <span class="path-status">{{ activeTab()?.path ?? '/' }}</span>
+    <span class="path-status">{{ displayPath() }}</span>
   </footer>
 </section>

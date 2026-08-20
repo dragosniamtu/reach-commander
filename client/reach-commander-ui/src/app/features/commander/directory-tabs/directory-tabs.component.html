@@ -7,7 +7,7 @@
         class="tab"
         [attr.aria-selected]="tab.id === activeTabId()"
         [attr.tabindex]="tab.id === activeTabId() ? 0 : -1"
-        [title]="tab.path"
+        [title]="tab.location.kind === 'filesystem' ? tab.location.path : tab.location.archivePath + '!' + tab.location.internalPath"
         (click)="tabSelected.emit(tab.id)"
       >{{ tab.label }}</button>
       <button

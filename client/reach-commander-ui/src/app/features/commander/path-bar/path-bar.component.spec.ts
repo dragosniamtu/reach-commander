@@ -24,4 +24,26 @@ describe('PathBarComponent', () => {
 
     expect(committed).toHaveBeenCalledWith('/Movies/Sci-Fi');
   });
+
+  it('shows an archive path without allowing it to be edited', () => {
+    fixture.componentRef.setInput('path', 'Downloads:/backups/photos.7z!/Family/2025');
+    fixture.componentRef.setInput('readOnly', true);
+    fixture.detectChanges();
+
+    const display = fixture.nativeElement.querySelector('.path-display') as HTMLElement;
+    expect((display as HTMLInputElement).value).toBe(
+      'Downloads:/backups/photos.7z!/Family/2025',
+    );
+    expect(display.tagName).toBe('INPUT');
+    expect(display.getAttribute('aria-readonly')).toBe('true');
+    expect(display.tabIndex).toBe(0);
+
+    fixture.componentInstance.focusEditor();
+    fixture.detectChanges();
+    const readOnlyInput = fixture.nativeElement.querySelector('input') as HTMLInputElement;
+    expect(readOnlyInput.readOnly).toBe(true);
+    expect(document.activeElement).toBe(readOnlyInput);
+    expect(readOnlyInput.selectionStart).toBe(0);
+    expect(readOnlyInput.selectionEnd).toBe(readOnlyInput.value.length);
+  });
 });

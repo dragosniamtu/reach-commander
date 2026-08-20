@@ -112,6 +112,9 @@ describe('MultiRenameStore', () => {
 });
 
 class FakeMultiRenameApi extends CommanderApiPort {
+  async listArchive(): Promise<never> {
+    throw new Error('Not used by these tests');
+  }
   readonly previewRequests: BatchRenamePreviewRequestDto[] = [];
   previewHandler: (request: BatchRenamePreviewRequestDto) => Promise<BatchRenamePreviewDto> = () =>
     Promise.resolve(previewResponse());
@@ -182,6 +185,8 @@ function entry(name: string): FileEntryDto {
     isReadOnly: false,
     isSymbolicLink: false,
     attributes: 'Normal',
+    archiveFormatHint: null,
+    archiveRole: null,
   };
 }
 

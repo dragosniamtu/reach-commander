@@ -15,7 +15,11 @@ import { CommanderStore } from '../../../core/state/commander-store';
 import { SystemMetricsStore } from '../../../core/state/system-metrics-store';
 import { UploadStore } from '../../../core/state/upload-store';
 import { buildVisibleRows } from '../../../core/state/file-table.viewmodel';
-import { PanelSide } from '../../../core/state/commander.models';
+import {
+  locationDisplayPath,
+  locationSourceId,
+  PanelSide,
+} from '../../../core/state/commander.models';
 import { CommanderPanelComponent } from '../commander-panel/commander-panel.component';
 import { CommandBarComponent } from '../command-bar/command-bar.component';
 import { SystemMetricsWidgetComponent } from '../../system-metrics/system-metrics-widget.component';
@@ -56,18 +60,24 @@ export class CommanderShellComponent implements OnInit {
   readonly activeState = computed(() =>
     this.store.activePanel() === 'left' ? this.store.leftPanel() : this.store.rightPanel(),
   );
-  readonly activeSource = computed(() =>
-    this.store.sources().find((source) => source.id === this.activeState().sourceId),
-  );
   readonly activeTab = computed(() =>
     this.activeState().tabs.find((tab) => tab.id === this.activeState().activeTabId),
+  );
+  readonly activeSource = computed(() =>
+    this.store.sources().find((source) => {
+      const tab = this.activeTab();
+      return tab && source.id === locationSourceId(tab.location);
+    }),
   );
   readonly toolbarContext = computed<ActivePanelToolbarContext>(() => ({
     side: this.store.activePanel(),
     sourceName: this.activeSource()?.name ?? 'Source',
-    logicalPath: this.activeTab()?.path ?? '/',
+    logicalPath: this.activeTab()
+      ? locationDisplayPath(this.activeTab()!.location, this.activeSource()?.name ?? 'Source')
+      : 'Source:/',
     available: this.activeSource()?.isAvailable ?? false,
     readOnly: this.activeSource()?.isReadOnly ?? true,
+    archive: this.activeTab()?.location.kind === 'archive',
     hasRenameTargets: this.store.createMultiRenameContext(this.store.activePanel()) !== null,
     uploadPending: this.uploadStore.isPending(),
   }));
@@ -197,9 +207,16 @@ export class CommanderShellComponent implements OnInit {
     const side = this.store.activePanel();
     const panel = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
     const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId);
-    const source = this.store.sources().find((candidate) => candidate.id === activeTab?.sourceId);
+    const source = this.store.sources().find(
+      (candidate) => candidate.id === activeTab?.location.sourceId,
+    );
     if (!activeTab || !source) {
       this.commandStatus.set('The active destination is unavailable.');
+      return;
+    }
+
+    if (activeTab.location.kind === 'archive') {
+      this.commandStatus.set('Files cannot be added inside a read-only archive.');
       return;
     }
 
@@ -223,7 +240,7 @@ export class CommanderShellComponent implements OnInit {
         side,
         sourceId: source.id,
         sourceName: source.name,
-        directoryPath: activeTab.path,
+        directoryPath: activeTab.location.path,
       },
       files,
       () => {
@@ -303,8 +320,11 @@ export class CommanderShellComponent implements OnInit {
       return;
     }
 
-    if (row.type === 'directory') {
-      void this.store.navigateTo(side, row.relativePath);
+    const tab = state.tabs.find((candidate) => candidate.id === state.activeTabId);
+    const canOpen = row.isParent || row.type === 'directory' ||
+      (tab?.location.kind === 'filesystem' && row.archiveFormatHint !== null);
+    if (canOpen) {
+      void this.store.openEntry(side, row);
     } else {
       this.commandStatus.set('File preview arrives in a later milestone.');
     }

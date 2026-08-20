@@ -5,6 +5,7 @@ import { ReachCommanderApi } from './reach-commander-api';
 import { HttpEventType } from '@angular/common/http';
 import { firstValueFrom, toArray } from 'rxjs';
 import {
+  ArchiveDirectoryDto,
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
@@ -41,6 +42,62 @@ describe('ReachCommanderApi', () => {
     request.flush([]);
 
     await expect(result).resolves.toEqual([]);
+  });
+
+  it('URL-encodes the source, archive, and virtual path when listing an archive', async () => {
+    const expected: ArchiveDirectoryDto = {
+      sourceId: 'media library',
+      archivePath: '/Family & Friends/photos 2025.7z',
+      path: '/Summer & Winter',
+      format: 'sevenZip',
+      volumeCount: 1,
+      isReadOnly: true,
+      entries: [{
+        name: 'photo.jpg',
+        relativePath: '/Summer & Winter/photo.jpg',
+        type: 'file',
+        size: 12,
+        modifiedAt: null,
+        extension: 'jpg',
+        isReadOnly: true,
+        isSymbolicLink: false,
+        attributes: 'Archive',
+        archiveFormatHint: null,
+        archiveRole: null,
+      }],
+    };
+    const result = api.listArchive(
+      'media library',
+      '/Family & Friends/photos 2025.7z',
+      '/Summer & Winter',
+    );
+    const request = http.expectOne(
+      (candidate) =>
+        candidate.url === '/api/archives/entries' &&
+        candidate.params.get('sourceId') === 'media library' &&
+        candidate.params.get('archivePath') === '/Family & Friends/photos 2025.7z' &&
+        candidate.params.get('path') === '/Summer & Winter',
+    );
+
+    expect(request.request.method).toBe('GET');
+    expect(request.request.params.keys().sort()).toEqual(['archivePath', 'path', 'sourceId']);
+    expect(request.request.urlWithParams).toContain('sourceId=media%20library');
+    expect(request.request.urlWithParams).toContain('archivePath=/Family%20%26%20Friends/photos%202025.7z');
+    expect(request.request.urlWithParams).toContain('path=/Summer%20%26%20Winter');
+    request.flush({
+      ...expected,
+      entries: [{
+        path: '/Summer & Winter/photo.jpg',
+        name: 'photo.jpg',
+        type: 'file',
+        size: 12,
+        modifiedAt: null,
+        extension: 'jpg',
+        attributes: 'Archive',
+      }],
+    });
+
+    await expect(result).resolves.toEqual(expected);
   });
 
   it('requests source metadata from the stable API route', async () => {

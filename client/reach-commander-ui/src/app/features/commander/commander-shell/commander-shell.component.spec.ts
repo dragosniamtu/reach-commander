@@ -43,6 +43,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     createMultiRenameContext: vi.fn(() => null),
     activatePanel: vi.fn(),
     setFilter: vi.fn(),
+    openEntry: vi.fn(() => Promise.resolve()),
   };
   const upload = {
     state: signal<UploadState>(closedUploadState()),
@@ -119,8 +120,11 @@ describe('CommanderShellComponent system metrics integration', () => {
     store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
     store.leftPanel.set(
       panel({
-        sourceId: 'downloads',
-        tabs: [{ id: 'left-tab', label: 'Complete', sourceId: 'downloads', path: '/Complete' }],
+        tabs: [{
+          id: 'left-tab',
+          label: 'Complete',
+          location: { kind: 'filesystem', sourceId: 'downloads', path: '/Complete' },
+        }],
         activeTabId: 'left-tab',
         filter: '*.zip',
         selectedItems: new Set(['/existing.zip']),
@@ -128,8 +132,11 @@ describe('CommanderShellComponent system metrics integration', () => {
     );
     store.rightPanel.set(
       panel({
-        sourceId: 'media',
-        tabs: [{ id: 'right-tab', label: 'Movies', sourceId: 'media', path: '/Movies' }],
+        tabs: [{
+          id: 'right-tab',
+          label: 'Movies',
+          location: { kind: 'filesystem', sourceId: 'media', path: '/Movies' },
+        }],
         activeTabId: 'right-tab',
       }),
     );
@@ -157,8 +164,11 @@ describe('CommanderShellComponent system metrics integration', () => {
     store.sources.set([source('archive', 'Archive', { isReadOnly: true })]);
     store.leftPanel.set(
       panel({
-        sourceId: 'archive',
-        tabs: [{ id: 'tab', label: '/', sourceId: 'archive', path: '/' }],
+        tabs: [{
+          id: 'tab',
+          label: '/',
+          location: { kind: 'filesystem', sourceId: 'archive', path: '/' },
+        }],
       }),
     );
 
@@ -217,16 +227,22 @@ describe('CommanderShellComponent system metrics integration', () => {
     store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
     store.leftPanel.set(
       panel({
-        sourceId: 'downloads',
-        tabs: [{ id: 'left', label: '/', sourceId: 'downloads', path: '/incoming' }],
+        tabs: [{
+          id: 'left',
+          label: '/',
+          location: { kind: 'filesystem', sourceId: 'downloads', path: '/incoming' },
+        }],
         activeTabId: 'left',
         filter: '*.txt',
       }),
     );
     store.rightPanel.set(
       panel({
-        sourceId: 'media',
-        tabs: [{ id: 'right', label: '/', sourceId: 'media', path: '/Movies' }],
+        tabs: [{
+          id: 'right',
+          label: '/',
+          location: { kind: 'filesystem', sourceId: 'media', path: '/Movies' },
+        }],
         activeTabId: 'right',
         filter: '*.mkv',
       }),
@@ -268,12 +284,67 @@ describe('CommanderShellComponent system metrics integration', () => {
       'Search active panel',
     );
   });
+
+  it('routes Enter on an archive candidate through the shared store open operation', () => {
+    const candidate = {
+      name: 'photos.7z',
+      relativePath: '/photos.7z',
+      type: 'file' as const,
+      size: 12,
+      modifiedAt: null,
+      extension: '7z',
+      isReadOnly: false,
+      isSymbolicLink: false,
+      attributes: 'Normal',
+      archiveFormatHint: 'sevenZip' as const,
+      archiveRole: 'single' as const,
+    };
+    store.sources.set([source('downloads', 'Downloads')]);
+    store.leftPanel.set(panel({
+      tabs: [{
+        id: 'tab',
+        label: '/',
+        location: { kind: 'filesystem', sourceId: 'downloads', path: '/' },
+      }],
+      entries: [candidate],
+      cursorIndex: 0,
+    }));
+
+    fixture.componentInstance.execute({ type: 'open-cursor' });
+
+    expect(store.openEntry).toHaveBeenCalledWith('left', expect.objectContaining(candidate));
+  });
+
+  it('blocks upload inside an archive even when the underlying source is writable', () => {
+    store.sources.set([source('downloads', 'Downloads')]);
+    store.leftPanel.set(panel({
+      tabs: [{
+        id: 'tab',
+        label: 'photos.7z',
+        location: {
+          kind: 'archive',
+          sourceId: 'downloads',
+          archivePath: '/photos.7z',
+          internalPath: '/',
+        },
+      }],
+      archiveMetadata: { format: 'sevenZip', volumeCount: 1 },
+    }));
+
+    fixture.componentInstance.reviewUpload([new File(['one'], 'one.txt')]);
+
+    expect(upload.open).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.commandStatus()).toContain('read-only archive');
+  });
 });
 
 function panel(overrides: Partial<PanelState> = {}): PanelState {
   return {
-    sourceId: '',
-    tabs: [{ id: 'tab', label: '/', sourceId: '', path: '/' }],
+    tabs: [{
+      id: 'tab',
+      label: '/',
+      location: { kind: 'filesystem', sourceId: '', path: '/' },
+    }],
     activeTabId: 'tab',
     cursorIndex: 0,
     selectedItems: new Set<string>(),
@@ -284,6 +355,8 @@ function panel(overrides: Partial<PanelState> = {}): PanelState {
     entries: [],
     loading: false,
     errorCode: null,
+    errorDetail: null,
+    archiveMetadata: null,
     requestToken: 0,
     ...overrides,
   };

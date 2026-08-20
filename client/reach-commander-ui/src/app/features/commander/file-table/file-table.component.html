@@ -22,10 +22,18 @@
           (dblclick)="rowOpened.emit(row)"
         >
           <td class="name-cell">
-            <span class="type-icon" [class.folder]="row.type === 'directory'" aria-hidden="true">
-              @if (row.isParent) { ↑ } @else if (row.type === 'directory') { ◆ } @else { ▪ }
+            @let kind = iconKind(row);
+            <span class="type-icon" [class]="kind" aria-hidden="true">
+              @if (kind === 'parent') { ↑ }
+              @else if (kind === 'folder') { ◆ }
+              @else if (kind === 'archive') { ▣ }
+              @else if (kind === 'volume') { ◫ }
+              @else { ▪ }
             </span>
-            <span class="file-name" [title]="row.name">{{ row.name }}</span>
+            <span class="file-name" [title]="rowExplanation(row) ?? row.name">{{ row.name }}</span>
+            @if (rowExplanation(row); as explanation) {
+              <span class="sr-only">{{ explanation }}</span>
+            }
             @if (row.isSymbolicLink) { <span class="link-mark" title="Symbolic link">↗</span> }
           </td>
           <td class="muted">{{ row.extension ?? '' }}</td>

@@ -13,6 +13,26 @@
       (blur)="commit()"
     />
   } @else {
-    <button type="button" class="path-display" title="Edit path (Ctrl+L)" (click)="focusEditor()">{{ path() }}</button>
+    @if (readOnly()) {
+      <input
+        #editor
+        class="path-display"
+        type="text"
+        readonly
+        aria-readonly="true"
+        aria-label="Read-only archive path"
+        title="Archive paths are read-only; select the path to copy it"
+        [value]="path()"
+        (focus)="$any($event.target).select()"
+        (click)="$any($event.target).select()"
+      />
+    } @else {
+      <button
+        type="button"
+        class="path-display"
+        title="Edit path (Ctrl+L)"
+        (click)="focusEditor()"
+      >{{ path() }}</button>
+    }
   }
 </div>

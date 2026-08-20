@@ -4,4 +4,5 @@
 .path-display, .path-input { min-width: 0; flex: 1; height: 25px; padding: 0 7px; border: 1px solid transparent; border-radius: 3px; color: var(--text-1); background: transparent; font: 500 12px/1 var(--font-mono); text-align: left; }
 .path-display { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 .path-display:hover { background: var(--surface-3); }
+.path-display[aria-readonly="true"] { color: var(--text-2); cursor: text; user-select: text; }
 .path-input { outline: 0; border-color: var(--accent); background: var(--surface-1); box-shadow: 0 0 0 2px var(--focus-ring); }

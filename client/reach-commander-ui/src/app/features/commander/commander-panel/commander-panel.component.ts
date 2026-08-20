@@ -8,8 +8,17 @@ import {
 } from '@angular/core';
 import { SourceDto } from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
-import { PanelSide, PanelState } from '../../../core/state/commander.models';
+import {
+  locationDisplayPath,
+  locationSourceId,
+  PanelSide,
+  PanelState,
+} from '../../../core/state/commander.models';
 import { FileTableRow } from '../file-table/file-table.viewmodel';
+import {
+  buildVisibleRows,
+  fileTableRowExplanation,
+} from '../../../core/state/file-table.viewmodel';
 import { SourceSelectorComponent } from '../source-selector/source-selector.component';
 import { DirectoryTabsComponent } from '../directory-tabs/directory-tabs.component';
 import { PathBarComponent } from '../path-bar/path-bar.component';
@@ -31,8 +40,33 @@ export class CommanderPanelComponent {
     this.panel().tabs.find((tab) => tab.id === this.panel().activeTabId),
   );
   readonly currentSource = computed(() =>
-    this.sources().find((source) => source.id === this.panel().sourceId),
+    this.sources().find((source) => {
+      const tab = this.activeTab();
+      return tab && source.id === locationSourceId(tab.location);
+    }),
   );
+  readonly isArchive = computed(() => this.activeTab()?.location.kind === 'archive');
+  readonly displayPath = computed(() => {
+    const tab = this.activeTab();
+    return tab
+      ? locationDisplayPath(tab.location, this.currentSource()?.name ?? 'Source')
+      : 'Source:/';
+  });
+  readonly pathBarPath = computed(() => {
+    const location = this.activeTab()?.location;
+    return location?.kind === 'filesystem' ? location.path : this.displayPath();
+  });
+  readonly statusAnnouncement = computed(() => {
+    const panel = this.panel();
+    if (panel.loading) return 'Reading location.';
+    if (panel.errorCode) return panel.errorDetail ?? this.errorMessage();
+    const rows = buildVisibleRows(panel);
+    if (rows.length === 0) return 'This location is empty.';
+    const activeRow = rows[panel.cursorIndex];
+    if (!activeRow) return `${panel.entries.length} items.`;
+    const explanation = fileTableRowExplanation(panel, activeRow);
+    return `${activeRow.name}. ${explanation ? `${explanation} ` : ''}${panel.entries.length} items.`;
+  });
 
   @ViewChild(PathBarComponent) private pathBar?: PathBarComponent;
   @ViewChild('panelRoot', { read: ElementRef })
@@ -52,10 +86,9 @@ export class CommanderPanelComponent {
     this.store.selectWithPointer(this.side(), selection.rowIndex, selection.mode);
   }
 
-  openRow(row: FileTableRow): void {
-    if (row.type === 'directory') {
-      void this.store.navigateTo(this.side(), row.relativePath);
-    }
+  async openRow(row: FileTableRow): Promise<void> {
+    await this.store.openEntry(this.side(), row);
+    this.focusPanel();
   }
 
   async closeTab(tabId: string): Promise<void> {
@@ -74,7 +107,13 @@ export class CommanderPanelComponent {
       case 'request_failed':
         return 'The directory could not be loaded.';
       default:
-        return '';
+        return this.panel().errorDetail ?? 'The location could not be loaded.';
     }
+  }
+
+  errorTitle(): string {
+    return this.isArchive() || this.panel().errorCode?.startsWith('archive_')
+      ? 'Archive unavailable'
+      : 'Source unavailable';
   }
 }

@@ -74,6 +74,16 @@ describe('file table view model', () => {
       buildVisibleRows(panel('/Folder', entries, { filter: '*.zip' })).map((row) => row.name),
     ).toEqual(['..']);
   });
+
+  it('sorts missing archive modified dates deterministically by name', () => {
+    const rows = buildVisibleRows(panel('/', [
+      { ...entry('zeta.txt', 'file'), modifiedAt: null },
+      { ...entry('alpha.txt', 'file'), modifiedAt: null },
+      { ...entry('middle.txt', 'file'), modifiedAt: '2026-08-19T10:00:00Z' },
+    ], { sortColumn: 'modifiedAt' }));
+
+    expect(rows.map((row) => row.name)).toEqual(['middle.txt', 'alpha.txt', 'zeta.txt']);
+  });
 });
 
 function panel(
@@ -82,8 +92,11 @@ function panel(
   overrides: Partial<PanelState> = {},
 ): PanelState {
   return {
-    sourceId: 'media',
-    tabs: [{ id: 'tab', label: 'Movies', sourceId: 'media', path }],
+    tabs: [{
+      id: 'tab',
+      label: 'Movies',
+      location: { kind: 'filesystem', sourceId: 'media', path },
+    }],
     activeTabId: 'tab',
     cursorIndex: 0,
     selectedItems: new Set<string>(),
@@ -94,6 +107,8 @@ function panel(
     entries,
     loading: false,
     errorCode: null,
+    errorDetail: null,
+    archiveMetadata: null,
     requestToken: 1,
     ...overrides,
   };
@@ -110,5 +125,7 @@ function entry(name: string, type: 'file' | 'directory', size: number | null = n
     isReadOnly: false,
     isSymbolicLink: false,
     attributes: 'Normal',
+    archiveFormatHint: null,
+    archiveRole: null,
   };
 }

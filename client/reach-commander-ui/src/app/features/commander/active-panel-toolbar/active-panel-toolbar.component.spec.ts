@@ -40,6 +40,14 @@ describe('ActivePanelToolbarComponent', () => {
     fixture.detectChanges();
     expect(button('toolbar-multi-rename').disabled).toBe(true);
     expect(button('toolbar-add-files').disabled).toBe(false);
+
+    setInputs(context({ archive: true }), '');
+    fixture.detectChanges();
+    expect(button('toolbar-multi-rename').disabled).toBe(true);
+    expect(button('toolbar-add-files').disabled).toBe(true);
+    expect(button('toolbar-add-files').closest('[role="group"]')?.getAttribute('title')).toContain(
+      'archive',
+    );
   });
 
   it('emits search input and clear while describing wildcard support', () => {
@@ -106,6 +114,7 @@ function context(overrides: Partial<ActivePanelToolbarContext> = {}): ActivePane
     logicalPath: '/incoming',
     available: true,
     readOnly: false,
+    archive: false,
     hasRenameTargets: true,
     uploadPending: false,
     ...overrides,

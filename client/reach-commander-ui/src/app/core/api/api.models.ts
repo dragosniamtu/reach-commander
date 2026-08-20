@@ -1,6 +1,8 @@
 import { Observable } from 'rxjs';
 
 export type FileEntryType = 'file' | 'directory' | 'other';
+export type ArchiveFormat = 'zip' | 'rar' | 'sevenZip';
+export type ArchiveRole = 'single' | 'primary' | 'secondary';
 
 export interface SourceDto {
   readonly id: string;
@@ -19,11 +21,23 @@ export interface FileEntryDto {
   readonly relativePath: string;
   readonly type: FileEntryType;
   readonly size: number | null;
-  readonly modifiedAt: string;
+  readonly modifiedAt: string | null;
   readonly extension: string | null;
   readonly isReadOnly: boolean;
   readonly isSymbolicLink: boolean;
   readonly attributes: string;
+  readonly archiveFormatHint: ArchiveFormat | null;
+  readonly archiveRole: ArchiveRole | null;
+}
+
+export interface ArchiveDirectoryDto {
+  readonly sourceId: string;
+  readonly archivePath: string;
+  readonly path: string;
+  readonly format: ArchiveFormat;
+  readonly volumeCount: number;
+  readonly isReadOnly: true;
+  readonly entries: readonly FileEntryDto[];
 }
 
 export interface ApiProblemDetails {
@@ -223,6 +237,12 @@ export abstract class CommanderApiPort {
   abstract getSources(): Promise<readonly SourceDto[]>;
 
   abstract listFiles(sourceId: string, path: string): Promise<readonly FileEntryDto[]>;
+
+  abstract listArchive(
+    sourceId: string,
+    archivePath: string,
+    internalPath: string,
+  ): Promise<ArchiveDirectoryDto>;
 
   abstract getInfo(sourceId: string, path: string): Promise<FileEntryDto>;
 

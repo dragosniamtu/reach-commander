@@ -11,6 +11,8 @@ import { Injectable } from '@angular/core';
 import { filter, firstValueFrom, map, Observable } from 'rxjs';
 import {
   CommanderApiPort,
+  ArchiveDirectoryDto,
+  ArchiveFormat,
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
@@ -40,6 +42,41 @@ export class ReachCommanderApi extends CommanderApiPort {
   listFiles(sourceId: string, path: string): Promise<readonly FileEntryDto[]> {
     const params = new HttpParams().set('sourceId', sourceId).set('path', path);
     return firstValueFrom(this.http.get<readonly FileEntryDto[]>('/api/files', { params }));
+  }
+
+  async listArchive(
+    sourceId: string,
+    archivePath: string,
+    internalPath: string,
+  ): Promise<ArchiveDirectoryDto> {
+    const params = new HttpParams()
+      .set('sourceId', sourceId)
+      .set('archivePath', archivePath)
+      .set('path', internalPath);
+    const response = await firstValueFrom(
+      this.http.get<ArchiveDirectoryTransport>('/api/archives/entries', { params }),
+    );
+    return {
+      sourceId: response.sourceId,
+      archivePath: response.archivePath,
+      path: response.path,
+      format: response.format,
+      volumeCount: response.volumeCount,
+      isReadOnly: true,
+      entries: response.entries.map((entry) => ({
+        name: entry.name,
+        relativePath: entry.path,
+        type: entry.type,
+        size: entry.size,
+        modifiedAt: entry.modifiedAt,
+        extension: entry.extension,
+        isReadOnly: true,
+        isSymbolicLink: false,
+        attributes: entry.attributes,
+        archiveFormatHint: null,
+        archiveRole: null,
+      })),
+    };
   }
 
   getInfo(sourceId: string, path: string): Promise<FileEntryDto> {
@@ -115,4 +152,24 @@ function isUploadTransportEvent(
 
 function missingUploadResult(): never {
   throw new Error('The upload response did not contain a result.');
+}
+
+interface ArchiveDirectoryTransport {
+  readonly sourceId: string;
+  readonly archivePath: string;
+  readonly path: string;
+  readonly format: ArchiveFormat;
+  readonly volumeCount: number;
+  readonly isReadOnly: true;
+  readonly entries: readonly ArchiveEntryTransport[];
+}
+
+interface ArchiveEntryTransport {
+  readonly path: string;
+  readonly name: string;
+  readonly type: FileEntryDto['type'];
+  readonly size: number | null;
+  readonly modifiedAt: string | null;
+  readonly extension: string | null;
+  readonly attributes: string;
 }

@@ -26,8 +26,28 @@ export function buildVisibleRows(panel: PanelState): readonly FileTableRow[] {
   directories.sort(comparator(panel));
   files.sort(comparator(panel));
 
-  const parent = tab.path === '/' ? [] : [parentRow(tab.path)];
+  const parentPath = tab.location.kind === 'filesystem'
+    ? tab.location.path
+    : tab.location.internalPath;
+  const parent = tab.location.kind === 'filesystem' && parentPath === '/'
+    ? []
+    : [parentRow(parentPath)];
   return [...parent, ...directories, ...files];
+}
+
+export function fileTableRowExplanation(panel: PanelState, row: FileTableRow): string | null {
+  if (row.archiveRole === 'secondary') {
+    return 'Archive volume part. Open the primary volume instead.';
+  }
+  if (row.archiveFormatHint) {
+    return 'Supported archive. Open as a read-only folder.';
+  }
+
+  const location = panel.tabs.find((tab) => tab.id === panel.activeTabId)?.location;
+  if (location?.kind === 'archive' && looksLikeArchive(row.name)) {
+    return 'Archive file inside an archive. Nested archive browsing is unavailable.';
+  }
+  return null;
 }
 
 function comparator(panel: PanelState): (left: FileTableRow, right: FileTableRow) => number {
@@ -51,10 +71,25 @@ function compareColumn(
     case 'size':
       return (left.size ?? 0) - (right.size ?? 0);
     case 'modifiedAt':
-      return Date.parse(left.modifiedAt) - Date.parse(right.modifiedAt);
+      return compareModifiedAt(left.modifiedAt, right.modifiedAt);
     case 'attributes':
       return nameCollator.compare(left.attributes, right.attributes);
   }
+}
+
+function compareModifiedAt(left: string | null, right: string | null): number {
+  const leftTime = parseDate(left);
+  const rightTime = parseDate(right);
+  if (leftTime === null && rightTime === null) return 0;
+  if (leftTime === null) return 1;
+  if (rightTime === null) return -1;
+  return leftTime - rightTime;
+}
+
+function parseDate(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parentRow(path: string): FileTableRow {
@@ -68,6 +103,12 @@ function parentRow(path: string): FileTableRow {
     isReadOnly: true,
     isSymbolicLink: false,
     attributes: '',
+    archiveFormatHint: null,
+    archiveRole: null,
     isParent: true,
   };
+}
+
+function looksLikeArchive(name: string): boolean {
+  return /(?:\.zip|\.rar|\.7z)(?:\.\d{3})?$|\.(?:r|z)\d{2}$/i.test(name);
 }

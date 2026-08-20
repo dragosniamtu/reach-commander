@@ -2,7 +2,11 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { PanelState } from '../../../core/state/commander.models';
 import { FileSizePipe } from '../../../shared/pipes/file-size.pipe';
-import { buildVisibleRows, FileTableRow } from './file-table.viewmodel';
+import {
+  buildVisibleRows,
+  fileTableRowExplanation,
+  FileTableRow,
+} from '../../../core/state/file-table.viewmodel';
 
 export interface PointerSelection {
   readonly rowIndex: number;
@@ -34,5 +38,17 @@ export class FileTableComponent {
 
   isSelected(row: FileTableRow): boolean {
     return !row.isParent && this.panel().selectedItems.has(row.relativePath);
+  }
+
+  iconKind(row: FileTableRow): 'parent' | 'folder' | 'archive' | 'volume' | 'file' {
+    if (row.isParent) return 'parent';
+    if (row.type === 'directory') return 'folder';
+    if (row.archiveRole === 'secondary') return 'volume';
+    if (row.archiveFormatHint) return 'archive';
+    return 'file';
+  }
+
+  rowExplanation(row: FileTableRow): string | null {
+    return fileTableRowExplanation(this.panel(), row);
   }
 }

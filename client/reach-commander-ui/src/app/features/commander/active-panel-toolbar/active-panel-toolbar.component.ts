@@ -14,6 +14,7 @@ export interface ActivePanelToolbarContext {
   readonly logicalPath: string;
   readonly available: boolean;
   readonly readOnly: boolean;
+  readonly archive: boolean;
   readonly hasRenameTargets: boolean;
   readonly uploadPending: boolean;
 }
@@ -43,6 +44,9 @@ export class ActivePanelToolbarComponent {
     if (!context.available) {
       return 'The active source is unavailable.';
     }
+    if (context.archive) {
+      return 'Multi-Rename is unavailable inside a read-only archive.';
+    }
     if (context.readOnly) {
       return 'The active source is read-only.';
     }
@@ -56,6 +60,9 @@ export class ActivePanelToolbarComponent {
     const context = this.context();
     if (!context.available) {
       return 'The active source is unavailable.';
+    }
+    if (context.archive) {
+      return 'Files cannot be added inside a read-only archive.';
     }
     if (context.readOnly) {
       return 'The active source is read-only.';

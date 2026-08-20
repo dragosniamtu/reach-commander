@@ -8,8 +8,16 @@ describe('DirectoryTabsComponent', () => {
     await TestBed.configureTestingModule({ imports: [DirectoryTabsComponent] }).compileComponents();
     fixture = TestBed.createComponent(DirectoryTabsComponent);
     fixture.componentRef.setInput('tabs', [
-      { id: 'one', label: 'Complete', sourceId: 'downloads', path: '/Complete' },
-      { id: 'two', label: 'Movies', sourceId: 'media', path: '/Movies' },
+      {
+        id: 'one',
+        label: 'Complete',
+        location: { kind: 'filesystem', sourceId: 'downloads', path: '/Complete' },
+      },
+      {
+        id: 'two',
+        label: 'Movies',
+        location: { kind: 'filesystem', sourceId: 'media', path: '/Movies' },
+      },
     ]);
     fixture.componentRef.setInput('activeTabId', 'two');
     fixture.detectChanges();

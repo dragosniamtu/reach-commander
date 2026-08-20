@@ -12,4 +12,10 @@ public interface IPathSecurityService
         string parentLogicalPath,
         string childName,
         CancellationToken cancellationToken);
+
+    ValueTask<ResolvedSourcePath> ResolveDescendantAsync(
+        string sourceId,
+        string parentLogicalPath,
+        string relativePath,
+        CancellationToken cancellationToken);
 }

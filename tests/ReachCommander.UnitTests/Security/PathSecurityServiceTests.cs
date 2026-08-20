@@ -177,6 +177,38 @@ public sealed class PathSecurityServiceTests : IDisposable
                 "media",
                 "/file.txt",
                 "child",
+            CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task ResolveDescendantAsync_confines_a_nested_nonexistent_path()
+    {
+        var resolved = await _service.ResolveDescendantAsync(
+            "media",
+            "/Movies",
+            "New/Season 1/episode.mkv",
+            CancellationToken.None);
+
+        Assert.Equal("/Movies/New/Season 1/episode.mkv", resolved.LogicalPath);
+        Assert.Equal(
+            System.IO.Path.Combine(_sourceRoot, "Movies", "New", "Season 1", "episode.mkv"),
+            resolved.PhysicalPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("../escape")]
+    [InlineData("safe/../../escape")]
+    [InlineData("safe\\escape")]
+    [InlineData("C:/escape")]
+    [InlineData("safe//escape")]
+    public async Task ResolveDescendantAsync_rejects_non_relative_or_ambiguous_paths(string relativePath)
+    {
+        await Assert.ThrowsAsync<InvalidLogicalPathException>(() =>
+            _service.ResolveDescendantAsync(
+                "media",
+                "/Movies",
+                relativePath,
                 CancellationToken.None).AsTask());
     }
 

@@ -69,6 +69,36 @@ public sealed partial class PathSecurityService(ISourceCatalog sourceCatalog) : 
         return new ResolvedSourcePath(parent.Source, logicalPath, candidate);
     }
 
+    public async ValueTask<ResolvedSourcePath> ResolveDescendantAsync(
+        string sourceId,
+        string parentLogicalPath,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var components = ValidateRelativeDescendant(relativePath, parentLogicalPath);
+        var parent = await ResolveAsync(sourceId, parentLogicalPath, cancellationToken);
+        if (!Directory.Exists(parent.PhysicalPath))
+        {
+            throw new InvalidLogicalPathException(
+                parent.LogicalPath,
+                "the parent is not a directory");
+        }
+
+        var canonicalRoot = ResolveAbsolutePath(parent.Source.RootPath, cancellationToken);
+        var current = parent.PhysicalPath;
+        foreach (var component in components)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            current = Path.GetFullPath(Path.Combine(current, component));
+            EnsureWithin(canonicalRoot, current, parent.LogicalPath);
+        }
+
+        var logicalPath = parent.LogicalPath == "/"
+            ? $"/{string.Join('/', components)}"
+            : $"{parent.LogicalPath}/{string.Join('/', components)}";
+        return new ResolvedSourcePath(parent.Source, logicalPath, current);
+    }
+
     private static string Normalize(string logicalPath)
     {
         if (string.IsNullOrEmpty(logicalPath))
@@ -132,6 +162,31 @@ public sealed partial class PathSecurityService(ISourceCatalog sourceCatalog) : 
                 parentLogicalPath,
                 "the child name must be one non-rooted path component");
         }
+    }
+
+    private static string[] ValidateRelativeDescendant(
+        string relativePath,
+        string parentLogicalPath)
+    {
+        if (string.IsNullOrEmpty(relativePath) ||
+            relativePath.StartsWith('/') ||
+            relativePath.EndsWith('/') ||
+            relativePath.Contains("//", StringComparison.Ordinal) ||
+            relativePath.Contains('\\') ||
+            Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidLogicalPathException(
+                parentLogicalPath,
+                "the descendant path must be normalized and relative");
+        }
+
+        var components = relativePath.Split('/', StringSplitOptions.None);
+        foreach (var component in components)
+        {
+            ValidateChildName(component, parentLogicalPath);
+        }
+
+        return components;
     }
 
     private static string ResolveAbsolutePath(string absolutePath, CancellationToken cancellationToken)

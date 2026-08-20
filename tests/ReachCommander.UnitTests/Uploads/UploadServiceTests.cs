@@ -464,5 +464,12 @@ public sealed class UploadServiceTests
             string childName,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public ValueTask<ResolvedSourcePath> ResolveDescendantAsync(
+            string sourceId,
+            string parentLogicalPath,
+            string relativePath,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

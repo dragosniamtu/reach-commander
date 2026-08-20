@@ -5,7 +5,7 @@
       "name": "Downloads",
       "path": "{{DOWNLOADS_ROOT}}",
       "enabled": true,
-      "readOnly": true,
+      "readOnly": false,
       "defaultLeft": true,
       "defaultRight": false
     },
@@ -22,6 +22,15 @@
       "id": "usb",
       "name": "USB",
       "path": "{{USB_ROOT}}",
+      "enabled": true,
+      "readOnly": true,
+      "defaultLeft": false,
+      "defaultRight": false
+    },
+    {
+      "id": "archive",
+      "name": "Archive",
+      "path": "{{ARCHIVE_ROOT}}",
       "enabled": true,
       "readOnly": true,
       "defaultLeft": false,

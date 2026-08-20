@@ -34,8 +34,9 @@ test('operates two independent panes and restores the commander workspace', asyn
 
   await page.keyboard.press('Insert');
   await expect(left.locator('tr[data-path="/Complete"]')).toHaveAttribute('aria-selected', 'true');
+  const selectableRowCount = await left.locator('tbody tr').count();
   await page.keyboard.press('Control+A');
-  await expect(left.locator('tbody tr[aria-selected="true"]')).toHaveCount(2);
+  await expect(left.locator('tbody tr[aria-selected="true"]')).toHaveCount(selectableRowCount);
 
   const initialTabCount = await left.getByRole('tab').count();
   await page.keyboard.press('Control+T');
@@ -44,7 +45,7 @@ test('operates two independent panes and restores the commander workspace', asyn
   await expect(left.getByRole('tab')).toHaveCount(initialTabCount);
 
   await page.keyboard.type('inc');
-  await expect(left.getByRole('searchbox', { name: 'Quick filter' })).toHaveValue('inc');
+  await expect(page.getByRole('searchbox', { name: 'Search active panel' })).toHaveValue('inc');
   await expect(left.locator('tbody tr')).toHaveCount(1);
   await expect(left.getByText('Incomplete', { exact: true })).toBeVisible();
 
@@ -59,7 +60,8 @@ test('operates two independent panes and restores the commander workspace', asyn
   await page.reload();
   await expect(left.getByTestId('source-downloads')).toHaveAttribute('aria-pressed', 'true');
   await expect(right.getByTestId('source-media')).toHaveAttribute('aria-pressed', 'true');
-  await expect(left.getByRole('searchbox', { name: 'Quick filter' })).toHaveValue('inc');
+  await left.click();
+  await expect(page.getByRole('searchbox', { name: 'Search active panel' })).toHaveValue('inc');
   await expect(right.locator('.path-status')).toHaveText('/Movies');
   await expect(right.getByRole('tab')).toHaveCount(persistedTabCount + 1);
   await expect(right.getByText('Gladiator II.mkv')).toBeVisible();

@@ -3,7 +3,10 @@ import {
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
+  UploadEvent,
+  UploadLimitsDto,
 } from '../api/api.models';
+import { EMPTY, Observable } from 'rxjs';
 import { CommanderStore } from './commander-store';
 
 describe('CommanderStore', () => {
@@ -95,7 +98,9 @@ describe('CommanderStore', () => {
   });
 
   it('replaces the final closed tab with a safe root tab', async () => {
-    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
     const store = new CommanderStore(api);
     await store.initialize();
 
@@ -106,7 +111,9 @@ describe('CommanderStore', () => {
   });
 
   it('ignores a stale navigation response', async () => {
-    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
     const store = new CommanderStore(api);
     await store.initialize();
     const slow = deferred<readonly FileEntryDto[]>();
@@ -123,12 +130,15 @@ describe('CommanderStore', () => {
   });
 
   it('repairs persisted tabs whose sources were removed', async () => {
-    localStorage.setItem('reachcommander.panel-state.v1', JSON.stringify({
-      version: 1,
-      activePanel: 'right',
-      left: persistedPanel('removed', '/Lost'),
-      right: persistedPanel('media', '/Movies'),
-    }));
+    localStorage.setItem(
+      'reachcommander.panel-state.v1',
+      JSON.stringify({
+        version: 1,
+        activePanel: 'right',
+        left: persistedPanel('removed', '/Lost'),
+        right: persistedPanel('media', '/Movies'),
+      }),
+    );
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true }),
       source('media', { defaultRight: true }),
@@ -145,7 +155,9 @@ describe('CommanderStore', () => {
   });
 
   it('toggles selection with Insert and advances the cursor', async () => {
-    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
     api.entries.set('downloads:/', [entry('one.txt'), entry('two.txt')]);
     const store = new CommanderStore(api);
     await store.initialize();
@@ -157,7 +169,9 @@ describe('CommanderStore', () => {
   });
 
   it('selects all visible real entries and excludes the parent row', async () => {
-    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
     api.entries.set('downloads:/Complete', [entry('one.txt'), entry('two.txt')]);
     const store = new CommanderStore(api);
     await store.initialize();
@@ -169,21 +183,29 @@ describe('CommanderStore', () => {
   });
 
   it('supports plain, toggle, and range pointer selection', async () => {
-    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
     api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
     const store = new CommanderStore(api);
     await store.initialize();
 
     store.selectWithPointer('left', 0, 'replace');
     store.selectWithPointer('left', 2, 'range');
-    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/alpha.txt', '/beta.txt', '/gamma.txt']);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual([
+      '/alpha.txt',
+      '/beta.txt',
+      '/gamma.txt',
+    ]);
 
     store.selectWithPointer('left', 1, 'toggle');
     expect(store.leftPanel().selectedItems.has('/beta.txt')).toBe(false);
   });
 
   it('clamps the cursor after filtering and keeps the opposite pane untouched', async () => {
-    const api = new FakeCommanderApi([source('downloads', { defaultLeft: true, defaultRight: true })]);
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
     api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt')]);
     const store = new CommanderStore(api);
     await store.initialize();
@@ -215,10 +237,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function source(
-  id: string,
-  overrides: Partial<SourceDto> = {},
-): SourceDto {
+function source(id: string, overrides: Partial<SourceDto> = {}): SourceDto {
   return {
     id,
     name: id[0]?.toUpperCase() + id.slice(1),
@@ -285,5 +304,13 @@ class FakeCommanderApi extends CommanderApiPort {
 
   async getInfo(): Promise<FileEntryDto> {
     throw new Error('Not used by these tests');
+  }
+
+  async getUploadLimits(): Promise<UploadLimitsDto> {
+    return { maxFileBytes: 10, maxBatchBytes: 20, maxFilesPerBatch: 2 };
+  }
+
+  uploadFiles(): Observable<UploadEvent> {
+    return EMPTY;
   }
 }

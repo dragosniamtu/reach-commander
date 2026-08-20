@@ -1,3 +1,5 @@
+import { Observable } from 'rxjs';
+
 export type FileEntryType = 'file' | 'directory' | 'other';
 
 export interface SourceDto {
@@ -33,8 +35,43 @@ export interface ApiProblemDetails {
   readonly code: string;
 }
 
+export interface UploadLimitsDto {
+  readonly maxFileBytes: number;
+  readonly maxBatchBytes: number;
+  readonly maxFilesPerBatch: number;
+}
+
+export interface UploadedFileDto {
+  readonly name: string;
+  readonly relativePath: string;
+  readonly size: number;
+}
+
+export interface UploadResultDto {
+  readonly uploadedCount: number;
+  readonly totalBytes: number;
+  readonly files: readonly UploadedFileDto[];
+}
+
+export interface UploadTarget {
+  readonly sourceId: string;
+  readonly directoryPath: string;
+}
+
+export type UploadEvent =
+  | {
+      readonly kind: 'progress';
+      readonly loadedBytes: number;
+      readonly totalBytes: number | null;
+    }
+  | {
+      readonly kind: 'completed';
+      readonly result: UploadResultDto;
+    };
+
 export type HardwareMetricsState = 'healthy' | 'partial' | 'stale' | 'disabled';
-export type HardwareCollectorState = 'success' | 'unsupported' | 'unavailable' | 'timeout' | 'failed';
+export type HardwareCollectorState =
+  'success' | 'unsupported' | 'unavailable' | 'timeout' | 'failed';
 
 export interface CpuMetricsDto {
   readonly utilizationPercent: number | null;
@@ -116,4 +153,8 @@ export abstract class CommanderApiPort {
   abstract listFiles(sourceId: string, path: string): Promise<readonly FileEntryDto[]>;
 
   abstract getInfo(sourceId: string, path: string): Promise<FileEntryDto>;
+
+  abstract getUploadLimits(): Promise<UploadLimitsDto>;
+
+  abstract uploadFiles(target: UploadTarget, files: readonly File[]): Observable<UploadEvent>;
 }

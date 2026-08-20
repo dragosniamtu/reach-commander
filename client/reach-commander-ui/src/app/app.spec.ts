@@ -1,10 +1,13 @@
 import { TestBed } from '@angular/core/testing';
+import { EMPTY, Observable } from 'rxjs';
 import { App } from './app';
 import {
   CommanderApiPort,
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
+  UploadEvent,
+  UploadLimitsDto,
 } from './core/api/api.models';
 
 describe('App', () => {
@@ -49,17 +52,19 @@ class AppTestApi extends CommanderApiPort {
   }
 
   async getSources(): Promise<readonly SourceDto[]> {
-    return [{
-      id: 'downloads',
-      name: 'Downloads',
-      isAvailable: true,
-      isReadOnly: false,
-      totalBytes: 100,
-      usedBytes: 25,
-      freeBytes: 75,
-      defaultLeft: true,
-      defaultRight: true,
-    }];
+    return [
+      {
+        id: 'downloads',
+        name: 'Downloads',
+        isAvailable: true,
+        isReadOnly: false,
+        totalBytes: 100,
+        usedBytes: 25,
+        freeBytes: 75,
+        defaultLeft: true,
+        defaultRight: true,
+      },
+    ];
   }
 
   async listFiles(): Promise<readonly FileEntryDto[]> {
@@ -68,5 +73,13 @@ class AppTestApi extends CommanderApiPort {
 
   async getInfo(): Promise<FileEntryDto> {
     throw new Error('Not used');
+  }
+
+  async getUploadLimits(): Promise<UploadLimitsDto> {
+    return { maxFileBytes: 10, maxBatchBytes: 20, maxFilesPerBatch: 2 };
+  }
+
+  uploadFiles(): Observable<UploadEvent> {
+    return EMPTY;
   }
 }

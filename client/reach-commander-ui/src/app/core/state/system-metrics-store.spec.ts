@@ -1,5 +1,13 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { CommanderApiPort, FileEntryDto, SourceDto, SystemMetricsDto } from '../api/api.models';
+import { EMPTY, Observable } from 'rxjs';
+import {
+  CommanderApiPort,
+  FileEntryDto,
+  SourceDto,
+  SystemMetricsDto,
+  UploadEvent,
+  UploadLimitsDto,
+} from '../api/api.models';
 import { SystemMetricsStore } from './system-metrics-store';
 
 describe('SystemMetricsStore', () => {
@@ -36,10 +44,13 @@ describe('SystemMetricsStore', () => {
   });
 
   it('preserves the last snapshot and derives stale after fifteen seconds of failures', async () => {
-    api.metricsHandler = () => Promise.resolve(systemMetricsResponse({
-      sampledAt: '2026-08-19T12:00:00Z',
-      state: 'healthy',
-    }));
+    api.metricsHandler = () =>
+      Promise.resolve(
+        systemMetricsResponse({
+          sampledAt: '2026-08-19T12:00:00Z',
+          state: 'healthy',
+        }),
+      );
     store.start();
     await Promise.resolve();
 
@@ -54,7 +65,7 @@ describe('SystemMetricsStore', () => {
   it('queues one immediate refresh on visibility return without overlapping the in-flight request', async () => {
     const first = deferred<SystemMetricsDto>();
     const second = deferred<SystemMetricsDto>();
-    api.metricsHandler = () => api.metricsRequests === 1 ? first.promise : second.promise;
+    api.metricsHandler = () => (api.metricsRequests === 1 ? first.promise : second.promise);
     store.start();
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -89,10 +100,13 @@ describe('SystemMetricsStore', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    api.metricsHandler = () => Promise.reject(new HttpErrorResponse({
-      status: 503,
-      error: { code: 'metrics_not_ready', detail: 'must not be displayed' },
-    }));
+    api.metricsHandler = () =>
+      Promise.reject(
+        new HttpErrorResponse({
+          status: 503,
+          error: { code: 'metrics_not_ready', detail: 'must not be displayed' },
+        }),
+      );
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(store.state().snapshot).not.toBeNull();
@@ -120,6 +134,14 @@ class FakeMetricsApi extends CommanderApiPort {
   async getInfo(): Promise<FileEntryDto> {
     throw new Error('Not used');
   }
+
+  async getUploadLimits(): Promise<UploadLimitsDto> {
+    return { maxFileBytes: 10, maxBatchBytes: 20, maxFilesPerBatch: 2 };
+  }
+
+  uploadFiles(): Observable<UploadEvent> {
+    return EMPTY;
+  }
 }
 
 function deferred<T>(): {
@@ -133,9 +155,7 @@ function deferred<T>(): {
   return { promise, resolve };
 }
 
-function systemMetricsResponse(
-  overrides: Partial<SystemMetricsDto> = {},
-): SystemMetricsDto {
+function systemMetricsResponse(overrides: Partial<SystemMetricsDto> = {}): SystemMetricsDto {
   return {
     sampledAt: '2026-08-19T12:00:00Z',
     state: 'healthy',

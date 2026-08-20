@@ -1,8 +1,34 @@
 # ReachCommander
 
-ReachCommander is a self-hosted, browser-based dual-pane file manager inspired by Total Commander. It combines configurable filesystem sources, independent panes and directory tabs, dense sortable listings, wildcard search, controlled batch rename and upload workflows, live hardware telemetry, persistence, and a single-origin container deployment.
+[![CI](https://github.com/dragosniamtu/reach-commander/actions/workflows/ci.yml/badge.svg)](https://github.com/dragosniamtu/reach-commander/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+[![Angular 22](https://img.shields.io/badge/Angular-22-DD0031)](https://angular.dev/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](Dockerfile)
 
-> **Trusted-network warning:** ReachCommander has no authentication, authorization, or built-in TLS. Do not expose it directly to the public internet. Bind it to a trusted network or place it behind an authenticated HTTPS reverse proxy.
+ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an Angular 22 interface with an ASP.NET Core 10 backend to deliver authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on Windows and Linux.
+
+![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
+
+> **Security boundary:** ReachCommander has no built-in authentication, authorization, or TLS. Keep it on a trusted network or place it behind an authenticated HTTPS reverse proxy. Checked-in sources and Docker mounts remain read-only until an administrator explicitly opts one narrow source into writes.
+
+## Why this project
+
+ReachCommander demonstrates more than a file-browser UI:
+
+- **Server-authoritative mutations:** previews are short-lived plans; execution revalidates paths, fingerprints, conflicts, source policy, and write access.
+- **Safe batch algorithms:** two-phase temporary renames support swaps, cycles, and case-only changes with compensation and one-level Undo.
+- **Streamed upload safety:** multipart files are bounded, staged beside their destination, committed all-or-nothing, and serialized with renames through a shared directory lock.
+- **Cross-platform observability:** Windows and Linux collectors normalize CPU, memory, storage, GPU, temperature, fan, network, and uptime data without shelling out to vendor tools.
+- **Testable accessibility:** keyboard-first pane control, focus trapping/restoration, live regions, explicit RO/RW semantics, and deterministic browser acceptance at desktop and compact widths.
+
+| Layer | Technology |
+|---|---|
+| Frontend | Angular 22 standalone components, Signals, RxJS, Angular CDK A11y |
+| Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
+| Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
+| Deployment | Single-origin publish, hardened Docker Compose, Windows and Ubuntu support |
+| Quality | 240 .NET tests, 136 Angular tests, 12 Playwright scenarios |
 
 ## What ReachCommander includes
 
@@ -256,6 +282,8 @@ Search filters only the loaded current directory and preserves a separate value 
 Source chips show `RO` for application read-only policy and `RW` for application write opt-in. Unavailable sources remain visible with an accessible explanation. Multi-Rename and Add files require an available `RW` source, and the server still revalidates source policy, containment, symlinks, staleness, and actual storage permissions.
 
 ## Multi-Rename
+
+![ReachCommander Multi-Rename workspace](docs/images/reachcommander-multi-rename.png)
 
 The Total Commander-inspired Multi-Rename Tool opens from the toolbar or `Ctrl+M`. It uses selected files and directories in visible selection order; with no selection, the non-parent cursor row is used. Entries must be direct children of one active directory, symbolic links are rejected, and one preview is limited to 5,000 entries.
 

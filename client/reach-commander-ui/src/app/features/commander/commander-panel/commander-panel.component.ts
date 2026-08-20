@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, ViewChild, computed, input } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  ViewChild,
+  computed,
+  input,
+} from '@angular/core';
 import { SourceDto } from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
 import { PanelSide, PanelState } from '../../../core/state/commander.models';
@@ -35,11 +42,17 @@ export class CommanderPanelComponent {
   );
 
   @ViewChild(PathBarComponent) private pathBar?: PathBarComponent;
+  @ViewChild('panelRoot', { read: ElementRef })
+  private panelRoot?: ElementRef<HTMLElement>;
 
   constructor(readonly store: CommanderStore) {}
 
   focusPath(): void {
     this.pathBar?.focusEditor();
+  }
+
+  focusPanel(): void {
+    this.panelRoot?.nativeElement.focus();
   }
 
   selectRow(selection: PointerSelection): void {
@@ -61,10 +74,14 @@ export class CommanderPanelComponent {
 
   errorMessage(): string {
     switch (this.panel().errorCode) {
-      case 'source_unavailable': return 'This source is not currently mounted or accessible.';
-      case 'invalid_path': return 'That logical path is not valid.';
-      case 'request_failed': return 'The directory could not be loaded.';
-      default: return '';
+      case 'source_unavailable':
+        return 'This source is not currently mounted or accessible.';
+      case 'invalid_path':
+        return 'That logical path is not valid.';
+      case 'request_failed':
+        return 'The directory could not be loaded.';
+      default:
+        return '';
     }
   }
 }

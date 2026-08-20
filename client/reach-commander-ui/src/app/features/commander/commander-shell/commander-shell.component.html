@@ -5,7 +5,7 @@
       <div><strong>ReachCommander</strong><span>DUAL-PANE FILE OPERATIONS</span></div>
     </div>
     <div class="top-actions">
-      <span class="read-mode"><i></i> READ-ONLY FOUNDATION</span>
+      <span class="read-mode"><i></i> CONTROLLED FILE OPERATIONS</span>
       <button type="button" disabled title="Transfers arrive in Milestone 3">Transfers</button>
       <button
         type="button"
@@ -39,7 +39,10 @@
   }
 
   @if (multiRename.state().open) {
-    <app-multi-rename-dialog (closeRequested)="closeMultiRename()" />
+    <app-multi-rename-dialog
+      (closeRequested)="closeMultiRename()"
+      (filesystemChanged)="handleRenameFilesystemChanged($event)"
+    />
   }
 
   @if (initializationError()) {
@@ -70,8 +73,8 @@
       configured
     </div>
     <div class="shortcut-hint">
-      <kbd>Tab</kbd> switch pane <span>·</span> <kbd>Insert</kbd> select <span>·</span> type to
-      filter
+      <kbd>Tab</kbd> switch pane <span>·</span> <kbd>Insert</kbd> select <span>·</span>
+      <kbd>Ctrl+M</kbd> multi-rename <span>·</span> type to filter
     </div>
     @if (commandStatus()) {
       <div class="command-status">{{ commandStatus() }}</div>
@@ -87,11 +90,12 @@
       <div class="menu-grid">
         <span>Navigate</span><kbd>↑ ↓ Enter Backspace</kbd> <span>Select</span
         ><kbd>Insert · Ctrl+A</kbd> <span>Panels & tabs</span><kbd>Tab · Ctrl+T · Ctrl+W</kbd>
-        <span>Path & refresh</span><kbd>Ctrl+L · Ctrl+R</kbd>
+        <span>Path & refresh</span><kbd>Ctrl+L · Ctrl+R</kbd> <span>Multi-Rename</span
+        ><kbd>Ctrl+M</kbd>
       </div>
       <p>
-        Copy, move, rename, create directory, and delete are intentionally unavailable in Milestone
-        1.
+        Multi-Rename is available with Ctrl+M. F4–F8 remain reserved for future single-item and
+        transfer operations.
       </p>
     </section>
   }

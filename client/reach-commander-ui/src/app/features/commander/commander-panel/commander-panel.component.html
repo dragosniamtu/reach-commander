@@ -1,4 +1,5 @@
 <section
+  #panelRoot
   class="panel"
   [class.active]="active()"
   [attr.aria-label]="side() + ' file panel'"
@@ -27,7 +28,10 @@
     (tabClosed)="closeTab($event)"
     (tabCreated)="store.createTab(side())"
   />
-  <app-path-bar [path]="activeTab()?.path ?? '/'" (pathCommitted)="store.setPathFromEditor(side(), $event)" />
+  <app-path-bar
+    [path]="activeTab()?.path ?? '/'"
+    (pathCommitted)="store.setPathFromEditor(side(), $event)"
+  />
   <app-quick-filter [value]="panel().filter" (valueChanged)="store.setFilter(side(), $event)" />
 
   <div class="content-state">

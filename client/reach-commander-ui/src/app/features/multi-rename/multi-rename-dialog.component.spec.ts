@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { BatchRenamePreviewDto } from '../../core/api/api.models';
+import { BatchRenameOperationDto, BatchRenamePreviewDto } from '../../core/api/api.models';
 import { MultiRenameState } from '../../core/state/multi-rename.models';
 import { MultiRenameStore } from '../../core/state/multi-rename-store';
 import { MultiRenameDialogComponent } from './multi-rename-dialog.component';
@@ -52,6 +52,52 @@ describe('MultiRenameDialogComponent', () => {
     input.dispatchEvent(new Event('input'));
 
     expect(fakeStore.updateRules).toHaveBeenCalledWith({ nameMask: 'Trip-[C]' });
+  });
+
+  it('executes only an authoritative plan and exposes Undo after success', async () => {
+    fakeStore.state.set(openState({ preview: previewResponse({ canExecute: true }) }));
+    fakeStore.canExecute.set(true);
+    fakeStore.execute.mockImplementationOnce(async () => {
+      fakeStore.state.update((state) => ({ ...state, operation: operationResponse() }));
+      fakeStore.canUndo.set(true);
+      return true;
+    });
+    const changed = vi.fn();
+    fixture.componentInstance.filesystemChanged.subscribe(changed);
+    fixture.detectChanges();
+
+    (
+      fixture.nativeElement.querySelector('[data-testid="rename-start"]') as HTMLButtonElement
+    ).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fakeStore.execute).toHaveBeenCalledOnce();
+    expect(fixture.nativeElement.textContent).toContain('2 entries renamed');
+    expect(
+      (fixture.nativeElement.querySelector('[data-testid="rename-undo"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(changed).toHaveBeenCalledWith('left');
+  });
+
+  it('blocks close while pending and requires acknowledgement for recovery-required results', () => {
+    fakeStore.state.set(
+      openState({
+        operation: operationResponse({ status: 'recoveryRequired', recoveryRequired: true }),
+      }),
+    );
+    fixture.detectChanges();
+
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[aria-label="Close Multi-Rename"]',
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain('Recovery required');
+    expect(fixture.nativeElement.textContent).toContain('/Movies/current-a.txt');
   });
 });
 
@@ -112,6 +158,44 @@ function previewResponse(overrides: Partial<BatchRenamePreviewDto> = {}): BatchR
     changedCount: 1,
     unchangedCount: 0,
     invalidCount: 0,
+    ...overrides,
+  };
+}
+
+function operationResponse(
+  overrides: Partial<BatchRenameOperationDto> = {},
+): BatchRenameOperationDto {
+  return {
+    operationId: 'operation',
+    status: 'completed',
+    rows: [
+      {
+        oldPath: '/Movies/a.txt',
+        newPath: '/Movies/one.txt',
+        currentPath: '/Movies/current-a.txt',
+        oldName: 'a.txt',
+        newName: 'one.txt',
+        currentName: 'current-a.txt',
+        type: 'file',
+        result: 'completed',
+        message: null,
+      },
+      {
+        oldPath: '/Movies/b.txt',
+        newPath: '/Movies/two.txt',
+        currentPath: '/Movies/two.txt',
+        oldName: 'b.txt',
+        newName: 'two.txt',
+        currentName: 'two.txt',
+        type: 'file',
+        result: 'completed',
+        message: null,
+      },
+    ],
+    compensationAttempted: false,
+    recoveryRequired: false,
+    undoAvailable: true,
+    undoExpiresAt: '2026-08-20T08:30:00Z',
     ...overrides,
   };
 }

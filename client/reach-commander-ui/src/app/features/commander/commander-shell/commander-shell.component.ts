@@ -234,7 +234,14 @@ export class CommanderShellComponent implements OnInit {
   }
 
   closeMultiRename(): void {
+    const side = this.multiRename.state().context?.panelSide ?? this.store.activePanel();
     this.multiRename.close();
+    queueMicrotask(() => (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+  }
+
+  async handleRenameFilesystemChanged(side: PanelSide): Promise<void> {
+    this.store.clearSelection(side);
+    await this.store.refresh(side);
   }
 
   handleFunctionKey(key: CommanderFunctionKey): void {

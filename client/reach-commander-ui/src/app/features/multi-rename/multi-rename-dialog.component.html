@@ -16,7 +16,7 @@
       <button
         type="button"
         aria-label="Close Multi-Rename"
-        [disabled]="store.state().previewPending || store.state().actionPending"
+        [disabled]="!canClose()"
         (click)="requestClose()"
       >
         ×
@@ -153,7 +153,48 @@
       }
     </div>
 
-    <app-multi-rename-preview-table [rows]="store.state().preview?.rows ?? []" />
+    @if (store.state().operation; as operation) {
+      @if (operation.recoveryRequired) {
+        <section class="recovery-banner" role="alert">
+          <strong>Recovery required</strong>
+          <p>
+            Automatic rollback was incomplete. Review every logical current location before closing.
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              [checked]="recoveryReviewed()"
+              (change)="acknowledgeRecovery($any($event.target).checked)"
+            />
+            I have reviewed the recovery list
+          </label>
+        </section>
+      }
+      <div class="result-region" data-testid="rename-result-list" tabindex="0">
+        <table>
+          <thead>
+            <tr>
+              <th>Original</th>
+              <th>Intended</th>
+              <th>Current</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of operation.rows; track row.oldPath) {
+              <tr [attr.data-result]="row.result">
+                <td>{{ row.oldPath }}</td>
+                <td>{{ row.newPath }}</td>
+                <td>{{ row.currentPath }}</td>
+                <td>{{ resultLabel(row.result) }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <app-multi-rename-preview-table [rows]="store.state().preview?.rows ?? []" />
+    }
 
     <footer>
       <span role="status" aria-live="polite">{{ summary() }}</span>
@@ -175,7 +216,7 @@
         >
           Start
         </button>
-        <button type="button" (click)="requestClose()">Close</button>
+        <button type="button" [disabled]="!canClose()" (click)="requestClose()">Close</button>
       </div>
     </footer>
   </section>

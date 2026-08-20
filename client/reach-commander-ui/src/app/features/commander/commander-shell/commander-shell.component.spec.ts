@@ -39,6 +39,9 @@ describe('CommanderShellComponent system metrics integration', () => {
     activePanel: signal<'left' | 'right'>('left'),
     initialize: vi.fn(() => Promise.resolve()),
     refresh: vi.fn(() => Promise.resolve()),
+    clearSelection: vi.fn(),
+    createMultiRenameContext: vi.fn(() => null),
+    activatePanel: vi.fn(),
   };
   const upload = {
     state: signal<UploadState>(closedUploadState()),
@@ -178,6 +181,35 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.componentInstance.closeUpload();
     expect(upload.start).toHaveBeenCalledOnce();
     expect(upload.close).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes only the originating pane and restores its focus after rename', async () => {
+    const rightPanelBefore = store.rightPanel();
+    multiRename.state.set({
+      ...closedMultiRenameState(),
+      open: true,
+      context: {
+        panelSide: 'left',
+        sourceId: 'downloads',
+        sourceName: 'Downloads',
+        directoryPath: '/',
+        entries: [],
+        isAvailable: true,
+        isReadOnly: false,
+      },
+    });
+    fixture.detectChanges();
+    const leftPanel = fixture.componentInstance['leftPanel']!;
+    const focus = vi.spyOn(leftPanel, 'focusPanel');
+
+    await fixture.componentInstance.handleRenameFilesystemChanged('left');
+
+    expect(store.clearSelection).toHaveBeenCalledWith('left');
+    expect(store.refresh).toHaveBeenCalledWith('left');
+    expect(store.rightPanel()).toBe(rightPanelBefore);
+    fixture.componentInstance.closeMultiRename();
+    await Promise.resolve();
+    expect(focus).toHaveBeenCalledOnce();
   });
 });
 

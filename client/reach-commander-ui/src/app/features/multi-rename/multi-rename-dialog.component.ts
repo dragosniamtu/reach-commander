@@ -1,7 +1,16 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, computed, inject, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  HostListener,
+  computed,
+  inject,
+  output,
+  signal,
+} from '@angular/core';
 import { BatchRenameCaseMode } from '../../core/api/api.models';
 import { MultiRenameStore } from '../../core/state/multi-rename-store';
+import { PanelSide } from '../../core/state/commander.models';
 import { RenameMaskFieldComponent, RenameMaskToken } from './rename-mask-field.component';
 import { MultiRenamePreviewTableComponent } from './multi-rename-preview-table.component';
 
@@ -31,12 +40,36 @@ const errorMessages: Readonly<Record<string, string>> = {
 export class MultiRenameDialogComponent {
   readonly store = inject(MultiRenameStore);
   readonly closeRequested = output<void>();
+  readonly filesystemChanged = output<PanelSide>();
+  readonly recoveryReviewed = signal(false);
   readonly context = computed(() => this.store.state().context);
   readonly rulesLocked = computed(
     () => this.store.state().operation !== null || this.store.state().actionPending,
   );
+  readonly canClose = computed(() => {
+    const state = this.store.state();
+    return (
+      !state.previewPending &&
+      !state.actionPending &&
+      (!state.operation?.recoveryRequired || this.recoveryReviewed())
+    );
+  });
   readonly summary = computed(() => {
     const state = this.store.state();
+    const operation = state.operation;
+    if (operation?.status === 'completed') {
+      const count = operation.rows.filter((row) => row.result === 'completed').length;
+      return `${count} ${count === 1 ? 'entry' : 'entries'} renamed`;
+    }
+    if (operation?.status === 'undone') {
+      return 'Undo completed';
+    }
+    if (operation?.status === 'recoveryRequired') {
+      return 'Recovery required';
+    }
+    if (operation?.status === 'failed') {
+      return 'Rename failed · completed changes were rolled back';
+    }
     if (state.previewPending) {
       return 'Refreshing preview…';
     }
@@ -108,16 +141,65 @@ export class MultiRenameDialogComponent {
   }
 
   async start(): Promise<void> {
-    await this.store.execute();
+    const side = this.context()?.panelSide;
+    if (
+      side &&
+      (await this.store.execute()) &&
+      this.store.state().operation?.status === 'completed'
+    ) {
+      this.filesystemChanged.emit(side);
+    }
   }
 
   async undo(): Promise<void> {
-    await this.store.undo();
+    const side = this.context()?.panelSide;
+    if (side && (await this.store.undo()) && this.store.state().operation?.status === 'undone') {
+      this.filesystemChanged.emit(side);
+    }
   }
 
   requestClose(): void {
-    if (!this.store.state().previewPending && !this.store.state().actionPending) {
+    if (this.canClose()) {
       this.closeRequested.emit();
+    }
+  }
+
+  acknowledgeRecovery(reviewed: boolean): void {
+    this.recoveryReviewed.set(reviewed);
+  }
+
+  resultLabel(result: string): string {
+    switch (result) {
+      case 'completed':
+        return 'Completed';
+      case 'unchanged':
+        return 'Unchanged';
+      case 'failed':
+        return 'Failed';
+      case 'rolledBack':
+        return 'Rolled back';
+      case 'recoveryRequired':
+        return 'Recovery required';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  @HostListener('keydown', ['$event'])
+  handleDialogKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.requestClose();
+      return;
+    }
+
+    if (event.key === 'Enter' && event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.store.canExecute()) {
+        void this.start();
+      }
     }
   }
 

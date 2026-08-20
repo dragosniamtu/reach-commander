@@ -11,9 +11,11 @@ describe('CommandBarComponent', () => {
   });
 
   it('keeps future mutation commands visible but disabled and enables the menu', () => {
+    const rename: HTMLButtonElement = fixture.nativeElement.querySelector('[data-key="F4"]');
     const copy: HTMLButtonElement = fixture.nativeElement.querySelector('[data-key="F5"]');
     const menu: HTMLButtonElement = fixture.nativeElement.querySelector('[data-key="F9"]');
 
+    expect(rename.disabled).toBe(true);
     expect(copy.disabled).toBe(true);
     expect(copy.getAttribute('aria-describedby')).toBeTruthy();
     expect(menu.disabled).toBe(false);

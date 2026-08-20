@@ -14,4 +14,13 @@ internal sealed class ArchiveFrameWriter(Stream output)
         ArchiveFrameKind kind,
         CancellationToken cancellationToken) =>
         ArchiveFrameCodec.WriteAsync(output, kind, ReadOnlyMemory<byte>.Empty, cancellationToken);
+
+    public ValueTask WriteDataAsync(
+        ReadOnlyMemory<byte> data,
+        CancellationToken cancellationToken) =>
+        ArchiveFrameCodec.WriteAsync(
+            output,
+            ArchiveFrameKind.EntryData,
+            data,
+            cancellationToken);
 }

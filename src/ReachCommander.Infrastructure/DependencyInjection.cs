@@ -21,6 +21,7 @@ using ReachCommander.Infrastructure.Archives;
 using ReachCommander.Infrastructure.Archives.Catalog;
 using ReachCommander.Infrastructure.Archives.Volumes;
 using ReachCommander.Infrastructure.Archives.Worker;
+using ReachCommander.Infrastructure.Archives.Extraction;
 
 namespace ReachCommander.Infrastructure;
 
@@ -81,6 +82,18 @@ public static class DependencyInjection
             services.AddSingleton<IArchiveWorkerClient, ArchiveWorkerClient>();
             services.AddSingleton<IArchiveCatalogProvider, ArchiveCatalogProvider>();
             services.AddSingleton<IArchiveBrowser, ArchiveBrowser>();
+            services.AddSingleton<ArchiveExtractionPlanStore>();
+            services.AddSingleton<ArchiveExtractionOperationStore>();
+            services.AddSingleton<LocalArchiveExtractionRuntimeFileSystem>();
+            services.AddSingleton<IArchiveExtractionFileSystem>(provider =>
+                provider.GetRequiredService<LocalArchiveExtractionRuntimeFileSystem>());
+            services.AddSingleton<IArchiveExtractionRuntimeFileSystem>(provider =>
+                provider.GetRequiredService<LocalArchiveExtractionRuntimeFileSystem>());
+            services.AddSingleton<IArchivePlanIdGenerator, ArchivePlanIdGenerator>();
+            services.AddSingleton<IArchiveOperationIdGenerator, ArchiveOperationIdGenerator>();
+            services.AddSingleton<ArchiveExtractionPlanner>();
+            services.AddSingleton<ArchiveExtractionCoordinator>();
+            services.AddSingleton<IArchiveExtractionService, ArchiveExtractionService>();
         }
         else
         {

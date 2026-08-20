@@ -87,8 +87,9 @@ internal sealed partial class ArchivePathPolicy(IOptions<ArchiveOptions> options
     }
 
     private static bool IsStagingControlName(string component) =>
-        component.StartsWith(".reachcommander-extract-", StringComparison.OrdinalIgnoreCase) &&
-        component.EndsWith(".partial", StringComparison.OrdinalIgnoreCase);
+        component.Equals(".reachcommander-owner", StringComparison.OrdinalIgnoreCase) ||
+        (component.StartsWith(".reachcommander-extract-", StringComparison.OrdinalIgnoreCase) &&
+         component.EndsWith(".partial", StringComparison.OrdinalIgnoreCase));
 
     [GeneratedRegex(@"^/?[A-Za-z]:[\\/]", RegexOptions.CultureInvariant)]
     private static partial Regex DrivePathRegex();

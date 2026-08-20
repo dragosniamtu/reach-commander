@@ -95,23 +95,141 @@ internal sealed class ArchiveWorkerClient(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            Kill(process);
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
             throw;
         }
         catch (OperationCanceledException)
         {
-            Kill(process);
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
             throw new ArchiveLimitExceededException(
                 "Archive inspection exceeded the configured time limit.");
         }
         catch (ArchiveException)
         {
-            Kill(process);
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
             throw;
         }
         catch
         {
-            Kill(process);
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
+            throw new ArchiveWorkerFailedException();
+        }
+        finally
+        {
+            monitorCancellation.Cancel();
+            await IgnoreCaptureFailureAsync(stderrTask).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask ExtractAsync(
+        ResolvedArchivePartSet partSet,
+        IReadOnlyList<int> entryIndexes,
+        IArchiveEntrySink sink,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(partSet);
+        ArgumentNullException.ThrowIfNull(entryIndexes);
+        ArgumentNullException.ThrowIfNull(sink);
+        if (entryIndexes.Count == 0 ||
+            entryIndexes.Any(index => index < 0) ||
+            entryIndexes.Distinct().Count() != entryIndexes.Count)
+        {
+            throw new ArchiveWorkerFailedException();
+        }
+
+        var startInfo = CreateStartInfo();
+        IArchiveWorkerProcess process;
+        try
+        {
+            process = processFactory.Start(startInfo);
+        }
+        catch
+        {
+            throw new ArchiveWorkerFailedException();
+        }
+
+        await using var processScope = process;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_options.ExtractionTimeout);
+        using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var stderrTask = CaptureStderrAsync(process.StandardError, timeout.Token);
+
+        try
+        {
+            var request = new ArchiveExtractionRequest(
+                ArchiveFrameCodec.CurrentProtocolVersion,
+                Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture),
+                partSet.Parts.Select(part => part.PhysicalPath).ToArray(),
+                entryIndexes,
+                new ArchiveWorkerLimits(
+                    _options.MaxEntries,
+                    _options.MaxTotalExtractedBytes));
+            await ArchiveFrameCodec.WriteJsonAsync(
+                process.StandardInput,
+                ArchiveFrameKind.ExtractionRequest,
+                request,
+                timeout.Token).ConfigureAwait(false);
+            await process.CompleteInputAsync().ConfigureAwait(false);
+
+            var readTask = ReadExtractionAsync(
+                process.StandardOutput,
+                entryIndexes,
+                sink,
+                timeout.Token);
+            var monitorTask = MonitorWorkingSetAsync(
+                process,
+                monitorCancellation.Token).AsTask();
+            var completed = await Task.WhenAny(readTask, monitorTask).ConfigureAwait(false);
+            if (completed == monitorTask)
+            {
+                await monitorTask.ConfigureAwait(false);
+            }
+
+            await readTask.ConfigureAwait(false);
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                throw new ArchiveWorkerFailedException();
+            }
+
+            await EnsureEndOfOutputAsync(process.StandardOutput, timeout.Token).ConfigureAwait(false);
+            monitorCancellation.Cancel();
+            await IgnoreMonitorCancellationAsync(monitorTask).ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
+            if (stderr.Length > 0)
+            {
+                _logger?.LogDebug(
+                    "Archive extraction worker emitted a bounded diagnostic category ({Length} bytes).",
+                    stderr.Length);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
+            throw new ArchiveLimitExceededException(
+                "Archive extraction exceeded the configured time limit.");
+        }
+        catch (ArchiveException)
+        {
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
+            throw;
+        }
+        catch
+        {
+            timeout.Cancel();
+            await TerminateAsync(process).ConfigureAwait(false);
             throw new ArchiveWorkerFailedException();
         }
         finally
@@ -216,6 +334,135 @@ internal sealed class ArchiveWorkerClient(
             output,
             ArchiveFrameCodec.MaxJsonPayloadBytes,
             cancellationToken);
+
+    private async Task ReadExtractionAsync(
+        Stream output,
+        IReadOnlyList<int> entryIndexes,
+        IArchiveEntrySink sink,
+        CancellationToken cancellationToken)
+    {
+        var expected = entryIndexes.ToHashSet();
+        var seen = new HashSet<int>();
+        int? currentIndex = null;
+        long currentBytes = 0;
+        long totalBytes = 0;
+        var completedFiles = 0;
+        var lastEntryIndex = -1;
+        var progressRequired = false;
+
+        while (true)
+        {
+            var frame = await ReadFrameAsync(output, cancellationToken).ConfigureAwait(false);
+            if (frame.Kind == ArchiveFrameKind.Failure)
+            {
+                throw MapFailure(frame.Deserialize<ArchiveFailureFrame>().Code);
+            }
+
+            switch (frame.Kind)
+            {
+                case ArchiveFrameKind.EntryStart:
+                {
+                    if (currentIndex is not null || progressRequired)
+                    {
+                        throw new ArchiveWorkerFailedException();
+                    }
+
+                    var start = frame.Deserialize<ArchiveEntryStartFrame>();
+                    if (!expected.Contains(start.Index) ||
+                        !seen.Add(start.Index) ||
+                        start.Index <= lastEntryIndex)
+                    {
+                        throw new ArchiveWorkerFailedException();
+                    }
+
+                    currentIndex = start.Index;
+                    currentBytes = 0;
+                    lastEntryIndex = start.Index;
+                    await sink.StartAsync(start.Index, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+                case ArchiveFrameKind.EntryData:
+                {
+                    if (currentIndex is null || progressRequired || frame.Payload.IsEmpty)
+                    {
+                        throw new ArchiveWorkerFailedException();
+                    }
+
+                    try
+                    {
+                        currentBytes = checked(currentBytes + frame.Payload.Length);
+                        totalBytes = checked(totalBytes + frame.Payload.Length);
+                    }
+                    catch (OverflowException)
+                    {
+                        throw new ArchiveLimitExceededException(
+                            "Archive extraction exceeded the configured size limit.");
+                    }
+
+                    if (totalBytes > _options.MaxTotalExtractedBytes)
+                    {
+                        throw new ArchiveLimitExceededException(
+                            "Archive extraction exceeded the configured size limit.");
+                    }
+
+                    await sink.WriteAsync(frame.Payload, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+                case ArchiveFrameKind.EntryEnd:
+                {
+                    var end = frame.Deserialize<ArchiveEntryEndFrame>();
+                    if (currentIndex is null || progressRequired ||
+                        end.Index != currentIndex ||
+                        end.ActualBytes != currentBytes)
+                    {
+                        throw new ArchiveWorkerFailedException();
+                    }
+
+                    await sink.EndAsync(
+                        end.Index,
+                        end.ActualBytes,
+                        cancellationToken).ConfigureAwait(false);
+                    completedFiles++;
+                    currentIndex = null;
+                    progressRequired = true;
+                    break;
+                }
+                case ArchiveFrameKind.Progress:
+                {
+                    var progress = frame.Deserialize<ArchiveProgressFrame>();
+                    if (currentIndex is not null || !progressRequired ||
+                        progress.CompletedFiles != completedFiles ||
+                        progress.ActualBytes != totalBytes)
+                    {
+                        throw new ArchiveWorkerFailedException();
+                    }
+
+                    await sink.ProgressAsync(
+                        progress.CompletedFiles,
+                        progress.ActualBytes,
+                        cancellationToken).ConfigureAwait(false);
+                    progressRequired = false;
+                    break;
+                }
+                case ArchiveFrameKind.Completed:
+                {
+                    var completed = frame.Deserialize<ArchiveCompletedFrame>();
+                    if (currentIndex is not null || progressRequired ||
+                        completed.CompletedFiles != completedFiles ||
+                        completed.ActualBytes != totalBytes ||
+                        completedFiles != expected.Count ||
+                        seen.Count != expected.Count)
+                    {
+                        throw new ArchiveWorkerFailedException();
+                    }
+
+                    return;
+                }
+                default:
+                    throw new ArchiveWorkerFailedException();
+            }
+        }
+    }
 
     private async ValueTask MonitorWorkingSetAsync(
         IArchiveWorkerProcess process,
@@ -332,11 +579,23 @@ internal sealed class ArchiveWorkerClient(
         }
     }
 
-    private static void Kill(IArchiveWorkerProcess process)
+    private static async ValueTask TerminateAsync(IArchiveWorkerProcess process)
     {
         try
         {
             process.KillEntireProcessTree();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                await process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
+            }
         }
         catch
         {

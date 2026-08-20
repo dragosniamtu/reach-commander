@@ -24,7 +24,7 @@ internal interface IArchiveExtractionFileSystem
     long? GetAvailableFreeSpace(string physicalDirectory);
 }
 
-internal sealed class LocalArchiveExtractionFileSystem : IArchiveExtractionFileSystem
+internal class LocalArchiveExtractionFileSystem : IArchiveExtractionFileSystem
 {
     public bool DirectoryExists(string physicalPath) => Directory.Exists(physicalPath);
 

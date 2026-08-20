@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.RegularExpressions;
 using ReachCommander.ArchiveProtocol;
 using SharpCompress.Archives;
@@ -10,6 +11,19 @@ internal sealed record ArchiveInspectionResult(
     string Format,
     bool IsSolid,
     IReadOnlyList<ArchiveEntryFrame> Entries);
+
+internal interface IWorkerArchiveEntrySink
+{
+    ValueTask StartAsync(int entryIndex, CancellationToken cancellationToken);
+
+    ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken);
+
+    ValueTask EndAsync(int entryIndex, long actualBytes, CancellationToken cancellationToken);
+
+    ValueTask ProgressAsync(int completedFiles, long actualBytes, CancellationToken cancellationToken);
+
+    ValueTask CompleteAsync(int completedFiles, long actualBytes, CancellationToken cancellationToken);
+}
 
 internal sealed partial class SharpCompressArchiveAdapter
 {
@@ -41,6 +55,155 @@ internal sealed partial class SharpCompressArchiveAdapter
 
             ValidateConsumedVolumes(archive, files);
             return new ArchiveInspectionResult(format, archive.IsSolid, entries);
+        }
+        catch (WorkerFailure)
+        {
+            throw;
+        }
+        catch (CryptographicException)
+        {
+            throw WorkerFailure.Encrypted();
+        }
+        catch (SharpCompressException)
+        {
+            throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
+        }
+        catch (InvalidDataException)
+        {
+            throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
+        }
+        catch (IOException)
+        {
+            throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
+        }
+    }
+
+    public async ValueTask ExtractAsync(
+        ArchiveExtractionRequest request,
+        IWorkerArchiveEntrySink sink,
+        CancellationToken cancellationToken)
+    {
+        ValidateRequest(request);
+        var files = request.VolumePaths.Select(path => new FileInfo(path)).ToArray();
+        if (files.Any(file => !file.Exists))
+        {
+            throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
+        }
+
+        ValidateVolumeNames(files);
+        try
+        {
+            var libraryFiles = IsClassicZip(files.Select(file => file.Name).ToArray())
+                ? [files[^1], .. files[..^1]]
+                : files;
+            using var archive = ArchiveFactory.OpenArchive(libraryFiles);
+            _ = MapFormat(archive.Type);
+            if (archive.IsEncrypted)
+            {
+                throw WorkerFailure.Encrypted();
+            }
+
+            var entries = archive.Entries.ToArray();
+            if (!archive.IsComplete)
+            {
+                throw WorkerFailure.Invalid(request.VolumePaths.Count > 1);
+            }
+
+            ValidateConsumedVolumes(archive, files);
+            var requested = request.EntryIndexes.ToHashSet();
+            foreach (var index in requested)
+            {
+                if (index < 0 || index >= entries.Length)
+                {
+                    throw WorkerFailure.Protocol();
+                }
+
+                var entry = entries[index];
+                var kind = GetEntryKind(entry);
+                if (entry.IsEncrypted)
+                {
+                    throw WorkerFailure.Encrypted();
+                }
+
+                if (entry.IsDirectory || entry.Key is null || kind.IsLink || kind.IsSpecial)
+                {
+                    throw WorkerFailure.Protocol();
+                }
+            }
+
+            var completedFiles = 0;
+            long totalBytes = 0;
+            var buffer = ArrayPool<byte>.Shared.Rent(ArchiveFrameCodec.MaxDataPayloadBytes);
+            try
+            {
+                for (var index = 0; index < entries.Length; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!requested.Contains(index))
+                    {
+                        continue;
+                    }
+
+                    var entry = entries[index];
+                    await sink.StartAsync(index, cancellationToken).ConfigureAwait(false);
+                    long entryBytes = 0;
+                    using var stream = entry.OpenEntryStream();
+                    while (true)
+                    {
+                        var read = await stream.ReadAsync(
+                            buffer.AsMemory(0, ArchiveFrameCodec.MaxDataPayloadBytes),
+                            cancellationToken).ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        try
+                        {
+                            entryBytes = checked(entryBytes + read);
+                            totalBytes = checked(totalBytes + read);
+                        }
+                        catch (OverflowException)
+                        {
+                            throw WorkerFailure.Limit();
+                        }
+
+                        if (totalBytes > request.Limits.MaxTotalExtractedBytes)
+                        {
+                            throw WorkerFailure.Limit();
+                        }
+
+                        await sink.WriteAsync(
+                            buffer.AsMemory(0, read),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
+                    completedFiles++;
+                    await sink.EndAsync(index, entryBytes, cancellationToken).ConfigureAwait(false);
+                    await sink.ProgressAsync(
+                        completedFiles,
+                        totalBytes,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+
+            if (completedFiles != requested.Count)
+            {
+                throw WorkerFailure.Protocol();
+            }
+
+            await sink.CompleteAsync(
+                completedFiles,
+                totalBytes,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (WorkerFailure)
         {
@@ -163,6 +326,30 @@ internal sealed partial class SharpCompressArchiveAdapter
                 !Path.IsPathFullyQualified(path)) ||
             request.VolumePaths.Distinct(PathComparer()).Count() != request.VolumePaths.Count ||
             request.Limits.MaxEntries is < 1 or > MaximumRequestEntries ||
+            request.Limits.MaxTotalExtractedBytes < 1)
+        {
+            throw WorkerFailure.Protocol();
+        }
+    }
+
+    private static void ValidateRequest(ArchiveExtractionRequest request)
+    {
+        if (request.ProtocolVersion != ArchiveFrameCodec.CurrentProtocolVersion ||
+            string.IsNullOrWhiteSpace(request.RequestId) ||
+            request.RequestId.Length > 128 ||
+            request.VolumePaths is null ||
+            request.EntryIndexes is null ||
+            request.Limits is null ||
+            request.VolumePaths.Count is < 1 or > MaximumVolumeCount ||
+            request.VolumePaths.Any(path =>
+                string.IsNullOrWhiteSpace(path) ||
+                !Path.IsPathFullyQualified(path)) ||
+            request.VolumePaths.Distinct(PathComparer()).Count() != request.VolumePaths.Count ||
+            request.EntryIndexes.Count is < 1 or > MaximumRequestEntries ||
+            request.EntryIndexes.Any(index => index < 0) ||
+            request.EntryIndexes.Distinct().Count() != request.EntryIndexes.Count ||
+            request.Limits.MaxEntries is < 1 or > MaximumRequestEntries ||
+            request.EntryIndexes.Count > request.Limits.MaxEntries ||
             request.Limits.MaxTotalExtractedBytes < 1)
         {
             throw WorkerFailure.Protocol();

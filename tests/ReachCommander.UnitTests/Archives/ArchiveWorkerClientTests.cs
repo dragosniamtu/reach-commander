@@ -12,6 +12,63 @@ namespace ReachCommander.UnitTests.Archives;
 public sealed class ArchiveWorkerClientTests
 {
     [Fact]
+    public async Task Extraction_validates_frames_and_forwards_only_ordered_payloads()
+    {
+        var output = await SuccessfulExtractionOutputAsync();
+        var process = new FakeProcess(output) { ExitCodeValue = 0 };
+        var client = CreateClient(new FakeProcessFactory(process));
+        var sink = new RecordingEntrySink();
+
+        await client.ExtractAsync(PartSet(), [0], sink, default);
+
+        Assert.Equal(
+            ["start:0", "data:abc", "end:0:3", "progress:1:3"],
+            sink.Events);
+        process.StandardInput.Position = 0;
+        var request = (await ArchiveFrameCodec.ReadAsync(
+                process.StandardInput,
+                ArchiveFrameCodec.MaxJsonPayloadBytes,
+                default))
+            .Deserialize<ArchiveExtractionRequest>();
+        Assert.Equal([0], request.EntryIndexes);
+        Assert.Equal(PartSet().Parts.Select(part => part.PhysicalPath), request.VolumePaths);
+    }
+
+    [Fact]
+    public async Task Extraction_rejects_inconsistent_progress_and_kills_the_worker()
+    {
+        await using var output = new MemoryStream();
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.EntryStart,
+            new ArchiveEntryStartFrame(0),
+            default);
+        await ArchiveFrameCodec.WriteAsync(
+            output,
+            ArchiveFrameKind.EntryData,
+            "abc"u8.ToArray(),
+            default);
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.EntryEnd,
+            new ArchiveEntryEndFrame(0, 3),
+            default);
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.Progress,
+            new ArchiveProgressFrame(1, 2),
+            default);
+        output.Position = 0;
+        var process = new FakeProcess(output);
+        var client = CreateClient(new FakeProcessFactory(process));
+
+        await Assert.ThrowsAsync<ArchiveWorkerFailedException>(() =>
+            client.ExtractAsync(PartSet(), [0], new RecordingEntrySink(), default).AsTask());
+
+        Assert.True(process.Killed);
+    }
+
+    [Fact]
     public async Task Maps_process_start_failure_to_a_safe_worker_error()
     {
         var client = CreateClient(new ThrowingProcessFactory());
@@ -71,6 +128,22 @@ public sealed class ArchiveWorkerClientTests
             client.InspectAsync(PartSet(), default).AsTask());
 
         Assert.True(process.Killed);
+    }
+
+    [Fact]
+    public async Task Verifies_process_exit_even_when_the_kill_request_fails()
+    {
+        var process = new FakeProcess(new MemoryStream([1, 2, 3]))
+        {
+            ThrowOnKill = true,
+        };
+        var client = CreateClient(new FakeProcessFactory(process));
+
+        await Assert.ThrowsAsync<ArchiveWorkerFailedException>(() =>
+            client.InspectAsync(PartSet(), default).AsTask());
+
+        Assert.True(process.KillAttempted);
+        Assert.True(process.WaitForExitCalls > 0);
     }
 
     [Fact]
@@ -255,6 +328,38 @@ public sealed class ArchiveWorkerClientTests
         return output;
     }
 
+    private static async Task<MemoryStream> SuccessfulExtractionOutputAsync()
+    {
+        var output = new MemoryStream();
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.EntryStart,
+            new ArchiveEntryStartFrame(0),
+            default);
+        await ArchiveFrameCodec.WriteAsync(
+            output,
+            ArchiveFrameKind.EntryData,
+            "abc"u8.ToArray(),
+            default);
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.EntryEnd,
+            new ArchiveEntryEndFrame(0, 3),
+            default);
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.Progress,
+            new ArchiveProgressFrame(1, 3),
+            default);
+        await ArchiveFrameCodec.WriteJsonAsync(
+            output,
+            ArchiveFrameKind.Completed,
+            new ArchiveCompletedFrame(1, 3),
+            default);
+        output.Position = 0;
+        return output;
+    }
+
     private static ArchiveEntryFrame Entry(int index) => new(
         index,
         "one.txt",
@@ -314,16 +419,29 @@ public sealed class ArchiveWorkerClientTests
 
         public bool Killed { get; private set; }
 
+        public bool KillAttempted { get; private set; }
+
+        public bool ThrowOnKill { get; init; }
+
+        public int WaitForExitCalls { get; private set; }
+
         public ValueTask CompleteInputAsync() => ValueTask.CompletedTask;
 
         public ValueTask WaitForExitAsync(CancellationToken cancellationToken)
         {
+            WaitForExitCalls++;
             HasExited = true;
             return ValueTask.CompletedTask;
         }
 
         public void KillEntireProcessTree()
         {
+            KillAttempted = true;
+            if (ThrowOnKill)
+            {
+                throw new InvalidOperationException("simulated kill failure");
+            }
+
             Killed = true;
             HasExited = true;
             if (StandardOutput is BlockingReadStream blocking)
@@ -347,6 +465,41 @@ public sealed class ArchiveWorkerClientTests
             RequestedDelays.Add(delay);
             await Task.Yield();
             cancellationToken.ThrowIfCancellationRequested();
+        }
+    }
+
+    private sealed class RecordingEntrySink : IArchiveEntrySink
+    {
+        public List<string> Events { get; } = [];
+
+        public ValueTask StartAsync(int entryIndex, CancellationToken cancellationToken)
+        {
+            Events.Add($"start:{entryIndex}");
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        {
+            Events.Add($"data:{System.Text.Encoding.UTF8.GetString(data.Span)}");
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask EndAsync(
+            int entryIndex,
+            long actualBytes,
+            CancellationToken cancellationToken)
+        {
+            Events.Add($"end:{entryIndex}:{actualBytes}");
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask ProgressAsync(
+            int completedFiles,
+            long actualBytes,
+            CancellationToken cancellationToken)
+        {
+            Events.Add($"progress:{completedFiles}:{actualBytes}");
+            return ValueTask.CompletedTask;
         }
     }
 

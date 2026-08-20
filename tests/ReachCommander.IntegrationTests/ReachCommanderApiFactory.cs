@@ -267,6 +267,13 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             };
         }
 
+        public ValueTask ExtractAsync(
+            ResolvedArchivePartSet partSet,
+            IReadOnlyList<int> entryIndexes,
+            IArchiveEntrySink sink,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         private static UntrustedArchiveEntry Entry(int index, string key) => new(
             index,
             key,

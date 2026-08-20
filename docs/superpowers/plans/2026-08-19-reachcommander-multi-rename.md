@@ -11,6 +11,7 @@
 ## Global Constraints
 
 - Work directly on `master`; do not create a Git worktree.
+- Before Task 4, complete Task 2 of `2026-08-20-reachcommander-secure-uploads.md`; it owns the shared `DirectoryMutationLock` used by uploads and renames. Do not introduce a second directory lock.
 - Preserve .NET SDK `10.0.400`, Angular `22.1`, TypeScript strict mode, and Node `24.15+` or `22.22.3+` requirements.
 - Use TDD for every production slice: observe the focused test fail before writing its implementation.
 - Before every commit, inspect `git status --short` and stage only the files changed for that task; never absorb unrelated user edits even when a sample `git add` command names a directory.
@@ -35,15 +36,17 @@ src/ReachCommander.Application/BatchRenames/
 ├── BatchRenameRules.cs               Rule/case-mode value objects
 └── IBatchRenameService.cs            Preview/Execute/Undo application port
 
-src/ReachCommander.Infrastructure/BatchRenames/
-├── AsyncDirectoryLock.cs             Per-source/logical-directory serialization
-├── BatchRenameExecutor.cs            Two-phase move and compensation
-├── BatchRenameFileSystem.cs          Injectable System.IO boundary and snapshots
-├── BatchRenamePlanner.cs             Authoritative preview construction/revalidation
-├── BatchRenamePlanStore.cs           Bounded plan/result/undo cache
-├── BatchRenameService.cs             Application-port orchestration and idempotency
-├── RenameNameValidator.cs            Portable component-name policy
-└── RenameRuleEvaluator.cs            Mask/replacement/case/counter evaluation
+src/ReachCommander.Infrastructure/
+├── Mutations/DirectoryMutationLock.cs Shared upload/rename directory serialization
+└── BatchRenames/
+    ├── BatchRenameRequestLock.cs      Plan/Undo request idempotency only
+    ├── BatchRenameExecutor.cs         Two-phase move and compensation
+    ├── BatchRenameFileSystem.cs       Injectable System.IO boundary and snapshots
+    ├── BatchRenamePlanner.cs          Authoritative preview construction/revalidation
+    ├── BatchRenamePlanStore.cs        Bounded plan/result/undo cache
+    ├── BatchRenameService.cs          Application-port orchestration and idempotency
+    ├── RenameNameValidator.cs         Portable component-name policy
+    └── RenameRuleEvaluator.cs         Mask/replacement/case/counter evaluation
 
 src/ReachCommander.Api/
 ├── Contracts/BatchRenames/
@@ -804,7 +807,6 @@ git commit -m "feat: add authoritative multi-rename previews"
 
 **Files:**
 
-- Create: `src/ReachCommander.Infrastructure/BatchRenames/AsyncDirectoryLock.cs`
 - Create: `src/ReachCommander.Infrastructure/BatchRenames/BatchRenameExecutor.cs`
 - Modify: `src/ReachCommander.Infrastructure/BatchRenames/BatchRenameFileSystem.cs`
 - Modify: `tests/ReachCommander.UnitTests/Support/BatchRenameTestFixture.cs`
@@ -812,10 +814,9 @@ git commit -m "feat: add authoritative multi-rename previews"
 
 **Interfaces:**
 
-- Produces: `AsyncDirectoryLock.AcquireAsync(string key, CancellationToken)` returning an `IAsyncDisposable` lease.
 - Produces: `BatchRenameExecutor.ExecuteAsync(Guid operationId, StoredBatchRenamePlan plan, CancellationToken)` returning `BatchRenameExecutionOutcome`.
 - Produces: `ExecutedRename` records containing original/final paths and post-execution fingerprints for Task 5 Undo.
-- Consumes: Task 3 `BatchRenamePlanner.RevalidateAsync` and `IBatchRenameFileSystem`.
+- Consumes: Task 3 `BatchRenamePlanner.RevalidateAsync`, `IBatchRenameFileSystem`, and the secure-upload plan's shared `DirectoryMutationLock`.
 
 - [ ] **Step 1: Write failing executor tests for swap, cycle, case-only rename, and compensation**
 
@@ -907,13 +908,13 @@ public sealed class BatchRenameExecutorTests : IDisposable
 dotnet test tests/ReachCommander.UnitTests/ReachCommander.UnitTests.csproj -c Release --filter FullyQualifiedName~BatchRenameExecutorTests
 ```
 
-Expected: compilation fails because executor, lock, execution outcome, and failure-injection helpers do not exist.
+Expected: compilation fails because executor, execution outcome, and failure-injection helpers do not exist.
 
-- [ ] **Step 3: Implement the keyed asynchronous directory lock**
+- [ ] **Step 3: Prove the executor consumes the shared directory lock**
 
-Use a `ConcurrentDictionary<string, LockEntry>` where `LockEntry` contains a `SemaphoreSlim` and reference count. `AcquireAsync` increments the reference before waiting, returns a lease that releases once, and removes/disposes the entry only when no holder or waiter remains. Executor keys are `$"directory\0{sourceId}\0{directoryLogicalPath}"` with source ID compared ordinally and normalized logical paths supplied by the planner; Task 5 uses disjoint `plan\0` and `undo\0` prefixes for request idempotency.
+Add an executor test with a shared `DirectoryMutationLock` and a blocking filesystem boundary. Start two valid plans against source IDs that differ only by casing and the same normalized logical directory. Assert the second cannot reach revalidation/mutation until the first lease is released. Add a parent/child case proving a rename in `/` blocks an upload/rename in `/Movies`, plus a control proving sibling directories such as `/Movies` and `/Music` can proceed concurrently.
 
-Cancellation is honored while waiting. The lease must be safe under exceptions and never expose a physical path in its key.
+Inject the existing singleton `DirectoryMutationLock`; do not copy its dictionary/semaphore implementation into BatchRenames. Acquire with the plan's source ID and normalized logical directory only. Physical paths never enter lock keys.
 
 - [ ] **Step 4: Implement the two-phase executor**
 
@@ -935,7 +936,7 @@ internal sealed record BatchRenameExecutionOutcome(
 
 Execution behavior:
 
-1. Acquire the logical directory lock.
+1. Acquire `DirectoryMutationLock` for the plan's source ID and normalized logical directory.
 2. Revalidate the complete plan through `BatchRenamePlanner.RevalidateAsync`.
 3. Generate collision-free names `.reachcommander-rename-{operationId:N}-{index:D5}.tmp` through `ResolveChildAsync`.
 4. Before the first mutation, emit one structured log event containing the operation ID and the complete logical original/temporary/final mapping for every Ready row; never log physical paths.
@@ -961,7 +962,7 @@ Expected: swap, cycle, case-only, compensation, and existing tests all pass.
 - [ ] **Step 6: Commit the execution slice**
 
 ```powershell
-git add src/ReachCommander.Infrastructure/BatchRenames/AsyncDirectoryLock.cs src/ReachCommander.Infrastructure/BatchRenames/BatchRenameExecutor.cs src/ReachCommander.Infrastructure/BatchRenames/BatchRenameFileSystem.cs tests/ReachCommander.UnitTests/BatchRenames/BatchRenameExecutorTests.cs tests/ReachCommander.UnitTests/Support/BatchRenameTestFixture.cs
+git add src/ReachCommander.Infrastructure/BatchRenames/BatchRenameExecutor.cs src/ReachCommander.Infrastructure/BatchRenames/BatchRenameFileSystem.cs tests/ReachCommander.UnitTests/BatchRenames/BatchRenameExecutorTests.cs tests/ReachCommander.UnitTests/Support/BatchRenameTestFixture.cs
 git commit -m "feat: execute multi-rename plans safely"
 ```
 
@@ -972,6 +973,7 @@ git commit -m "feat: execute multi-rename plans safely"
 **Files:**
 
 - Create: `src/ReachCommander.Infrastructure/BatchRenames/BatchRenameService.cs`
+- Create: `src/ReachCommander.Infrastructure/BatchRenames/BatchRenameRequestLock.cs`
 - Modify: `src/ReachCommander.Infrastructure/BatchRenames/BatchRenamePlanStore.cs`
 - Modify: `src/ReachCommander.Infrastructure/DependencyInjection.cs`
 - Modify: `tests/ReachCommander.UnitTests/Support/BatchRenameTestFixture.cs`
@@ -981,7 +983,7 @@ git commit -m "feat: execute multi-rename plans safely"
 
 - Implements: Task 1 `IBatchRenameService` exactly.
 - Produces: stored completed operation and undo mapping keyed by operation ID and original plan ID.
-- Consumes: planner, plan store, executor, filesystem boundary, keyed lock, and `TimeProvider`.
+- Consumes: planner, plan store, executor, filesystem boundary, request-idempotency lock, and `TimeProvider`.
 - Used by: Task 6 API and Task 7 Angular transport.
 
 - [ ] **Step 1: Write failing orchestration/Undo tests**
@@ -1081,7 +1083,7 @@ public sealed class BatchRenameServiceTests : IDisposable
 dotnet test tests/ReachCommander.UnitTests/ReachCommander.UnitTests.csproj -c Release --filter FullyQualifiedName~BatchRenameServiceTests
 ```
 
-Expected: compilation fails because `BatchRenameService`, operation storage, and undo orchestration do not exist.
+Expected: compilation fails because `BatchRenameService`, `BatchRenameRequestLock`, operation storage, and undo orchestration do not exist.
 
 - [ ] **Step 3: Extend the store for completed operations and retries**
 
@@ -1114,9 +1116,11 @@ public ValueTask<BatchRenamePreview> PreviewAsync(
     planner.PreviewAsync(command, cancellationToken);
 ```
 
-`ExecuteAsync` first returns any stored operation for the plan. Otherwise it acquires `AsyncDirectoryLock` with the non-filesystem key `plan\0{planId:N}`, checks the operation store again, loads the plan, rejects `CanExecute == false`, generates an operation ID, runs the executor, captures successful mappings, and atomically stores the result before releasing the plan lock. This double-check guarantees simultaneous requests for one plan execute only once; later retries receive the exact stored success, compensated failure, or recovery-required result.
+Create a singleton-safe `BatchRenameRequestLock` whose key is `(RequestKind kind, Guid id)`, where kind is `ExecutePlan` or `UndoOperation`. It uses reference-counted `SemaphoreSlim` entries, cancellation-safe acquisition, and idempotent async leases. It is deliberately unable to accept source/directory or physical-path strings and is used only for HTTP retry/idempotency coordination.
 
-`UndoAsync` first returns an existing stored Undo result. Otherwise it acquires `AsyncDirectoryLock` with `undo\0{operationId:N}`, checks for a stored Undo result again, and then:
+`ExecuteAsync` first returns any stored operation for the plan. Otherwise it acquires `BatchRenameRequestLock.AcquirePlanAsync(planId, cancellationToken)`, checks the operation store again, loads the plan, rejects `CanExecute == false`, generates an operation ID, runs the executor, captures successful mappings, and atomically stores the result before releasing the plan request lock. This double-check guarantees simultaneous requests for one plan execute only once; later retries receive the exact stored success, compensated failure, or recovery-required result.
+
+`UndoAsync` first returns an existing stored Undo result. Otherwise it acquires `BatchRenameRequestLock.AcquireUndoAsync(operationId, cancellationToken)`, checks for a stored Undo result again, and then:
 
 1. Loads the successful unexpired operation.
 2. Revalidates every final entry against its post-execution fingerprint and verifies every original name is free.
@@ -1125,7 +1129,7 @@ public ValueTask<BatchRenamePreview> PreviewAsync(
 5. Maps a successful result to `BatchRenameOperationStatus.Undone` with `UndoAvailable: false`.
 6. Atomically stores and returns the Undo result before releasing the operation lock.
 
-The `plan\0`, `undo\0`, and `directory\0` key prefixes keep orchestration locks disjoint from executor directory locks. Undo never skips a stale row. Any preflight mismatch throws `RenamePlanStaleException` before the first reverse move.
+The separate request lock prevents request-idempotency keys from ever sharing a namespace with `DirectoryMutationLock`. Undo never skips a stale row. Any preflight mismatch throws `RenamePlanStaleException` before the first reverse move.
 
 - [ ] **Step 5: Register the complete backend feature**
 
@@ -1138,12 +1142,12 @@ services.AddSingleton<RenameRuleEvaluator>();
 services.AddSingleton<RenameNameValidator>();
 services.AddSingleton<BatchRenamePlanStore>();
 services.AddSingleton<BatchRenamePlanner>();
-services.AddSingleton<AsyncDirectoryLock>();
+services.AddSingleton<BatchRenameRequestLock>();
 services.AddSingleton<BatchRenameExecutor>();
 services.AddSingleton<IBatchRenameService, BatchRenameService>();
 ```
 
-Keep every service stateless or concurrency-safe because all registrations are singleton.
+Keep every service stateless or concurrency-safe because all registrations are singleton. `DirectoryMutationLock` is already registered exactly once by the secure-upload plan; verify both `UploadService` and `BatchRenameExecutor` resolve that same singleton instead of adding another registration.
 
 - [ ] **Step 6: Run service and full solution tests**
 
@@ -1157,7 +1161,7 @@ Expected: service, unit, and integration suites pass.
 - [ ] **Step 7: Commit service and Undo**
 
 ```powershell
-git add src/ReachCommander.Infrastructure/BatchRenames/BatchRenameService.cs src/ReachCommander.Infrastructure/BatchRenames/BatchRenamePlanStore.cs src/ReachCommander.Infrastructure/DependencyInjection.cs tests/ReachCommander.UnitTests/BatchRenames/BatchRenameServiceTests.cs tests/ReachCommander.UnitTests/Support/BatchRenameTestFixture.cs
+git add src/ReachCommander.Infrastructure/BatchRenames/BatchRenameService.cs src/ReachCommander.Infrastructure/BatchRenames/BatchRenameRequestLock.cs src/ReachCommander.Infrastructure/BatchRenames/BatchRenamePlanStore.cs src/ReachCommander.Infrastructure/DependencyInjection.cs tests/ReachCommander.UnitTests/BatchRenames/BatchRenameServiceTests.cs tests/ReachCommander.UnitTests/Support/BatchRenameTestFixture.cs
 git commit -m "feat: add idempotent multi-rename undo"
 ```
 
@@ -2136,7 +2140,7 @@ Expected: tests fail because writable/read-only rename fixtures and/or productio
 
 - [ ] **Step 3: Seed deterministic writable and read-only sources**
 
-Set E2E Downloads and Media to `readOnly: false`. Add an available Archive source with `readOnly: true` and `{{ARCHIVE_ROOT}}`. Extend `seed-fixtures.ts` to create:
+Set E2E Downloads to `readOnly: false`; keep Media read-only. Add an available Archive source with `readOnly: true` and `{{ARCHIVE_ROOT}}`. Extend `seed-fixtures.ts` to create:
 
 ```text
 Downloads/

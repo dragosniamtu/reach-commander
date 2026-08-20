@@ -217,6 +217,41 @@ describe('CommanderStore', () => {
     expect(store.leftPanel().cursorIndex).toBe(0);
     expect(store.rightPanel()).toBe(rightBefore);
   });
+
+  it('creates rename context in visible table order rather than Set insertion order', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [
+      entry('zeta.txt'),
+      { ...entry('Drafts'), type: 'directory', extension: null, size: null },
+      entry('alpha.txt'),
+    ]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.selectWithPointer('left', 1, 'replace');
+    store.selectWithPointer('left', 0, 'toggle');
+
+    const context = store.createMultiRenameContext('left');
+
+    expect(context?.entries.map((item) => item.name)).toEqual(['Drafts', 'alpha.txt']);
+    expect(context?.directoryPath).toBe('/');
+  });
+
+  it('uses the cursor item when there is no selection and excludes the parent row', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/Folder', [entry('one.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    await store.navigateTo('left', '/Folder');
+    store.moveCursor('left', 1);
+
+    expect(store.createMultiRenameContext('left')?.entries.map((item) => item.name)).toEqual([
+      'one.txt',
+    ]);
+  });
 });
 
 function persistedPanel(sourceId: string, path: string) {

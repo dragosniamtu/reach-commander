@@ -1,0 +1,182 @@
+<div class="rename-backdrop" data-testid="multi-rename-dialog">
+  <section
+    class="rename-workspace"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="multi-rename-title"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+  >
+    <header class="workspace-header">
+      <div>
+        <span class="eyebrow">Controlled file operation</span>
+        <strong id="multi-rename-title">Multi-Rename Tool</strong>
+        <small>{{ context()?.sourceName }} · {{ context()?.directoryPath }}</small>
+      </div>
+      <button
+        type="button"
+        aria-label="Close Multi-Rename"
+        [disabled]="store.state().previewPending || store.state().actionPending"
+        (click)="requestClose()"
+      >
+        ×
+      </button>
+    </header>
+
+    <div class="rules-grid">
+      <fieldset>
+        <legend>Rename mask: file name</legend>
+        <app-rename-mask-field
+          label="Name mask"
+          testId="name-mask"
+          [value]="store.state().rules.nameMask"
+          [tokens]="nameTokens"
+          [disabled]="rulesLocked()"
+          (valueChanged)="setNameMask($event)"
+        />
+      </fieldset>
+      <fieldset>
+        <legend>Extension</legend>
+        <app-rename-mask-field
+          label="Extension mask"
+          testId="extension-mask"
+          [value]="store.state().rules.extensionMask"
+          [tokens]="extensionTokens"
+          [disabled]="rulesLocked()"
+          (valueChanged)="setExtensionMask($event)"
+        />
+      </fieldset>
+      <fieldset class="replace-fields">
+        <legend>Search &amp; Replace</legend>
+        <label
+          >Search for
+          <input
+            [disabled]="rulesLocked()"
+            [value]="store.state().rules.searchFor"
+            (input)="setSearchFor($any($event.target).value)"
+          />
+        </label>
+        <label
+          >Replace with
+          <input
+            [disabled]="rulesLocked()"
+            [value]="store.state().rules.replaceWith"
+            (input)="setReplaceWith($any($event.target).value)"
+          />
+        </label>
+        <div class="check-row">
+          <label
+            ><input
+              type="checkbox"
+              [disabled]="rulesLocked()"
+              [checked]="store.state().rules.useRegex"
+              (change)="setUseRegex($any($event.target).checked)"
+            />
+            Regex</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              [disabled]="rulesLocked()"
+              [checked]="store.state().rules.matchCase"
+              (change)="setMatchCase($any($event.target).checked)"
+            />
+            Match case</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              [disabled]="rulesLocked()"
+              [checked]="store.state().rules.replaceInExtension"
+              (change)="setReplaceInExtension($any($event.target).checked)"
+            />
+            Include extension</label
+          >
+        </div>
+        <label
+          >Case mode
+          <select
+            [disabled]="rulesLocked()"
+            [value]="store.state().rules.caseMode"
+            (change)="setCaseMode($any($event.target).value)"
+          >
+            <option value="unchanged">Unchanged</option>
+            <option value="lowercase">Lowercase</option>
+            <option value="uppercase">Uppercase</option>
+            <option value="capitalizeWords">Capitalize words</option>
+            <option value="sentenceCase">Sentence case</option>
+          </select>
+        </label>
+      </fieldset>
+      <fieldset class="counter-fields">
+        <legend>Define counter [C]</legend>
+        <label
+          >Start at
+          <input
+            type="number"
+            [disabled]="rulesLocked()"
+            [value]="store.state().rules.counterStart"
+            (input)="setCounterStart($any($event.target).valueAsNumber)"
+        /></label>
+        <label
+          >Step by
+          <input
+            type="number"
+            [disabled]="rulesLocked()"
+            [value]="store.state().rules.counterStep"
+            (input)="setCounterStep($any($event.target).valueAsNumber)"
+        /></label>
+        <label
+          >Counter digits
+          <input
+            type="number"
+            min="1"
+            max="12"
+            [disabled]="rulesLocked()"
+            [value]="store.state().rules.counterDigits"
+            (input)="setCounterDigits($any($event.target).valueAsNumber)"
+        /></label>
+      </fieldset>
+    </div>
+
+    <div class="message-region">
+      @if (store.state().disabledReason; as reason) {
+        <p role="status" data-testid="rename-disabled-reason">{{ reason }}</p>
+      }
+      @if (store.state().errorCode; as errorCode) {
+        <p class="error" role="alert">{{ errorMessage(errorCode) }}</p>
+      }
+      @if (store.state().previewPending || store.state().actionPending) {
+        <p class="pending" role="status">
+          {{ store.state().actionPending ? 'Applying the complete batch…' : 'Building preview…' }}
+        </p>
+      }
+    </div>
+
+    <app-multi-rename-preview-table [rows]="store.state().preview?.rows ?? []" />
+
+    <footer>
+      <span role="status" aria-live="polite">{{ summary() }}</span>
+      <div>
+        <button
+          type="button"
+          data-testid="rename-undo"
+          [disabled]="!store.canUndo()"
+          (click)="undo()"
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          class="primary"
+          data-testid="rename-start"
+          [disabled]="!store.canExecute()"
+          (click)="start()"
+        >
+          Start
+        </button>
+        <button type="button" (click)="requestClose()">Close</button>
+      </div>
+    </footer>
+  </section>
+</div>

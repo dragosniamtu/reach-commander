@@ -48,12 +48,20 @@ export function mapKeyboardEvent(event: KeyboardEvent): CommanderCommand | null 
 
   if (event.ctrlKey && !event.altKey && !event.metaKey) {
     switch (event.key.toLocaleLowerCase()) {
-      case 'a': return { type: 'select-all' };
-      case 'l': return { type: 'focus-path' };
-      case 'r': return { type: 'refresh' };
-      case 't': return { type: 'new-tab' };
-      case 'w': return { type: 'close-tab' };
-      default: return null;
+      case 'a':
+        return { type: 'select-all' };
+      case 'l':
+        return { type: 'focus-path' };
+      case 'm':
+        return { type: 'multi-rename' };
+      case 'r':
+        return { type: 'refresh' };
+      case 't':
+        return { type: 'new-tab' };
+      case 'w':
+        return { type: 'close-tab' };
+      default:
+        return null;
     }
   }
 
@@ -62,17 +70,28 @@ export function mapKeyboardEvent(event: KeyboardEvent): CommanderCommand | null 
   }
 
   switch (event.key) {
-    case 'ArrowUp': return { type: 'move-cursor', amount: -1 };
-    case 'ArrowDown': return { type: 'move-cursor', amount: 1 };
-    case 'PageUp': return { type: 'move-page', direction: -1 };
-    case 'PageDown': return { type: 'move-page', direction: 1 };
-    case 'Home': return { type: 'move-boundary', boundary: 'home' };
-    case 'End': return { type: 'move-boundary', boundary: 'end' };
-    case 'Enter': return { type: 'open-cursor' };
-    case 'Backspace': return { type: 'backspace' };
-    case 'Tab': return { type: 'switch-panel' };
-    case 'Insert': return { type: 'toggle-selection' };
-    case 'Escape': return { type: 'escape' };
+    case 'ArrowUp':
+      return { type: 'move-cursor', amount: -1 };
+    case 'ArrowDown':
+      return { type: 'move-cursor', amount: 1 };
+    case 'PageUp':
+      return { type: 'move-page', direction: -1 };
+    case 'PageDown':
+      return { type: 'move-page', direction: 1 };
+    case 'Home':
+      return { type: 'move-boundary', boundary: 'home' };
+    case 'End':
+      return { type: 'move-boundary', boundary: 'end' };
+    case 'Enter':
+      return { type: 'open-cursor' };
+    case 'Backspace':
+      return { type: 'backspace' };
+    case 'Tab':
+      return { type: 'switch-panel' };
+    case 'Insert':
+      return { type: 'toggle-selection' };
+    case 'Escape':
+      return { type: 'escape' };
     case 'F3':
     case 'F4':
     case 'F5':
@@ -82,15 +101,15 @@ export function mapKeyboardEvent(event: KeyboardEvent): CommanderCommand | null 
     case 'F9':
       return { type: 'function-key', key: event.key as CommanderFunctionKey };
     default:
-      return event.key.length === 1
-        ? { type: 'filter-text', text: event.key }
-        : null;
+      return event.key.length === 1 ? { type: 'filter-text', text: event.key } : null;
   }
 }
 
 function isTextControl(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement ||
+  return (
+    target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable);
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
 }

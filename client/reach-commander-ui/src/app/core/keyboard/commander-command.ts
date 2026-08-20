@@ -9,6 +9,7 @@ export type CommanderCommand =
   | { readonly type: 'switch-panel' }
   | { readonly type: 'toggle-selection' }
   | { readonly type: 'select-all' }
+  | { readonly type: 'multi-rename' }
   | { readonly type: 'escape' }
   | { readonly type: 'focus-path' }
   | { readonly type: 'refresh' }

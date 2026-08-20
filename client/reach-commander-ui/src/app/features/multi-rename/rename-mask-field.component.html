@@ -1,0 +1,26 @@
+<label>
+  <span>{{ label() }}</span>
+  <input
+    #editor
+    type="text"
+    autocomplete="off"
+    spellcheck="false"
+    [attr.data-testid]="testId()"
+    [value]="value()"
+    [disabled]="disabled()"
+    (input)="emitValue($event)"
+  />
+</label>
+<div class="token-row" aria-label="Insert rename token">
+  @for (token of tokens(); track token.value) {
+    <button
+      type="button"
+      [disabled]="disabled()"
+      [title]="'Insert ' + token.value"
+      (click)="insertToken(token.value)"
+    >
+      <code>{{ token.value }}</code
+      ><span>{{ token.label }}</span>
+    </button>
+  }
+</div>

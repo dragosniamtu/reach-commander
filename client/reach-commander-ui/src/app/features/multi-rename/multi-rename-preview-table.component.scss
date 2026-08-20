@@ -1,0 +1,100 @@
+:host {
+  display: block;
+  min-height: 0;
+}
+
+.preview-region {
+  height: 100%;
+  min-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-1);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--text-2);
+  font: 10px/1.25 var(--font-mono);
+}
+
+th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  height: 28px;
+  padding: 0 7px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--text-3);
+  background: var(--surface-3);
+  text-align: left;
+}
+
+td {
+  height: 28px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border-right: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+th:nth-child(1),
+th:nth-child(3) {
+  width: 27%;
+}
+
+th:nth-child(2) {
+  width: 7%;
+}
+
+th:nth-child(4) {
+  width: 10%;
+}
+
+th:nth-child(5) {
+  width: 18%;
+}
+
+th:nth-child(6) {
+  width: 11%;
+}
+
+tr[data-status='ready'] .status-mark {
+  background: var(--success);
+}
+
+tr[data-status='conflict'] .status-mark,
+tr[data-status='invalid'] .status-mark,
+tr[data-status='stale'] .status-mark {
+  background: var(--danger);
+}
+
+tr[data-status='unchanged'] .status-mark {
+  background: var(--text-4);
+}
+
+.status-mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+}
+
+.old-name {
+  color: var(--text-3);
+}
+
+.new-name {
+  color: var(--text-1);
+}
+
+.empty-row td {
+  height: 90px;
+  color: var(--text-4);
+  text-align: center;
+}

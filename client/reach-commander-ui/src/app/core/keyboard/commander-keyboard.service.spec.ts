@@ -30,6 +30,7 @@ describe('CommanderKeyboardService', () => {
     ['Escape', {}, { type: 'escape' }],
     ['a', { ctrlKey: true }, { type: 'select-all' }],
     ['l', { ctrlKey: true }, { type: 'focus-path' }],
+    ['m', { ctrlKey: true }, { type: 'multi-rename' }],
     ['r', { ctrlKey: true }, { type: 'refresh' }],
     ['t', { ctrlKey: true }, { type: 'new-tab' }],
     ['w', { ctrlKey: true }, { type: 'close-tab' }],

@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnInit,
+  ViewChild,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommanderCommand, CommanderFunctionKey } from '../../../core/keyboard/commander-command';
 import { CommanderKeyboardService } from '../../../core/keyboard/commander-keyboard.service';
@@ -12,6 +21,8 @@ import { CommandBarComponent } from '../command-bar/command-bar.component';
 import { SystemMetricsWidgetComponent } from '../../system-metrics/system-metrics-widget.component';
 import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metrics-details.component';
 import { UploadDialogComponent } from '../../uploads/upload-dialog.component';
+import { MultiRenameStore } from '../../../core/state/multi-rename-store';
+import { MultiRenameDialogComponent } from '../../multi-rename/multi-rename-dialog.component';
 
 @Component({
   selector: 'app-commander-shell',
@@ -21,6 +32,7 @@ import { UploadDialogComponent } from '../../uploads/upload-dialog.component';
     SystemMetricsWidgetComponent,
     SystemMetricsDetailsComponent,
     UploadDialogComponent,
+    MultiRenameDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -30,6 +42,7 @@ export class CommanderShellComponent implements OnInit {
   readonly store = inject(CommanderStore);
   readonly metricsStore = inject(SystemMetricsStore);
   readonly uploadStore = inject(UploadStore);
+  readonly multiRename = inject(MultiRenameStore);
   readonly commandStatus = signal<string | null>(null);
   readonly initializationError = signal<string | null>(null);
   readonly menuOpen = signal(false);
@@ -47,9 +60,7 @@ export class CommanderShellComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   constructor() {
-    this.keyboard.commands
-      .pipe(takeUntilDestroyed())
-      .subscribe((command) => this.execute(command));
+    this.keyboard.commands.pipe(takeUntilDestroyed()).subscribe((command) => this.execute(command));
     this.destroyRef.onDestroy(() => {
       this.keyboard.stop();
       this.metricsStore.stop();
@@ -65,6 +76,17 @@ export class CommanderShellComponent implements OnInit {
   }
 
   execute(command: CommanderCommand): void {
+    if (this.multiRename.state().open) {
+      if (
+        command.type === 'escape' &&
+        !this.multiRename.state().previewPending &&
+        !this.multiRename.state().actionPending
+      ) {
+        this.closeMultiRename();
+      }
+      return;
+    }
+
     if (command.type === 'escape' && this.metricsOpen()) {
       this.closeMetrics();
       return;
@@ -79,21 +101,54 @@ export class CommanderShellComponent implements OnInit {
 
     const side = this.store.activePanel();
     switch (command.type) {
-      case 'move-cursor': this.store.moveCursor(side, command.amount); break;
-      case 'move-page': this.store.moveCursorPage(side, command.direction); break;
-      case 'move-boundary': this.store.moveCursorBoundary(side, command.boundary); break;
-      case 'open-cursor': this.openCursor(side); break;
-      case 'backspace': this.backspace(side); break;
-      case 'switch-panel': this.store.activatePanel(side === 'left' ? 'right' : 'left'); break;
-      case 'toggle-selection': this.store.toggleCursorSelection(side); break;
-      case 'select-all': this.store.selectAllVisible(side); break;
-      case 'escape': this.escape(side); break;
-      case 'focus-path': this.focusPath(side); break;
-      case 'refresh': void this.store.refresh(side); break;
-      case 'new-tab': void this.store.createTab(side); break;
-      case 'close-tab': void this.store.closeActiveTab(side); break;
-      case 'filter-text': this.store.setFilter(side, this.activeState().filter + command.text); break;
-      case 'function-key': this.handleFunctionKey(command.key); break;
+      case 'move-cursor':
+        this.store.moveCursor(side, command.amount);
+        break;
+      case 'move-page':
+        this.store.moveCursorPage(side, command.direction);
+        break;
+      case 'move-boundary':
+        this.store.moveCursorBoundary(side, command.boundary);
+        break;
+      case 'open-cursor':
+        this.openCursor(side);
+        break;
+      case 'backspace':
+        this.backspace(side);
+        break;
+      case 'switch-panel':
+        this.store.activatePanel(side === 'left' ? 'right' : 'left');
+        break;
+      case 'toggle-selection':
+        this.store.toggleCursorSelection(side);
+        break;
+      case 'select-all':
+        this.store.selectAllVisible(side);
+        break;
+      case 'multi-rename':
+        this.openMultiRename(side);
+        break;
+      case 'escape':
+        this.escape(side);
+        break;
+      case 'focus-path':
+        this.focusPath(side);
+        break;
+      case 'refresh':
+        void this.store.refresh(side);
+        break;
+      case 'new-tab':
+        void this.store.createTab(side);
+        break;
+      case 'close-tab':
+        void this.store.closeActiveTab(side);
+        break;
+      case 'filter-text':
+        this.store.setFilter(side, this.activeState().filter + command.text);
+        break;
+      case 'function-key':
+        this.handleFunctionKey(command.key);
+        break;
     }
   }
 
@@ -164,6 +219,22 @@ export class CommanderShellComponent implements OnInit {
     const opener = this.uploadOpener();
     this.uploadOpener.set(null);
     queueMicrotask(() => opener?.focus());
+  }
+
+  openMultiRename(side: PanelSide = this.store.activePanel()): void {
+    const context = this.store.createMultiRenameContext(side);
+    if (!context) {
+      this.commandStatus.set('Select or focus an item before opening Multi-Rename.');
+      return;
+    }
+
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.multiRename.open(context);
+  }
+
+  closeMultiRename(): void {
+    this.multiRename.close();
   }
 
   handleFunctionKey(key: CommanderFunctionKey): void {

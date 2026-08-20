@@ -1,0 +1,36 @@
+<div class="preview-region" data-testid="multi-rename-preview" tabindex="0">
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Old name</th>
+        <th scope="col">Ext</th>
+        <th scope="col">New name</th>
+        <th scope="col">Size</th>
+        <th scope="col">Modified</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (row of rows(); track row.sourcePath) {
+        <tr
+          data-testid="rename-preview-row"
+          [attr.data-status]="row.status"
+          [title]="row.message ?? ''"
+        >
+          <td class="old-name">{{ row.oldName }}</td>
+          <td>{{ row.oldExtension ?? '—' }}</td>
+          <td class="new-name">
+            <app-name-diff [oldName]="row.oldName" [newName]="row.newName" />
+          </td>
+          <td>{{ row.size | fileSize }}</td>
+          <td>{{ row.modifiedAt | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
+          <td><span class="status-mark" aria-hidden="true"></span>{{ statusLabel(row) }}</td>
+        </tr>
+      } @empty {
+        <tr class="empty-row">
+          <td colspan="6">Waiting for an authoritative preview…</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

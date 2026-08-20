@@ -8,6 +8,8 @@ import { PanelState } from '../../../core/state/commander.models';
 import { SystemMetricsStore } from '../../../core/state/system-metrics-store';
 import { UploadStore } from '../../../core/state/upload-store';
 import { UploadState } from '../../../core/state/upload.models';
+import { MultiRenameStore } from '../../../core/state/multi-rename-store';
+import { MultiRenameState } from '../../../core/state/multi-rename.models';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -20,7 +22,13 @@ describe('CommanderShellComponent system metrics integration', () => {
   const metrics = {
     start: vi.fn(),
     stop: vi.fn(),
-    state: signal({ snapshot: null, pending: false, errorCode: null, requestToken: 0, nowEpochMilliseconds: Date.now() }),
+    state: signal({
+      snapshot: null,
+      pending: false,
+      errorCode: null,
+      requestToken: 0,
+      nowEpochMilliseconds: Date.now(),
+    }),
     effectiveSnapshot: signal(null),
     effectiveState: signal<'loading'>('loading'),
   };
@@ -40,6 +48,16 @@ describe('CommanderShellComponent system metrics integration', () => {
     cancel: vi.fn(() => true),
     close: vi.fn(() => true),
   };
+  const multiRename = {
+    state: signal<MultiRenameState>(closedMultiRenameState()),
+    canExecute: signal(false),
+    canUndo: signal(false),
+    open: vi.fn(),
+    close: vi.fn(),
+    updateRules: vi.fn(),
+    execute: vi.fn(() => Promise.resolve(false)),
+    undo: vi.fn(() => Promise.resolve(false)),
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -48,6 +66,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     store.rightPanel.set(panel());
     store.activePanel.set('left');
     upload.state.set(closedUploadState());
+    multiRename.state.set(closedMultiRenameState());
     await TestBed.configureTestingModule({
       imports: [CommanderShellComponent],
       providers: [
@@ -55,6 +74,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: CommanderStore, useValue: store },
         { provide: SystemMetricsStore, useValue: metrics },
         { provide: UploadStore, useValue: upload },
+        { provide: MultiRenameStore, useValue: multiRename },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -66,7 +86,11 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(actions.lastElementChild?.tagName).toBe('APP-SYSTEM-METRICS-WIDGET');
     expect(metrics.start).toHaveBeenCalledOnce();
 
-    (fixture.nativeElement.querySelector('[data-testid="system-metrics-trigger"]') as HTMLButtonElement).click();
+    (
+      fixture.nativeElement.querySelector(
+        '[data-testid="system-metrics-trigger"]',
+      ) as HTMLButtonElement
+    ).click();
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('[role="dialog"]')).not.toBeNull();
@@ -88,22 +112,23 @@ describe('CommanderShellComponent system metrics integration', () => {
   });
 
   it('captures the active panel destination and refreshes only that panel after completion', () => {
-    store.sources.set([
-      source('downloads', 'Downloads'),
-      source('media', 'Media'),
-    ]);
-    store.leftPanel.set(panel({
-      sourceId: 'downloads',
-      tabs: [{ id: 'left-tab', label: 'Complete', sourceId: 'downloads', path: '/Complete' }],
-      activeTabId: 'left-tab',
-      filter: '*.zip',
-      selectedItems: new Set(['/existing.zip']),
-    }));
-    store.rightPanel.set(panel({
-      sourceId: 'media',
-      tabs: [{ id: 'right-tab', label: 'Movies', sourceId: 'media', path: '/Movies' }],
-      activeTabId: 'right-tab',
-    }));
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(
+      panel({
+        sourceId: 'downloads',
+        tabs: [{ id: 'left-tab', label: 'Complete', sourceId: 'downloads', path: '/Complete' }],
+        activeTabId: 'left-tab',
+        filter: '*.zip',
+        selectedItems: new Set(['/existing.zip']),
+      }),
+    );
+    store.rightPanel.set(
+      panel({
+        sourceId: 'media',
+        tabs: [{ id: 'right-tab', label: 'Movies', sourceId: 'media', path: '/Movies' }],
+        activeTabId: 'right-tab',
+      }),
+    );
     const files = [new File(['one'], 'one.txt')];
 
     fixture.componentInstance.reviewUpload(files);
@@ -126,10 +151,12 @@ describe('CommanderShellComponent system metrics integration', () => {
 
   it('rejects unavailable or read-only upload destinations before opening a review', () => {
     store.sources.set([source('archive', 'Archive', { isReadOnly: true })]);
-    store.leftPanel.set(panel({
-      sourceId: 'archive',
-      tabs: [{ id: 'tab', label: '/', sourceId: 'archive', path: '/' }],
-    }));
+    store.leftPanel.set(
+      panel({
+        sourceId: 'archive',
+        tabs: [{ id: 'tab', label: '/', sourceId: 'archive', path: '/' }],
+      }),
+    );
 
     fixture.componentInstance.reviewUpload([new File(['one'], 'one.txt')]);
 
@@ -173,11 +200,7 @@ function panel(overrides: Partial<PanelState> = {}): PanelState {
   };
 }
 
-function source(
-  id: string,
-  name: string,
-  overrides: Partial<SourceDto> = {},
-): SourceDto {
+function source(id: string, name: string, overrides: Partial<SourceDto> = {}): SourceDto {
   return {
     id,
     name,
@@ -206,6 +229,33 @@ function closedUploadState(): UploadState {
     result: null,
     errorCode: null,
     errorMessage: null,
+    requestToken: 0,
+  };
+}
+
+function closedMultiRenameState(): MultiRenameState {
+  return {
+    open: false,
+    context: null,
+    rules: {
+      nameMask: '[N]',
+      extensionMask: '[E]',
+      searchFor: '',
+      replaceWith: '',
+      useRegex: false,
+      matchCase: false,
+      replaceInExtension: false,
+      caseMode: 'unchanged',
+      counterStart: 1,
+      counterStep: 1,
+      counterDigits: 1,
+    },
+    preview: null,
+    operation: null,
+    previewPending: false,
+    actionPending: false,
+    disabledReason: null,
+    errorCode: null,
     requestToken: 0,
   };
 }

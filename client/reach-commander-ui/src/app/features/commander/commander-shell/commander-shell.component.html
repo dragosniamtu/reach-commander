@@ -7,7 +7,14 @@
     <div class="top-actions">
       <span class="read-mode"><i></i> READ-ONLY FOUNDATION</span>
       <button type="button" disabled title="Transfers arrive in Milestone 3">Transfers</button>
-      <button type="button" disabled title="Settings arrive in a later milestone" aria-label="Settings">⚙</button>
+      <button
+        type="button"
+        disabled
+        title="Settings arrive in a later milestone"
+        aria-label="Settings"
+      >
+        ⚙
+      </button>
       <app-system-metrics-widget
         [snapshot]="metricsStore.effectiveSnapshot()"
         [effectiveState]="metricsStore.effectiveState() ?? 'loading'"
@@ -31,32 +38,61 @@
     <app-upload-dialog [opener]="uploadOpener()" />
   }
 
+  @if (multiRename.state().open) {
+    <app-multi-rename-dialog (closeRequested)="closeMultiRename()" />
+  }
+
   @if (initializationError()) {
     <div class="fatal-error" role="alert">{{ initializationError() }}</div>
   }
 
   <section class="panes" aria-label="Dual-pane file manager">
-    <app-commander-panel #leftPanel side="left" [panel]="store.leftPanel()" [sources]="store.sources()" [active]="store.activePanel() === 'left'" />
+    <app-commander-panel
+      #leftPanel
+      side="left"
+      [panel]="store.leftPanel()"
+      [sources]="store.sources()"
+      [active]="store.activePanel() === 'left'"
+    />
     <div class="divider" aria-hidden="true"><span></span></div>
-    <app-commander-panel #rightPanel side="right" [panel]="store.rightPanel()" [sources]="store.sources()" [active]="store.activePanel() === 'right'" />
+    <app-commander-panel
+      #rightPanel
+      side="right"
+      [panel]="store.rightPanel()"
+      [sources]="store.sources()"
+      [active]="store.activePanel() === 'right'"
+    />
   </section>
 
   <section class="global-status" aria-live="polite">
-    <div><span class="status-led"></span><strong>{{ store.sources().length }}</strong> sources configured</div>
-    <div class="shortcut-hint"><kbd>Tab</kbd> switch pane <span>·</span> <kbd>Insert</kbd> select <span>·</span> type to filter</div>
-    @if (commandStatus()) { <div class="command-status">{{ commandStatus() }}</div> }
+    <div>
+      <span class="status-led"></span><strong>{{ store.sources().length }}</strong> sources
+      configured
+    </div>
+    <div class="shortcut-hint">
+      <kbd>Tab</kbd> switch pane <span>·</span> <kbd>Insert</kbd> select <span>·</span> type to
+      filter
+    </div>
+    @if (commandStatus()) {
+      <div class="command-status">{{ commandStatus() }}</div>
+    }
   </section>
 
   @if (menuOpen()) {
     <section class="command-menu" role="dialog" aria-label="Commander commands">
-      <header><strong>Commands</strong><button type="button" aria-label="Close commands" (click)="menuOpen.set(false)">×</button></header>
+      <header>
+        <strong>Commands</strong
+        ><button type="button" aria-label="Close commands" (click)="menuOpen.set(false)">×</button>
+      </header>
       <div class="menu-grid">
-        <span>Navigate</span><kbd>↑ ↓ Enter Backspace</kbd>
-        <span>Select</span><kbd>Insert · Ctrl+A</kbd>
-        <span>Panels & tabs</span><kbd>Tab · Ctrl+T · Ctrl+W</kbd>
+        <span>Navigate</span><kbd>↑ ↓ Enter Backspace</kbd> <span>Select</span
+        ><kbd>Insert · Ctrl+A</kbd> <span>Panels & tabs</span><kbd>Tab · Ctrl+T · Ctrl+W</kbd>
         <span>Path & refresh</span><kbd>Ctrl+L · Ctrl+R</kbd>
       </div>
-      <p>Copy, move, rename, create directory, and delete are intentionally unavailable in Milestone 1.</p>
+      <p>
+        Copy, move, rename, create directory, and delete are intentionally unavailable in Milestone
+        1.
+      </p>
     </section>
   }
 

@@ -4,6 +4,7 @@ import { DirectoryTab, PanelSide, PanelState } from './commander.models';
 import { PanelPersistence, PersistedPanelState } from './panel-persistence';
 import { normalizeLogicalPath, parentLogicalPath } from './path-utils';
 import { buildVisibleRows } from './file-table.viewmodel';
+import { MultiRenameContext } from './multi-rename.models';
 
 @Injectable({ providedIn: 'root' })
 export class CommanderStore {
@@ -37,9 +38,9 @@ export class CommanderStore {
     }
 
     const state = this.panel(side)();
-    const tabs = state.tabs.map((tab) => tab.id === state.activeTabId
-      ? this.newTab(source, '/', tab.id)
-      : tab);
+    const tabs = state.tabs.map((tab) =>
+      tab.id === state.activeTabId ? this.newTab(source, '/', tab.id) : tab,
+    );
     this.updatePanel(side, resetForNavigation({ ...state, sourceId, tabs }));
     this.persist();
     await this.loadPanel(side);
@@ -50,12 +51,15 @@ export class CommanderStore {
     const active = state.tabs.find((tab) => tab.id === state.activeTabId)!;
     const source = this.sourceState().find((candidate) => candidate.id === active.sourceId)!;
     const tab = this.newTab(source, active.path);
-    this.updatePanel(side, resetForNavigation({
-      ...state,
-      sourceId: tab.sourceId,
-      tabs: [...state.tabs, tab],
-      activeTabId: tab.id,
-    }));
+    this.updatePanel(
+      side,
+      resetForNavigation({
+        ...state,
+        sourceId: tab.sourceId,
+        tabs: [...state.tabs, tab],
+        activeTabId: tab.id,
+      }),
+    );
     this.persist();
     await this.loadPanel(side);
   }
@@ -65,19 +69,23 @@ export class CommanderStore {
     const activeIndex = state.tabs.findIndex((tab) => tab.id === state.activeTabId);
     let tabs = state.tabs.filter((tab) => tab.id !== state.activeTabId);
     if (tabs.length === 0) {
-      const source = this.sourceState().find((candidate) => candidate.id === state.sourceId)
-        ?? this.defaultSource(side);
+      const source =
+        this.sourceState().find((candidate) => candidate.id === state.sourceId) ??
+        this.defaultSource(side);
       tabs = [this.newTab(source, '/')];
     }
 
     const nextIndex = Math.min(Math.max(activeIndex - 1, 0), tabs.length - 1);
     const active = tabs[nextIndex]!;
-    this.updatePanel(side, resetForNavigation({
-      ...state,
-      sourceId: active.sourceId,
-      tabs,
-      activeTabId: active.id,
-    }));
+    this.updatePanel(
+      side,
+      resetForNavigation({
+        ...state,
+        sourceId: active.sourceId,
+        tabs,
+        activeTabId: active.id,
+      }),
+    );
     this.persist();
     await this.loadPanel(side);
   }
@@ -89,11 +97,14 @@ export class CommanderStore {
       return;
     }
 
-    this.updatePanel(side, resetForNavigation({
-      ...state,
-      sourceId: tab.sourceId,
-      activeTabId: tab.id,
-    }));
+    this.updatePanel(
+      side,
+      resetForNavigation({
+        ...state,
+        sourceId: tab.sourceId,
+        activeTabId: tab.id,
+      }),
+    );
     this.persist();
     await this.loadPanel(side);
   }
@@ -107,9 +118,9 @@ export class CommanderStore {
     }
 
     const source = this.sourceState().find((candidate) => candidate.id === state.sourceId)!;
-    const tabs = state.tabs.map((tab) => tab.id === state.activeTabId
-      ? this.newTab(source, normalized, tab.id)
-      : tab);
+    const tabs = state.tabs.map((tab) =>
+      tab.id === state.activeTabId ? this.newTab(source, normalized, tab.id) : tab,
+    );
     this.updatePanel(side, resetForNavigation({ ...state, tabs }));
     this.persist();
     await this.loadPanel(side);
@@ -131,9 +142,10 @@ export class CommanderStore {
 
   sortBy(side: PanelSide, column: PanelState['sortColumn']): void {
     const state = this.panel(side)();
-    const sortDirection = state.sortColumn === column && state.sortDirection === 'ascending'
-      ? 'descending'
-      : 'ascending';
+    const sortDirection =
+      state.sortColumn === column && state.sortDirection === 'ascending'
+        ? 'descending'
+        : 'ascending';
     this.updatePanel(side, { ...state, sortColumn: column, sortDirection });
     this.persist();
   }
@@ -141,7 +153,8 @@ export class CommanderStore {
   setFilter(side: PanelSide, filter: string): void {
     const state = { ...this.panel(side)(), filter };
     const rowCount = buildVisibleRows(state).length;
-    const cursorIndex = rowCount === 0 ? -1 : Math.min(Math.max(state.cursorIndex, 0), rowCount - 1);
+    const cursorIndex =
+      rowCount === 0 ? -1 : Math.min(Math.max(state.cursorIndex, 0), rowCount - 1);
     this.updatePanel(side, { ...state, cursorIndex });
     this.persist();
   }
@@ -209,11 +222,7 @@ export class CommanderStore {
     this.updatePanel(side, { ...state, selectedItems });
   }
 
-  selectWithPointer(
-    side: PanelSide,
-    rowIndex: number,
-    mode: 'replace' | 'toggle' | 'range',
-  ): void {
+  selectWithPointer(side: PanelSide, rowIndex: number, mode: 'replace' | 'toggle' | 'range'): void {
     const state = this.panel(side)();
     const rows = buildVisibleRows(state);
     const row = rows[rowIndex];
@@ -240,7 +249,8 @@ export class CommanderStore {
       const start = Math.min(anchor, rowIndex);
       const end = Math.max(anchor, rowIndex);
       selectedItems = new Set(
-        rows.slice(start, end + 1)
+        rows
+          .slice(start, end + 1)
           .filter((candidate) => !candidate.isParent)
           .map((candidate) => candidate.relativePath),
       );
@@ -250,7 +260,7 @@ export class CommanderStore {
       ...state,
       cursorIndex: rowIndex,
       selectedItems,
-      selectionAnchor: mode === 'range' ? state.selectionAnchor ?? rowIndex : rowIndex,
+      selectionAnchor: mode === 'range' ? (state.selectionAnchor ?? rowIndex) : rowIndex,
     });
   }
 
@@ -261,6 +271,36 @@ export class CommanderStore {
       selectedItems: new Set<string>(),
       selectionAnchor: null,
     });
+  }
+
+  createMultiRenameContext(side: PanelSide): MultiRenameContext | null {
+    const panel = this.panel(side)();
+    const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId);
+    const source = this.sourceState().find((candidate) => candidate.id === activeTab?.sourceId);
+    if (!activeTab || !source) {
+      return null;
+    }
+
+    const rows = buildVisibleRows(panel);
+    const entries =
+      panel.selectedItems.size > 0
+        ? rows.filter((row) => !row.isParent && panel.selectedItems.has(row.relativePath))
+        : rows[panel.cursorIndex] && !rows[panel.cursorIndex]!.isParent
+          ? [rows[panel.cursorIndex]!]
+          : [];
+    if (entries.length === 0) {
+      return null;
+    }
+
+    return {
+      panelSide: side,
+      sourceId: source.id,
+      sourceName: source.name,
+      directoryPath: activeTab.path,
+      entries,
+      isAvailable: source.isAvailable,
+      isReadOnly: source.isReadOnly,
+    };
   }
 
   initialize(): Promise<void> {
@@ -283,13 +323,11 @@ export class CommanderStore {
     this.persist();
   }
 
-  private createInitialPanel(
-    side: PanelSide,
-    sources: readonly SourceDto[],
-  ): PanelState {
-    const source = sources.find((candidate) =>
-      side === 'left' ? candidate.defaultLeft : candidate.defaultRight,
-    ) ?? sources[0]!;
+  private createInitialPanel(side: PanelSide, sources: readonly SourceDto[]): PanelState {
+    const source =
+      sources.find((candidate) =>
+        side === 'left' ? candidate.defaultLeft : candidate.defaultRight,
+      ) ?? sources[0]!;
     const tab = this.newTab(source, '/');
     return {
       ...emptyPanel(),
@@ -352,8 +390,10 @@ export class CommanderStore {
 
   private defaultSource(side: PanelSide): SourceDto {
     const sources = this.sourceState();
-    return sources.find((source) => side === 'left' ? source.defaultLeft : source.defaultRight)
-      ?? sources[0]!;
+    return (
+      sources.find((source) => (side === 'left' ? source.defaultLeft : source.defaultRight)) ??
+      sources[0]!
+    );
   }
 
   private async loadPanel(side: PanelSide): Promise<void> {
@@ -383,9 +423,11 @@ export class CommanderStore {
       const entries = await this.api.listFiles(activeTab.sourceId, activeTab.path);
       const current = this.panel(side)();
       const currentTab = current.tabs.find((tab) => tab.id === current.activeTabId);
-      if (current.requestToken !== requestToken ||
-          currentTab?.sourceId !== activeTab.sourceId ||
-          currentTab.path !== activeTab.path) {
+      if (
+        current.requestToken !== requestToken ||
+        currentTab?.sourceId !== activeTab.sourceId ||
+        currentTab.path !== activeTab.path
+      ) {
         return;
       }
 
@@ -419,11 +461,7 @@ export class CommanderStore {
   }
 
   private persist(): void {
-    this.persistence.save(
-      this.leftPanelState(),
-      this.rightPanelState(),
-      this.activePanelState(),
-    );
+    this.persistence.save(this.leftPanelState(), this.rightPanelState(), this.activePanelState());
   }
 }
 

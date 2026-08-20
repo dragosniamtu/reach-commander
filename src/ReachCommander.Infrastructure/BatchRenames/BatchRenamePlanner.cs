@@ -162,7 +162,6 @@ internal sealed class BatchRenamePlanner
             throw Stale();
         }
 
-        var currentEntries = new List<BatchRenameEntrySnapshot>(plan.Entries.Count);
         foreach (var planned in plan.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -200,8 +199,6 @@ internal sealed class BatchRenamePlanner
                     throw Stale();
                 }
             }
-
-            currentEntries.Add(current);
         }
 
         var ready = plan.Entries

@@ -29,12 +29,14 @@ internal sealed record ArchiveExtractionPlan(
     IReadOnlyList<ArchiveExtractionIssue> Violations,
     bool CanExecute);
 
-internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
+internal sealed class ArchiveExtractionPlanStore(
+    TimeProvider clock,
+    ArchiveExtractionOperationStore operations)
 {
     private const int MaximumPlans = 128;
     private readonly Dictionary<string, ArchiveExtractionPlan> _plans =
         new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _operationIdsByPlan =
+    private readonly Dictionary<string, OperationBinding> _operationIdsByPlan =
         new(StringComparer.Ordinal);
     private readonly object _gate = new();
 
@@ -43,7 +45,7 @@ internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
         ArgumentNullException.ThrowIfNull(plan);
         lock (_gate)
         {
-            RemoveExpiredUnbound(clock.GetUtcNow());
+            RemoveExpired(clock.GetUtcNow());
             if (_plans.ContainsKey(plan.PlanId))
             {
                 throw new InvalidOperationException("An archive extraction plan ID was reused.");
@@ -76,8 +78,20 @@ internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
                 throw new ArchivePlanNotFoundException();
             }
 
-            if (plan.ExpiresAt <= clock.GetUtcNow() && !_operationIdsByPlan.ContainsKey(planId))
+            if (plan.ExpiresAt <= clock.GetUtcNow())
             {
+                if (_operationIdsByPlan.TryGetValue(planId, out var binding))
+                {
+                    if (!binding.IsRegistered || operations.Contains(binding.OperationId))
+                    {
+                        return plan;
+                    }
+
+                    _operationIdsByPlan.Remove(planId);
+                    _plans.Remove(planId);
+                    throw new ArchivePlanNotFoundException();
+                }
+
                 _plans.Remove(planId);
                 throw new ArchivePlanExpiredException();
             }
@@ -99,11 +113,26 @@ internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
 
             if (_operationIdsByPlan.TryGetValue(planId, out var existing))
             {
-                return existing;
+                return existing.OperationId;
             }
 
-            _operationIdsByPlan.Add(planId, operationId);
+            _operationIdsByPlan.Add(planId, new(operationId, IsRegistered: false));
             return operationId;
+        }
+    }
+
+    public void CommitBinding(string planId, string operationId)
+    {
+        lock (_gate)
+        {
+            if (!_operationIdsByPlan.TryGetValue(planId, out var existing) ||
+                !existing.OperationId.Equals(operationId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The archive extraction operation binding is not reserved.");
+            }
+
+            _operationIdsByPlan[planId] = existing with { IsRegistered = true };
         }
     }
 
@@ -112,7 +141,7 @@ internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
         lock (_gate)
         {
             if (!_operationIdsByPlan.TryGetValue(planId, out var existing) ||
-                !existing.Equals(operationId, StringComparison.Ordinal))
+                !existing.OperationId.Equals(operationId, StringComparison.Ordinal))
             {
                 return false;
             }
@@ -127,12 +156,20 @@ internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
         }
     }
 
-    private void RemoveExpiredUnbound(DateTimeOffset now)
+    private void RemoveExpired(DateTimeOffset now)
     {
-        foreach (var plan in _plans.Values
-                     .Where(plan => plan.ExpiresAt <= now && !_operationIdsByPlan.ContainsKey(plan.PlanId))
-                     .ToArray())
+        foreach (var plan in _plans.Values.Where(plan => plan.ExpiresAt <= now).ToArray())
         {
+            if (_operationIdsByPlan.TryGetValue(plan.PlanId, out var binding))
+            {
+                if (!binding.IsRegistered || operations.Contains(binding.OperationId))
+                {
+                    continue;
+                }
+
+                _operationIdsByPlan.Remove(plan.PlanId);
+            }
+
             _plans.Remove(plan.PlanId);
         }
     }
@@ -160,4 +197,6 @@ internal sealed class ArchiveExtractionPlanStore(TimeProvider clock)
 
     private sealed class ArchivePlanIssueException(string code, string detail)
         : ArchiveException(code, detail);
+
+    private sealed record OperationBinding(string OperationId, bool IsRegistered);
 }

@@ -67,6 +67,7 @@ internal sealed class ArchiveExtractionService(
             try
             {
                 operation = operations.Create(operationId, plan);
+                plans.CommitBinding(planId, operationId);
             }
             catch
             {

@@ -17,6 +17,7 @@ namespace ReachCommander.IntegrationTests;
 public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 {
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
+    private readonly TestArchiveWorkerClient _archiveWorker = new();
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
 
@@ -31,7 +32,9 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         MissingUsbRoot = Path.Combine(WorkspaceRoot, "usb-missing");
 
         Directory.CreateDirectory(Path.Combine(MediaRoot, "Movies"));
+        Directory.CreateDirectory(Path.Combine(MediaRoot, "Photos"));
         Directory.CreateDirectory(Path.Combine(DownloadsRoot, "Complete"));
+        Directory.CreateDirectory(Path.Combine(DownloadsRoot, "backups"));
         Directory.CreateDirectory(ArchiveRoot);
         File.WriteAllText(Path.Combine(MediaRoot, "Movies", "Gladiator II.mkv"), "video-data");
         foreach (var archiveName in new[]
@@ -49,6 +52,9 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         {
             File.WriteAllText(Path.Combine(DownloadsRoot, archiveName), "archive-test-data");
         }
+        File.WriteAllText(
+            Path.Combine(DownloadsRoot, "backups", "photos.7z"),
+            "archive-test-data");
 
         var configurationPath = Path.Combine(WorkspaceRoot, "sources.json");
         File.WriteAllText(configurationPath, JsonSerializer.Serialize(new
@@ -123,6 +129,16 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public void ResetTime() => _clock.Reset();
 
+    public int ArchiveExtractionCount => _archiveWorker.ExtractionCount;
+
+    public int ArchiveInspectionCount => _archiveWorker.InspectionCount;
+
+    public void BlockArchiveExtraction() => _archiveWorker.BlockExtraction();
+
+    public void ReleaseArchiveExtraction() => _archiveWorker.ReleaseExtraction();
+
+    public void ResetArchiveWorker() => _archiveWorker.Reset();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -146,7 +162,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(_clock);
             services.RemoveAll<IArchiveWorkerClient>();
-            services.AddSingleton<IArchiveWorkerClient, TestArchiveWorkerClient>();
+            services.AddSingleton<IArchiveWorkerClient>(_archiveWorker);
         });
     }
 
@@ -239,11 +255,49 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     private sealed class TestArchiveWorkerClient : IArchiveWorkerClient
     {
+        private readonly object _gate = new();
+        private TaskCompletionSource? _extractionGate;
+        private int _extractionCount;
+        private int _inspectionCount;
+
+        public int ExtractionCount => Volatile.Read(ref _extractionCount);
+
+        public int InspectionCount => Volatile.Read(ref _inspectionCount);
+
+        public void BlockExtraction()
+        {
+            lock (_gate)
+            {
+                _extractionGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        public void ReleaseExtraction()
+        {
+            lock (_gate)
+            {
+                _extractionGate?.TrySetResult();
+            }
+        }
+
+        public void Reset()
+        {
+            ReleaseExtraction();
+            lock (_gate)
+            {
+                _extractionGate = null;
+            }
+
+            Interlocked.Exchange(ref _extractionCount, 0);
+            Interlocked.Exchange(ref _inspectionCount, 0);
+        }
+
         public ValueTask<ArchiveWorkerInspection> InspectAsync(
             ResolvedArchivePartSet partSet,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _inspectionCount);
             var name = Path.GetFileName(partSet.PrimaryLogicalPath);
             return name switch
             {
@@ -256,6 +310,10 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                     ArchiveFormat.Zip,
                     false,
                     [Entry(0, "../escape.txt")])),
+                "photos.7z" => new(new ArchiveWorkerInspection(
+                    ArchiveFormat.SevenZip,
+                    false,
+                    [Entry(0, "Family/2025/photo.jpg")])),
                 _ => new(new ArchiveWorkerInspection(
                     partSet.Format,
                     false,
@@ -267,12 +325,37 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             };
         }
 
-        public ValueTask ExtractAsync(
+        public async ValueTask ExtractAsync(
             ResolvedArchivePartSet partSet,
             IReadOnlyList<int> entryIndexes,
             IArchiveEntrySink sink,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _extractionCount);
+            Task? wait;
+            lock (_gate)
+            {
+                wait = _extractionGate?.Task;
+            }
+
+            if (wait is not null)
+            {
+                await wait.WaitAsync(cancellationToken);
+            }
+
+            var completed = 0;
+            long bytes = 0;
+            foreach (var entryIndex in entryIndexes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await sink.StartAsync(entryIndex, cancellationToken);
+                await sink.WriteAsync(new byte[] { 1 }, cancellationToken);
+                await sink.EndAsync(entryIndex, 1, cancellationToken);
+                completed++;
+                bytes++;
+                await sink.ProgressAsync(completed, bytes, cancellationToken);
+            }
+        }
 
         private static UntrustedArchiveEntry Entry(int index, string key) => new(
             index,

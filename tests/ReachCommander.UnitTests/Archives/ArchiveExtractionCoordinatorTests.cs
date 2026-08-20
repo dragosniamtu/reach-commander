@@ -129,6 +129,25 @@ public sealed class ArchiveExtractionCoordinatorTests
     }
 
     [Fact]
+    public async Task Concurrent_execute_calls_bind_exactly_one_operation()
+    {
+        using var fixture = new CoordinatorFixture();
+        fixture.Worker.Block();
+
+        var executions = Enumerable.Range(0, 20)
+            .Select(_ => fixture.Service.ExecuteAsync("plan-one", default).AsTask())
+            .ToArray();
+        var operations = await Task.WhenAll(executions);
+        await fixture.Worker.Started.Task;
+
+        Assert.Single(operations.Select(operation => operation.OperationId).Distinct(StringComparer.Ordinal));
+        Assert.Equal(1, fixture.Worker.InvocationCount);
+
+        fixture.Worker.Release();
+        await fixture.Operations.WaitForTerminalAsync(operations[0].OperationId, default);
+    }
+
+    [Fact]
     public async Task Changed_source_fingerprint_or_destination_snapshot_fails_before_staging()
     {
         using var staleSource = new CoordinatorFixture();
@@ -350,8 +369,8 @@ public sealed class ArchiveExtractionCoordinatorTests
                             ? new FailingStagingCreationFileSystem(localFileSystem)
                             : localFileSystem;
             var clock = TimeProvider.System;
-            _plans = new ArchiveExtractionPlanStore(clock);
             Operations = new ArchiveExtractionOperationStore(clock);
+            _plans = new ArchiveExtractionPlanStore(clock, Operations);
             _worker = new PlannedWorker();
             Worker = _worker;
             var coordinator = new ArchiveExtractionCoordinator(

@@ -240,12 +240,84 @@ public sealed class ArchiveExtractionPlannerTests
         var fixture = CreateFixture([Entry(1, "one.txt")]);
         var preview = await fixture.Planner.PreviewAsync(
             Request("/", [], extractAll: true), CancellationToken.None);
+        var plan = fixture.Store.GetRequiredPlan(preview.PlanId);
         fixture.Store.BindOperation(preview.PlanId, "operation");
+        fixture.Operations.Create("operation", plan);
+        fixture.Store.CommitBinding(preview.PlanId, "operation");
         fixture.Clock.Advance(TimeSpan.FromMinutes(10));
 
         Assert.Equal(preview.PlanId, fixture.Store.GetRequiredPlan(preview.PlanId).PlanId);
         Assert.True(fixture.Store.ReleaseBinding(preview.PlanId, "operation"));
         Assert.Throws<ArchivePlanNotFoundException>(() => fixture.Store.GetRequiredPlan(preview.PlanId));
+    }
+
+    [Fact]
+    public async Task Pending_operation_binding_survives_expiry_cleanup_until_registration()
+    {
+        var fixture = CreateFixture([Entry(1, "one.txt")]);
+        var preview = await fixture.Planner.PreviewAsync(
+            Request("/", [], extractAll: true), CancellationToken.None);
+        fixture.Store.BindOperation(preview.PlanId, "pending-operation");
+        fixture.Clock.Advance(TimeSpan.FromMinutes(10));
+
+        _ = await fixture.Planner.PreviewAsync(
+            Request("/", [], extractAll: true), CancellationToken.None);
+
+        var reservedPlan = fixture.Store.GetRequiredPlan(preview.PlanId);
+        fixture.Operations.Create("pending-operation", reservedPlan);
+        fixture.Store.CommitBinding(preview.PlanId, "pending-operation");
+
+        Assert.Equal(preview.PlanId, fixture.Store.GetRequiredPlan(preview.PlanId).PlanId);
+    }
+
+    [Fact]
+    public async Task Bound_plan_is_reclaimed_only_after_plan_and_operation_retention_expire()
+    {
+        var fixture = CreateFixture([Entry(1, "one.txt")]);
+        var preview = await fixture.Planner.PreviewAsync(
+            Request("/", [], extractAll: true), CancellationToken.None);
+        var plan = fixture.Store.GetRequiredPlan(preview.PlanId);
+        fixture.Store.BindOperation(preview.PlanId, "operation");
+        fixture.Operations.Create("operation", plan);
+        fixture.Store.CommitBinding(preview.PlanId, "operation");
+        fixture.Operations.MarkCompleted("operation");
+
+        fixture.Clock.Advance(TimeSpan.FromMinutes(10));
+        Assert.Equal(preview.PlanId, fixture.Store.GetRequiredPlan(preview.PlanId).PlanId);
+
+        fixture.Clock.Advance(TimeSpan.FromMinutes(51));
+        Assert.Throws<ArchivePlanNotFoundException>(() =>
+            fixture.Store.GetRequiredPlan(preview.PlanId));
+    }
+
+    [Fact]
+    public async Task Terminal_operation_cap_does_not_break_idempotency_while_plan_is_valid()
+    {
+        var fixture = CreateFixture([Entry(1, "one.txt")], idGenerator: new ArchivePlanIdGenerator());
+        var bindings = new List<(string PlanId, string OperationId)>();
+        for (var index = 0; index < 101; index++)
+        {
+            var preview = await fixture.Planner.PreviewAsync(
+                Request("/", [], extractAll: true), CancellationToken.None);
+            var operationId = $"operation-{index}";
+            var plan = fixture.Store.GetRequiredPlan(preview.PlanId);
+            fixture.Store.BindOperation(preview.PlanId, operationId);
+            fixture.Operations.Create(operationId, plan);
+            fixture.Store.CommitBinding(preview.PlanId, operationId);
+            fixture.Operations.MarkCompleted(operationId);
+            bindings.Add((preview.PlanId, operationId));
+        }
+
+        var oldest = bindings[0];
+        Assert.Equal(
+            oldest.OperationId,
+            fixture.Store.BindOperation(oldest.PlanId, "replacement-operation"));
+        Assert.Equal(oldest.OperationId, fixture.Operations.GetRequired(oldest.OperationId).OperationId);
+
+        fixture.Clock.Advance(TimeSpan.FromMinutes(10));
+        Assert.False(fixture.Operations.Contains(oldest.OperationId));
+        Assert.True(fixture.Operations.Contains(bindings[1].OperationId));
+        Assert.True(fixture.Operations.Contains(bindings[^1].OperationId));
     }
 
     [Fact]
@@ -346,7 +418,8 @@ public sealed class ArchiveExtractionPlannerTests
             [part],
             new ArchiveVolumeFingerprint("fingerprint"));
         var clock = new ManualTimeProvider(DateTimeOffset.Parse("2026-08-20T10:00:00Z"));
-        var store = new ArchiveExtractionPlanStore(clock);
+        var operations = new ArchiveExtractionOperationStore(clock);
+        var store = new ArchiveExtractionPlanStore(clock, operations);
         var sources = new FakeSourceCatalog();
         var pathSecurity = new FakePathSecurity(sources);
         var fileSystem = new FakeArchiveExtractionFileSystem();
@@ -360,7 +433,15 @@ public sealed class ArchiveExtractionPlannerTests
             idGenerator ?? new FixedPlanIdGenerator(),
             Options.Create(options),
             clock);
-        return new PlannerFixture(planner, store, provider, sources, pathSecurity, fileSystem, clock);
+        return new PlannerFixture(
+            planner,
+            store,
+            operations,
+            provider,
+            sources,
+            pathSecurity,
+            fileSystem,
+            clock);
     }
 
     private static ArchiveExtractionPreviewRequest Request(
@@ -396,6 +477,7 @@ public sealed class ArchiveExtractionPlannerTests
     private sealed record PlannerFixture(
         ArchiveExtractionPlanner Planner,
         ArchiveExtractionPlanStore Store,
+        ArchiveExtractionOperationStore Operations,
         FakeCatalogProvider CatalogProvider,
         FakeSourceCatalog Sources,
         FakePathSecurity PathSecurity,

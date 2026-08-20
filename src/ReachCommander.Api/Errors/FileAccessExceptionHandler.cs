@@ -201,10 +201,55 @@ public sealed class FileAccessExceptionHandler(
             error,
             StatusCodes.Status413PayloadTooLarge,
             "Archive limit exceeded"),
+        ArchiveDestinationInvalidException error => ArchiveError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Invalid archive extraction destination"),
+        ArchiveDestinationReadOnlyException error => ArchiveError(
+            error,
+            StatusCodes.Status403Forbidden,
+            "Archive extraction destination is read-only"),
+        ArchiveDestinationConflictException error => ArchiveError(
+            error,
+            StatusCodes.Status409Conflict,
+            "Archive extraction destination conflict"),
+        ArchivePlanNotFoundException error => ArchiveError(
+            error,
+            StatusCodes.Status404NotFound,
+            "Archive extraction plan not found"),
+        ArchivePlanExpiredException error => ArchiveError(
+            error,
+            StatusCodes.Status410Gone,
+            "Archive extraction plan expired"),
+        ArchivePlanStaleException error => ArchiveError(
+            error,
+            StatusCodes.Status409Conflict,
+            "Archive extraction plan is stale"),
+        ArchiveDestinationChangedException error => ArchiveError(
+            error,
+            StatusCodes.Status409Conflict,
+            "Archive extraction destination changed"),
+        ArchiveCapacityReachedException error => ArchiveError(
+            error,
+            StatusCodes.Status429TooManyRequests,
+            "Archive extraction capacity reached"),
         ArchiveWorkerFailedException error => ArchiveError(
             error,
             StatusCodes.Status500InternalServerError,
             "Archive worker failed"),
+        ArchiveExtractionCancelledException error => ArchiveError(
+            error,
+            StatusCodes.Status499ClientClosedRequest,
+            "Archive extraction cancelled"),
+        ArchiveRecoveryRequiredException error => ArchiveError(
+            error,
+            StatusCodes.Status500InternalServerError,
+            "Archive extraction recovery required"),
+        BadHttpRequestException error when error.StatusCode == StatusCodes.Status413PayloadTooLarge => new(
+            StatusCodes.Status413PayloadTooLarge,
+            "Request body too large",
+            "request_too_large",
+            "The request body exceeds the allowed size."),
         _ => new(
             StatusCodes.Status500InternalServerError,
             "Unexpected server error",

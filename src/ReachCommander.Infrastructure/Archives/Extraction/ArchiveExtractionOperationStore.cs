@@ -8,6 +8,7 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
     private static readonly TimeSpan TerminalLifetime = TimeSpan.FromHours(1);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly object _gate = new();
+    private long _terminalSequence;
 
     public ArchiveExtractionOperation Create(
         string operationId,
@@ -26,7 +27,8 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
                 operationId,
                 plan.Files.Count,
                 totalBytes,
-                clock.GetUtcNow());
+                clock.GetUtcNow(),
+                plan.ExpiresAt);
             _entries.Add(operationId, entry);
             return Snapshot(entry);
         }
@@ -38,6 +40,15 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
         {
             PruneTerminal();
             return Snapshot(GetEntry(operationId));
+        }
+    }
+
+    public bool Contains(string operationId)
+    {
+        lock (_gate)
+        {
+            PruneTerminal();
+            return _entries.ContainsKey(operationId);
         }
     }
 
@@ -218,6 +229,7 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
         entry.State = state;
         entry.CurrentEntryName = null;
         entry.TerminalAt = clock.GetUtcNow();
+        entry.TerminalSequence = ++_terminalSequence;
         entry.StateHistory.Add(state);
         entry.Terminal.TrySetResult();
     }
@@ -231,7 +243,9 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
     {
         var cutoff = clock.GetUtcNow() - TerminalLifetime;
         foreach (var entry in _entries.Values
-                     .Where(entry => entry.TerminalAt <= cutoff)
+                     .Where(entry =>
+                         entry.TerminalAt <= cutoff &&
+                         entry.RetainAtLeastUntil <= clock.GetUtcNow())
                      .ToArray())
         {
             entry.Cancellation.Dispose();
@@ -241,7 +255,9 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
         var terminal = _entries.Values
             .Where(entry => entry.TerminalAt is not null)
             .OrderByDescending(entry => entry.TerminalAt)
+            .ThenByDescending(entry => entry.TerminalSequence)
             .Skip(MaximumTerminalOperations)
+            .Where(entry => entry.RetainAtLeastUntil <= clock.GetUtcNow())
             .ToArray();
         foreach (var entry in terminal)
         {
@@ -312,12 +328,14 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
         string operationId,
         int totalFiles,
         long? totalBytes,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        DateTimeOffset retainAtLeastUntil)
     {
         public string OperationId { get; } = operationId;
         public int TotalFiles { get; } = totalFiles;
         public long? TotalBytes { get; } = totalBytes;
         public DateTimeOffset CreatedAt { get; } = createdAt;
+        public DateTimeOffset RetainAtLeastUntil { get; } = retainAtLeastUntil;
         public ArchiveExtractionState State { get; set; } = ArchiveExtractionState.Queued;
         public int CompletedFiles { get; set; }
         public long ExtractedBytes { get; set; }
@@ -328,6 +346,7 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
         public string? ErrorCode { get; set; }
         public string? ErrorDetail { get; set; }
         public DateTimeOffset? TerminalAt { get; set; }
+        public long TerminalSequence { get; set; }
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource Terminal { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);

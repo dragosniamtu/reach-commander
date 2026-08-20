@@ -12,6 +12,8 @@ namespace ReachCommander.IntegrationTests;
 public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 {
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
+    private readonly ManualTimeProvider _clock = new(
+        new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
 
     public ReachCommanderApiFactory()
     {
@@ -97,6 +99,10 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public void SetHardwareNotReady() => _hardwareMetrics.SetNotReady();
 
+    public void AdvanceTime(TimeSpan amount) => _clock.Advance(amount);
+
+    public void ResetTime() => _clock.Reset();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -117,6 +123,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<IHardwareMetricsSnapshotProvider>();
             services.AddSingleton<IHardwareMetricsSnapshotProvider>(_hardwareMetrics);
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(_clock);
         });
     }
 
@@ -137,6 +145,43 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly DateTimeOffset _initial;
+        private DateTimeOffset _current;
+
+        public ManualTimeProvider(DateTimeOffset initial)
+        {
+            _initial = initial;
+            _current = initial;
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_gate)
+            {
+                return _current;
+            }
+        }
+
+        public void Advance(TimeSpan amount)
+        {
+            lock (_gate)
+            {
+                _current += amount;
+            }
+        }
+
+        public void Reset()
+        {
+            lock (_gate)
+            {
+                _current = _initial;
+            }
         }
     }
 

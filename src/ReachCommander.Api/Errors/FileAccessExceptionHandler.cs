@@ -4,6 +4,7 @@ using ReachCommander.Application.Files;
 using ReachCommander.Application.Sources;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Uploads;
+using ReachCommander.Application.BatchRenames;
 
 namespace ReachCommander.Api.Errors;
 
@@ -136,6 +137,41 @@ public sealed class FileAccessExceptionHandler(
             error,
             StatusCodes.Status500InternalServerError,
             "Upload cleanup required"),
+        InvalidRenameRuleException error => RenameError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Invalid rename rule",
+            "invalid_rename_rule"),
+        BatchTooLargeException error => RenameError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Rename batch is too large",
+            "batch_too_large"),
+        SourceReadOnlyException error => RenameError(
+            error,
+            StatusCodes.Status403Forbidden,
+            "Source is read-only",
+            "source_read_only"),
+        RenamePlanNotFoundException error => RenameError(
+            error,
+            StatusCodes.Status404NotFound,
+            "Rename plan not found",
+            "rename_plan_not_found"),
+        RenamePlanExpiredException error => RenameError(
+            error,
+            StatusCodes.Status410Gone,
+            "Rename plan expired",
+            "rename_plan_expired"),
+        RenamePlanStaleException error => RenameError(
+            error,
+            StatusCodes.Status409Conflict,
+            "Rename plan is stale",
+            "rename_plan_stale"),
+        RenameRecoveryRequiredException error => RenameError(
+            error,
+            StatusCodes.Status500InternalServerError,
+            "Rename recovery required",
+            "rename_recovery_required"),
         _ => new(
             StatusCodes.Status500InternalServerError,
             "Unexpected server error",
@@ -147,6 +183,12 @@ public sealed class FileAccessExceptionHandler(
         UploadException error,
         int status,
         string title) => new(status, title, error.Code, error.Detail);
+
+    private static ErrorDescriptor RenameError(
+        BatchRenameException error,
+        int status,
+        string title,
+        string code) => new(status, title, code, error.Message);
 
     private sealed record ErrorDescriptor(int Status, string Title, string Code, string Detail);
 }

@@ -15,4 +15,9 @@
     <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="SharpCompress-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

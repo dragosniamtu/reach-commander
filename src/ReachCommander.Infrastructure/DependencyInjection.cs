@@ -16,6 +16,11 @@ using ReachCommander.Infrastructure.SystemMetrics.Linux;
 using ReachCommander.Infrastructure.SystemMetrics.Windows;
 using ReachCommander.Infrastructure.Mutations;
 using ReachCommander.Infrastructure.Uploads;
+using ReachCommander.Application.Archives;
+using ReachCommander.Infrastructure.Archives;
+using ReachCommander.Infrastructure.Archives.Catalog;
+using ReachCommander.Infrastructure.Archives.Volumes;
+using ReachCommander.Infrastructure.Archives.Worker;
 
 namespace ReachCommander.Infrastructure;
 
@@ -57,6 +62,30 @@ public static class DependencyInjection
         services.AddSingleton<IHostPlatform, RuntimeHostPlatform>();
         services.AddSingleton<BoundedTextFileReader>();
         services.AddSingleton<ITrustedPathResolver, TrustedPathResolver>();
+
+        services
+            .AddOptions<ArchiveOptions>()
+            .Bind(configuration.GetSection(ArchiveOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<ArchiveOptions>, ArchiveOptionsValidator>();
+        var archiveOptions = configuration
+            .GetSection(ArchiveOptions.SectionName)
+            .Get<ArchiveOptions>() ?? new ArchiveOptions();
+        if (archiveOptions.Enabled)
+        {
+            services.AddSingleton<IArchivePartResolver, ArchivePartResolver>();
+            services.AddSingleton<ArchiveCatalogBuilder>();
+            services.AddSingleton<ArchiveCatalogCache>();
+            services.AddSingleton<IArchiveWorkerProcessFactory, ArchiveWorkerProcessFactory>();
+            services.AddSingleton<IArchiveWorkerDelay, ArchiveWorkerDelay>();
+            services.AddSingleton<IArchiveWorkerClient, ArchiveWorkerClient>();
+            services.AddSingleton<IArchiveCatalogProvider, ArchiveCatalogProvider>();
+            services.AddSingleton<IArchiveBrowser, ArchiveBrowser>();
+        }
+        else
+        {
+            services.AddSingleton<IArchiveBrowser, DisabledArchiveBrowser>();
+        }
 
         if (OperatingSystem.IsLinux())
         {

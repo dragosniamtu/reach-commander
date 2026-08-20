@@ -5,6 +5,7 @@ using ReachCommander.Application.Sources;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Uploads;
 using ReachCommander.Application.BatchRenames;
+using ReachCommander.Application.Archives;
 
 namespace ReachCommander.Api.Errors;
 
@@ -172,6 +173,38 @@ public sealed class FileAccessExceptionHandler(
             StatusCodes.Status500InternalServerError,
             "Rename recovery required",
             "rename_recovery_required"),
+        ArchiveUnsupportedException error => ArchiveError(
+            error,
+            StatusCodes.Status415UnsupportedMediaType,
+            "Unsupported archive"),
+        ArchiveInvalidException error => ArchiveError(
+            error,
+            StatusCodes.Status400BadRequest,
+            "Invalid archive"),
+        ArchiveEncryptedException error => ArchiveError(
+            error,
+            StatusCodes.Status422UnprocessableEntity,
+            "Encrypted archive"),
+        ArchiveVolumeSecondaryException error => ArchiveError(
+            error,
+            StatusCodes.Status409Conflict,
+            "Secondary archive volume"),
+        ArchiveVolumeSetInvalidException error => ArchiveError(
+            error,
+            StatusCodes.Status422UnprocessableEntity,
+            "Invalid archive volume set"),
+        ArchiveEntryUnsafeException error => ArchiveError(
+            error,
+            StatusCodes.Status422UnprocessableEntity,
+            "Unsafe archive entry"),
+        ArchiveLimitExceededException error => ArchiveError(
+            error,
+            StatusCodes.Status413PayloadTooLarge,
+            "Archive limit exceeded"),
+        ArchiveWorkerFailedException error => ArchiveError(
+            error,
+            StatusCodes.Status500InternalServerError,
+            "Archive worker failed"),
         _ => new(
             StatusCodes.Status500InternalServerError,
             "Unexpected server error",
@@ -189,6 +222,11 @@ public sealed class FileAccessExceptionHandler(
         int status,
         string title,
         string code) => new(status, title, code, error.Message);
+
+    private static ErrorDescriptor ArchiveError(
+        ArchiveException error,
+        int status,
+        string title) => new(status, title, error.Code, error.Detail);
 
     private sealed record ErrorDescriptor(int Status, string Title, string Code, string Detail);
 }

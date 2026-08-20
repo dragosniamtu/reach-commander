@@ -6,6 +6,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ReachCommander.Application.SystemMetrics;
+using ReachCommander.Application.Archives;
+using ReachCommander.Domain.Archives;
+using ReachCommander.Infrastructure.Archives.Catalog;
+using ReachCommander.Infrastructure.Archives.Volumes;
+using ReachCommander.Infrastructure.Archives.Worker;
 
 namespace ReachCommander.IntegrationTests;
 
@@ -29,6 +34,21 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         Directory.CreateDirectory(Path.Combine(DownloadsRoot, "Complete"));
         Directory.CreateDirectory(ArchiveRoot);
         File.WriteAllText(Path.Combine(MediaRoot, "Movies", "Gladiator II.mkv"), "video-data");
+        foreach (var archiveName in new[]
+        {
+            "sample.zip",
+            "invalid.zip",
+            "unsupported.zip",
+            "encrypted.zip",
+            "unsafe.zip",
+            "limit.zip",
+            "episodes.part02.rar",
+            "missing.part01.rar",
+            "missing.part03.rar",
+        })
+        {
+            File.WriteAllText(Path.Combine(DownloadsRoot, archiveName), "archive-test-data");
+        }
 
         var configurationPath = Path.Combine(WorkspaceRoot, "sources.json");
         File.WriteAllText(configurationPath, JsonSerializer.Serialize(new
@@ -125,6 +145,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IHardwareMetricsSnapshotProvider>(_hardwareMetrics);
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(_clock);
+            services.RemoveAll<IArchiveWorkerClient>();
+            services.AddSingleton<IArchiveWorkerClient, TestArchiveWorkerClient>();
         });
     }
 
@@ -213,5 +235,47 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 _snapshot = null;
             }
         }
+    }
+
+    private sealed class TestArchiveWorkerClient : IArchiveWorkerClient
+    {
+        public ValueTask<ArchiveWorkerInspection> InspectAsync(
+            ResolvedArchivePartSet partSet,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var name = Path.GetFileName(partSet.PrimaryLogicalPath);
+            return name switch
+            {
+                "invalid.zip" => throw new ArchiveInvalidException(),
+                "unsupported.zip" => throw new ArchiveUnsupportedException(),
+                "encrypted.zip" => throw new ArchiveEncryptedException(),
+                "limit.zip" => throw new ArchiveLimitExceededException(
+                    "The archive exceeds a configured inspection limit."),
+                "unsafe.zip" => new(new ArchiveWorkerInspection(
+                    ArchiveFormat.Zip,
+                    false,
+                    [Entry(0, "../escape.txt")])),
+                _ => new(new ArchiveWorkerInspection(
+                    partSet.Format,
+                    false,
+                    [
+                        Entry(0, "Family/one.txt"),
+                        Entry(1, "Family/Child/two.txt"),
+                        Entry(2, "root.txt"),
+                    ])),
+            };
+        }
+
+        private static UntrustedArchiveEntry Entry(int index, string key) => new(
+            index,
+            key,
+            false,
+            false,
+            false,
+            false,
+            1,
+            1,
+            DateTimeOffset.Parse("2026-08-20T08:00:00Z"));
     }
 }

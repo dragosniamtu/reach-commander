@@ -15,6 +15,8 @@
   <ItemGroup>
     <ProjectReference Include="..\ReachCommander.Application\ReachCommander.Application.csproj" />
     <ProjectReference Include="..\ReachCommander.Infrastructure\ReachCommander.Infrastructure.csproj" />
+    <ProjectReference Include="..\ReachCommander.ArchiveWorker\ReachCommander.ArchiveWorker.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="BuildAngularForPublish" BeforeTargets="ComputeFilesToPublish"
@@ -32,6 +34,22 @@
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
     </ItemGroup>
+  </Target>
+
+  <Target Name="CopyArchiveWorkerBuildOutput" AfterTargets="Build">
+    <ItemGroup>
+      <ArchiveWorkerBuildOutput Include="..\ReachCommander.ArchiveWorker\bin\$(Configuration)\$(TargetFramework)\**\*"
+                                Exclude="..\ReachCommander.ArchiveWorker\bin\$(Configuration)\$(TargetFramework)\publish\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ArchiveWorkerBuildOutput)"
+          DestinationFolder="$(TargetDir)archive-worker\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishArchiveWorker" AfterTargets="Publish">
+    <MSBuild Projects="..\ReachCommander.ArchiveWorker\ReachCommander.ArchiveWorker.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework);PublishDir=$(PublishDir)archive-worker\;SelfContained=false" />
   </Target>
 
 </Project>

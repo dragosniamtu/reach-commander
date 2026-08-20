@@ -12,6 +12,8 @@ WORKDIR /src
 COPY global.json Directory.Build.props ReachCommander.slnx ./
 COPY src/ReachCommander.Domain/ReachCommander.Domain.csproj src/ReachCommander.Domain/
 COPY src/ReachCommander.Application/ReachCommander.Application.csproj src/ReachCommander.Application/
+COPY src/ReachCommander.ArchiveProtocol/ReachCommander.ArchiveProtocol.csproj src/ReachCommander.ArchiveProtocol/
+COPY src/ReachCommander.ArchiveWorker/ReachCommander.ArchiveWorker.csproj src/ReachCommander.ArchiveWorker/
 COPY src/ReachCommander.Infrastructure/ReachCommander.Infrastructure.csproj src/ReachCommander.Infrastructure/
 COPY src/ReachCommander.Api/ReachCommander.Api.csproj src/ReachCommander.Api/
 RUN dotnet restore src/ReachCommander.Api/ReachCommander.Api.csproj

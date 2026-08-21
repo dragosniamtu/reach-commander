@@ -6,7 +6,9 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "test:pwa": "node --test tools/pwa-assets.test.mjs",
+    "verify:pwa": "node tools/verify-pwa-build.mjs"
   },
   "private": true,
   "packageManager": "npm@10.9.2",
@@ -18,6 +20,7 @@
     "@angular/forms": "^22.1.0",
     "@angular/platform-browser": "^22.1.0",
     "@angular/router": "^22.1.0",
+    "@angular/service-worker": "22.1.2",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ReachCommander dual-pane mark">
+  <rect width="512" height="512" rx="112" fill="#071318"/>
+  <rect x="82" y="82" width="348" height="348" rx="38" fill="#0d2028" stroke="#43d6e2" stroke-width="18"/>
+  <path d="M91 145h330" stroke="#43d6e2" stroke-width="14"/>
+  <circle cx="120" cy="114" r="9" fill="#43d6e2"/>
+  <circle cx="151" cy="114" r="9" fill="#43d6e2" opacity=".65"/>
+  <rect x="124" y="184" width="104" height="194" rx="14" fill="#43d6e2"/>
+  <rect x="284" y="184" width="104" height="194" rx="14" fill="#43d6e2" opacity=".48"/>
+</svg>

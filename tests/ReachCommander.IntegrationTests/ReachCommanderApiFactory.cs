@@ -148,6 +148,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ReachCommander:SourcesPath"] = ConfigurationPath,
+                ["Authentication:DataPath"] = Path.Combine(WorkspaceRoot, "authentication-data"),
                 ["HardwareMetrics:Enabled"] = "false",
                 ["Uploads:MaxFileBytes"] = "8",
                 ["Uploads:MaxBatchBytes"] = "12",

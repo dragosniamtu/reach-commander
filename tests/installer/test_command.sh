@@ -20,7 +20,20 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 INSTALL_ROOT="$TEST_ROOT/install root"
 COMMAND_PATH="$TEST_ROOT/bin/reachcommander"
 SOURCE_PATH="$TEST_ROOT/source data"
-mkdir -p "$INSTALL_ROOT/bin" "$INSTALL_ROOT/lib" "$INSTALL_ROOT/state" "$SOURCE_PATH" "$(dirname -- "$COMMAND_PATH")"
+RUNTIME_UID="$(id -u)"
+RUNTIME_GID="$(id -g)"
+if [[ "$RUNTIME_UID" == '0' ]]; then
+  RUNTIME_UID=1000
+  RUNTIME_GID=1000
+fi
+mkdir -p \
+  "$INSTALL_ROOT/bin" \
+  "$INSTALL_ROOT/lib" \
+  "$INSTALL_ROOT/state" \
+  "$INSTALL_ROOT/data/auth" \
+  "$INSTALL_ROOT/data/keys" \
+  "$SOURCE_PATH" \
+  "$(dirname -- "$COMMAND_PATH")"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
 cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
@@ -32,8 +45,8 @@ python3 "$RENDERER" create-request \
   --output "$REQUEST" \
   --bind-address 127.0.0.1 \
   --port 8092 \
-  --uid 1000 \
-  --gid 1000 \
+  --uid "$RUNTIME_UID" \
+  --gid "$RUNTIME_GID" \
   --image "ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})"
 python3 "$RENDERER" add-source \
   --request "$REQUEST" \
@@ -47,6 +60,18 @@ python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output 
 printf 'stable\n' >"$INSTALL_ROOT/state/channel"
 grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
 : >"$INSTALL_ROOT/state/previous-image"
+printf '{"username":"command-test","passwordHash":"fixture","securityStamp":"fixture"}\n' \
+  >"$INSTALL_ROOT/data/auth/account.json"
+printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
+printf '<key id="command-fixture" />\n' >"$INSTALL_ROOT/data/keys/key-command.xml"
+chmod 0700 "$INSTALL_ROOT/data" "$INSTALL_ROOT/data/auth" "$INSTALL_ROOT/data/keys"
+chmod 0600 \
+  "$INSTALL_ROOT/data/auth/account.json" \
+  "$INSTALL_ROOT/data/auth/bootstrap.json" \
+  "$INSTALL_ROOT/data/keys/key-command.xml"
+if (( EUID == 0 )); then
+  chown -R "$RUNTIME_UID:$RUNTIME_GID" "$INSTALL_ROOT/data"
+fi
 
 export REACHCOMMANDER_TESTING=1
 export REACHCOMMANDER_TEST_BASE="$TEST_ROOT"
@@ -169,6 +194,33 @@ assert_equal "0" "$last_status" "healthy doctor status"
 [[ ! -s "$FAKE_FLOCK_LOG" ]] || fail "doctor acquired a mutating lock"
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "doctor deployment mutation"
 pass "doctor reports a healthy deployment without mutating it"
+
+mv -- "$INSTALL_ROOT/data/auth/account.json" "$TEST_ROOT/account.json"
+run_command doctor
+assert_equal "0" "$last_status" "doctor setup-mode status"
+[[ "$last_output" == *'[WARN] Administrator account is not configured; first-run setup mode is active'* ]] ||
+  fail "doctor setup-mode warning missing"
+mv -- "$TEST_ROOT/account.json" "$INSTALL_ROOT/data/auth/account.json"
+pass "doctor reports missing account state as first-run setup mode"
+
+cp -- "$INSTALL_ROOT/data/auth/account.json" "$TEST_ROOT/account-valid.json"
+printf '{ malformed authentication state\n' >"$INSTALL_ROOT/data/auth/account.json"
+run_command doctor
+assert_equal "1" "$last_status" "doctor malformed account status"
+[[ "$last_output" == *'[FAIL] Administrator account state is invalid JSON'* ]] ||
+  fail "doctor malformed account failure missing"
+[[ "$last_output" != *'malformed authentication state'* ]] ||
+  fail "doctor exposed malformed account contents"
+cp -- "$TEST_ROOT/account-valid.json" "$INSTALL_ROOT/data/auth/account.json"
+pass "doctor rejects malformed account state without exposing contents"
+
+printf 'unexpected\n' >"$INSTALL_ROOT/data/unexpected.txt"
+run_command doctor
+assert_equal "1" "$last_status" "doctor unexpected authentication data status"
+[[ "$last_output" == *'[FAIL] Authentication data tree contains an unsafe entry'* ]] ||
+  fail "doctor unsafe authentication tree failure missing"
+rm -f -- "$INSTALL_ROOT/data/unexpected.txt"
+pass "doctor rejects unexpected authentication data entries"
 
 printf '%s\n' "$INSTALL_ROOT/backups/.reconfigure-transaction" >"$INSTALL_ROOT/state/install-transaction"
 run_command doctor
@@ -346,13 +398,24 @@ reset_update_baseline
 printf 'ancestor canary\n' >"$TEST_ROOT/ancestor-canary.txt"
 deployment_before="$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
 command_before="$(sha256sum "$COMMAND_PATH")"
+
+printf 'unexpected authentication data\n' >"$INSTALL_ROOT/data/unexpected.txt"
 : >"$FAKE_DOCKER_LOG"
-run_command_with_input 'cancel' uninstall
+run_command_with_input $'retain\nuninstall ReachCommander' uninstall
+(( last_status != 0 )) || fail "unsafe authentication data must stop uninstall"
+[[ "$last_output" == *'authentication data tree contains an unsafe entry'* ]] ||
+  fail "unsafe authentication data failure missing"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "unsafe authentication data invoked Docker"
+rm -f -- "$INSTALL_ROOT/data/unexpected.txt"
+pass "uninstall rejects unexpected authentication data before stopping the service"
+
+: >"$FAKE_DOCKER_LOG"
+run_command_with_input $'\ncancel' uninstall
 (( last_status != 0 )) || fail "uninstall cancellation must be nonzero"
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "cancelled uninstall deployment"
 assert_equal "$command_before" "$(sha256sum "$COMMAND_PATH")" "cancelled uninstall command"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "cancelled uninstall invoked Docker"
-pass "uninstall requires the exact destructive confirmation"
+pass "uninstall defaults to retaining authentication data and requires the exact destructive confirmation"
 
 cp -- "$INSTALL_ROOT/state/source-mounts.json" "$TEST_ROOT/source-mounts.backup"
 sed -E \
@@ -360,7 +423,7 @@ sed -E \
   "$TEST_ROOT/source-mounts.backup" \
   >"$INSTALL_ROOT/state/source-mounts.json"
 : >"$FAKE_DOCKER_LOG"
-run_command_with_input 'uninstall ReachCommander' uninstall
+run_command_with_input $'retain\nuninstall ReachCommander' uninstall
 (( last_status != 0 )) || fail "overlapping uninstall paths must be rejected"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "overlap rejection invoked Docker"
 cp -- "$TEST_ROOT/source-mounts.backup" "$INSTALL_ROOT/state/source-mounts.json"
@@ -368,14 +431,14 @@ assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "overlap unin
 pass "uninstall rejects installer paths that overlap a configured source"
 
 printf 'not a directory\n' >"$REACHCOMMANDER_TEST_BACKUP_ROOT"
-run_command_with_input 'uninstall ReachCommander' uninstall
+run_command_with_input $'backup\nuninstall ReachCommander' uninstall
 (( last_status != 0 )) || fail "backup creation failure must stop uninstall"
 [[ -d "$INSTALL_ROOT" && -x "$COMMAND_PATH" ]] || fail "backup failure removed deployment"
 rm -f -- "$REACHCOMMANDER_TEST_BACKUP_ROOT"
 pass "backup failure preserves the active deployment and command"
 
 export FAKE_DOCKER_COMPOSE_EXIT=1
-run_command_with_input 'uninstall ReachCommander' uninstall
+run_command_with_input $'retain\nuninstall ReachCommander' uninstall
 (( last_status != 0 )) || fail "Compose-down failure must stop uninstall"
 [[ -d "$INSTALL_ROOT" && -x "$COMMAND_PATH" ]] || fail "Compose failure removed deployment"
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "Compose failure source canary"
@@ -384,7 +447,7 @@ export FAKE_DOCKER_COMPOSE_EXIT=0
 pass "Compose-down failure preserves deployment after external backup"
 
 : >"$FAKE_DOCKER_LOG"
-run_command_with_input 'uninstall ReachCommander' uninstall
+run_command_with_input $'backup\nuninstall ReachCommander' uninstall
 assert_equal "0" "$last_status" "successful uninstall status"
 [[ ! -e "$INSTALL_ROOT" ]] || fail "successful uninstall retained install root"
 [[ ! -e "$COMMAND_PATH" ]] || fail "successful uninstall retained command"
@@ -396,6 +459,25 @@ backup_destination="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxde
 [[ -f "$backup_destination/deployment/config/sources.json" ]] || fail "backup source configuration missing"
 [[ -f "$backup_destination/deployment/state/source-mounts.json" ]] || fail "backup source metadata missing"
 [[ -f "$backup_destination/reachcommander-command" ]] || fail "backup management command missing"
+for authentication_file in \
+  auth/account.json \
+  auth/bootstrap.json \
+  keys/key-command.xml; do
+  [[ -f "$backup_destination/authentication-data/$authentication_file" ]] ||
+    fail "backup authentication file missing: $authentication_file"
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      ;;
+    *)
+      [[ "$(stat -c '%a' "$backup_destination/authentication-data/$authentication_file")" == '600' ]] ||
+        fail "backup authentication file mode is not 0600: $authentication_file"
+      ;;
+  esac
+done
+cmp -s \
+  "$TEST_ROOT/account-valid.json" \
+  "$backup_destination/authentication-data/auth/account.json" ||
+  fail "backup account bytes changed"
 mapfile -d '' uninstall_args <"$FAKE_DOCKER_LOG"
 printf '%s\n' "${uninstall_args[@]}" | grep -q '^down$' || fail "successful uninstall did not call Compose down"
 if printf '%s\n' "${uninstall_args[@]}" | grep -q '^-v$'; then
@@ -404,6 +486,47 @@ fi
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "successful uninstall source canary"
 assert_equal "ancestor canary" "$(cat -- "$TEST_ROOT/ancestor-canary.txt")" "successful uninstall ancestor canary"
 pass "uninstall backs up generated state and preserves every source ancestor"
+
+mkdir -p \
+  "$INSTALL_ROOT/bin" \
+  "$INSTALL_ROOT/lib" \
+  "$INSTALL_ROOT/state" \
+  "$INSTALL_ROOT/data/auth" \
+  "$INSTALL_ROOT/data/keys"
+cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
+cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
+cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
+chmod +x "$COMMAND_PATH"
+python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output "$INSTALL_ROOT"
+printf 'stable\n' >"$INSTALL_ROOT/state/channel"
+grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
+: >"$INSTALL_ROOT/state/previous-image"
+cp -- "$TEST_ROOT/account-valid.json" "$INSTALL_ROOT/data/auth/account.json"
+printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
+printf '<key id="command-fixture" />\n' >"$INSTALL_ROOT/data/keys/key-command.xml"
+chmod 0700 "$INSTALL_ROOT/data" "$INSTALL_ROOT/data/auth" "$INSTALL_ROOT/data/keys"
+chmod 0600 "$INSTALL_ROOT/data/auth/"*.json "$INSTALL_ROOT/data/keys/"*.xml
+
+: >"$FAKE_DOCKER_LOG"
+run_command_with_input $'retain\nuninstall ReachCommander' uninstall
+assert_equal "0" "$last_status" "retain uninstall status"
+[[ -d "$INSTALL_ROOT/data/auth" && -d "$INSTALL_ROOT/data/keys" ]] ||
+  fail "retain uninstall removed authentication data directories"
+[[ -f "$INSTALL_ROOT/data/auth/account.json" ]] || fail "retain uninstall removed account state"
+[[ ! -e "$COMMAND_PATH" ]] || fail "retain uninstall kept management command"
+unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
+  ! -path "$INSTALL_ROOT/data" \
+  ! -path "$INSTALL_ROOT/data/auth" \
+  ! -path "$INSTALL_ROOT/data/auth/account.json" \
+  ! -path "$INSTALL_ROOT/data/auth/bootstrap.json" \
+  ! -path "$INSTALL_ROOT/data/keys" \
+  ! -path "$INSTALL_ROOT/data/keys/key-command.xml" \
+  -print -quit)"
+[[ -z "$unexpected_retained" ]] || fail "retain uninstall left generated deployment state"
+[[ "$last_output" == *"Authentication data retained at: $INSTALL_ROOT/data"* ]] ||
+  fail "retain uninstall did not print the retained data location"
+assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "retain uninstall source canary"
+pass "uninstall retain leaves only inactive authentication data and preserves sources"
 
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "command source canary"
 printf '1..%d\n' "$tests_run"

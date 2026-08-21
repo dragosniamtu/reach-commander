@@ -84,6 +84,16 @@ for archive_entry in "${archive_entries[@]}"; do
 done
 pass "archive contains only the installer allowlist and safe relative paths"
 
+if tar -tzf "$FIRST_OUTPUT/reachcommander-installer.tar.gz" |
+  grep -Eq '(^|/)(data|account\.json|bootstrap\.json|auth\.lock|key-[^/]+\.xml)(/|$)'; then
+  fail "archive contains generated authentication state"
+fi
+if tar -xOzf "$FIRST_OUTPUT/reachcommander-installer.tar.gz" 2>/dev/null |
+  grep -Fq 'ReachCommander-E2E-Password-2026!'; then
+  fail "archive contains fixture credentials"
+fi
+pass "package excludes credentials and generated authentication state"
+
 EXTRACTED="$TEST_ROOT/extracted"
 mkdir -p "$EXTRACTED"
 tar -xzf "$FIRST_OUTPUT/reachcommander-installer.tar.gz" -C "$EXTRACTED"

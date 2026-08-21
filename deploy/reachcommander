@@ -328,6 +328,58 @@ command_update() {
   return 3
 }
 
+authentication_path_is_mount_point() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import os
+import sys
+
+candidate = os.path.realpath(sys.argv[1])
+try:
+    with open('/proc/self/mountinfo', encoding='utf-8') as mounts:
+        for line in mounts:
+            fields = line.split()
+            if len(fields) < 5:
+                continue
+            mount_path = fields[4]
+            for escaped, value in ((r'\040', ' '), (r'\011', '\t'), (r'\012', '\n'), (r'\134', '\\')):
+                mount_path = mount_path.replace(escaped, value)
+            if os.path.realpath(mount_path) == candidate:
+                raise SystemExit(0)
+except FileNotFoundError:
+    pass
+raise SystemExit(1)
+PY
+}
+
+authentication_data_tree_is_safe() {
+  local data_root="$RC_INSTALL_ROOT/data"
+  local path
+  local relative_path
+  if [[ ! -d "$data_root" || -L "$data_root" ]] || authentication_path_is_mount_point "$data_root"; then
+    return 1
+  fi
+  while IFS= read -r -d '' path; do
+    if [[ -L "$path" ]] || authentication_path_is_mount_point "$path"; then
+      return 1
+    fi
+    relative_path="${path#"$data_root"/}"
+    case "$relative_path" in
+      auth | keys)
+        [[ -d "$path" ]] || return 1
+        ;;
+      auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
+        [[ -f "$path" ]] || return 1
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done < <(find "$data_root" -xdev -mindepth 1 -print0)
+  [[ -d "$data_root/auth" && ! -L "$data_root/auth" ]] &&
+    [[ -d "$data_root/keys" && ! -L "$data_root/keys" ]]
+}
+
 UNINSTALL_FILES=(
   '.env'
   'compose.yaml'
@@ -361,6 +413,10 @@ validate_uninstall_tree() {
     rc_die 'uninstall paths must not be symlinks'
     return 1
   fi
+  if ! authentication_data_tree_is_safe; then
+    rc_die 'authentication data tree contains an unsafe entry'
+    return 1
+  fi
   while IFS= read -r -d '' path; do
     if [[ -L "$path" ]]; then
       invalid=1
@@ -368,7 +424,7 @@ validate_uninstall_tree() {
     fi
     relative_path="${path#"$RC_INSTALL_ROOT"/}"
     case "$relative_path" in
-      config|state|bin|lib|backups|\
+      config|state|bin|lib|backups|data|data/auth|data/keys|\
       .env|compose.yaml|\
       config/sources.json|\
       state/source-mounts.json|\
@@ -379,6 +435,12 @@ validate_uninstall_tree() {
       state/command.lock|\
       bin/render_config.py|\
       lib/common.sh)
+        ;;
+      data/auth/account.json|\
+      data/auth/bootstrap.json|\
+      data/auth/auth.lock|\
+      data/keys/key-*.xml)
+        [[ -f "$path" ]] || invalid=1
         ;;
       *)
         invalid=1
@@ -474,6 +536,55 @@ create_uninstall_backup() {
   fi
 }
 
+backup_authentication_file() {
+  local relative_path="$1"
+  local backup_destination="$2"
+  local source="$RC_INSTALL_ROOT/data/$relative_path"
+  local destination="$backup_destination/authentication-data/$relative_path"
+  [[ -f "$source" && ! -L "$source" ]] || return 0
+  mkdir -p -- "$(dirname -- "$destination")"
+  if ! install -m 0600 -- "$source" "$destination" ||
+    ! sync -f -- "$destination" ||
+    ! cmp -s -- "$source" "$destination"; then
+    rc_die 'authentication data backup verification failed'
+    return 1
+  fi
+}
+
+backup_authentication_data() {
+  local backup_destination="$1"
+  local key_path
+  local relative_path
+  mkdir -p -- \
+    "$backup_destination/authentication-data/auth" \
+    "$backup_destination/authentication-data/keys"
+  chmod 0700 -- \
+    "$backup_destination/authentication-data" \
+    "$backup_destination/authentication-data/auth" \
+    "$backup_destination/authentication-data/keys"
+  for relative_path in auth/account.json auth/bootstrap.json auth/auth.lock; do
+    backup_authentication_file "$relative_path" "$backup_destination" || return 1
+  done
+  while IFS= read -r -d '' key_path; do
+    relative_path="keys/${key_path##*/}"
+    backup_authentication_file "$relative_path" "$backup_destination" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data/keys" -xdev -mindepth 1 -maxdepth 1 -type f -name 'key-*.xml' -print0)
+}
+
+remove_authentication_data() {
+  local key_path
+  rm -f -- \
+    "$RC_INSTALL_ROOT/data/auth/account.json" \
+    "$RC_INSTALL_ROOT/data/auth/bootstrap.json" \
+    "$RC_INSTALL_ROOT/data/auth/auth.lock" || return 1
+  while IFS= read -r -d '' key_path; do
+    rm -f -- "$key_path" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data/keys" -xdev -mindepth 1 -maxdepth 1 -type f -name 'key-*.xml' -print0)
+  rmdir -- "$RC_INSTALL_ROOT/data/auth" || return 1
+  rmdir -- "$RC_INSTALL_ROOT/data/keys" || return 1
+  rmdir -- "$RC_INSTALL_ROOT/data"
+}
+
 remove_generated_deployment() {
   local relative_path
   local directory
@@ -485,12 +596,21 @@ remove_generated_deployment() {
       rmdir -- "$RC_INSTALL_ROOT/$directory" || return 1
     fi
   done
-  rmdir -- "$RC_INSTALL_ROOT"
+}
+
+restart_uninstall_service() {
+  if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
+    printf 'ReachCommander: the previous service was restarted after uninstall stopped.\n' >&2
+    return 0
+  fi
+  printf 'ReachCommander: uninstall stopped and automatic service restart failed; manual recovery is required.\n' >&2
+  return 1
 }
 
 command_uninstall() {
-  local timestamp
-  local backup_destination
+  local timestamp=''
+  local backup_destination=''
+  local authentication_action
   local confirmation
   local source_path
   if ! rc_acquire_lock; then
@@ -508,42 +628,90 @@ command_uninstall() {
   load_uninstall_sources || return 1
   validate_uninstall_separation || return 1
 
-  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  if [[ ! "$timestamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
-    rc_die 'UTC backup timestamp is invalid'
-    return 1
-  fi
-  backup_destination="$RC_BACKUP_ROOT/$timestamp"
-
   printf 'ReachCommander uninstall will remove:\n'
   printf '  container/network: reachcommander\n'
   printf '  management command: %s\n' "$RC_COMMAND_PATH"
-  printf '  generated deployment: %s\n' "$RC_INSTALL_ROOT"
-  printf '  verified backup destination: %s\n' "$backup_destination"
+  printf '  generated deployment files: %s\n' "$RC_INSTALL_ROOT"
   printf 'Configured source directories are excluded and will not be changed:\n'
   for source_path in "${UNINSTALL_SOURCE_PATHS[@]}"; do
     printf '  %s\n' "$source_path"
   done
+  printf 'Authentication data action (retain or backup) [retain]: ' >&2
+  if ! IFS= read -r authentication_action; then
+    rc_die 'uninstall cancelled; authentication data action was not provided'
+    return 1
+  fi
+  authentication_action="${authentication_action:-retain}"
+  if [[ "$authentication_action" != 'retain' && "$authentication_action" != 'backup' ]]; then
+    rc_die 'uninstall cancelled; authentication data action must be retain or backup'
+    return 1
+  fi
+  if [[ "$authentication_action" == 'backup' ]]; then
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    if [[ ! "$timestamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+      rc_die 'UTC backup timestamp is invalid'
+      return 1
+    fi
+    backup_destination="$RC_BACKUP_ROOT/$timestamp"
+    printf '  verified backup destination: %s\n' "$backup_destination"
+  else
+    printf '  authentication data retained at: %s\n' "$RC_INSTALL_ROOT/data"
+  fi
   printf "Type 'uninstall ReachCommander' to continue: " >&2
   if ! IFS= read -r confirmation || [[ "$confirmation" != 'uninstall ReachCommander' ]]; then
     rc_die 'uninstall cancelled; confirmation did not match'
     return 1
   fi
 
-  create_uninstall_backup "$backup_destination" || return 1
+  if ! rc_compose stop reachcommander; then
+    rc_die 'Compose stop failed; deployment and command were preserved'
+    return 1
+  fi
+  if ! validate_uninstall_tree; then
+    restart_uninstall_service || true
+    return 1
+  fi
+  if [[ "$authentication_action" == 'backup' ]]; then
+    if ! create_uninstall_backup "$backup_destination" ||
+      ! backup_authentication_data "$backup_destination"; then
+      restart_uninstall_service || true
+      return 1
+    fi
+  fi
   if ! rc_compose down; then
+    restart_uninstall_service || true
     rc_die 'Compose teardown failed; deployment and command were preserved'
     return 1
   fi
+  if [[ "$authentication_action" == 'backup' ]] && ! remove_authentication_data; then
+    rc_die "authentication data removal was incomplete; verified backup is at $backup_destination"
+    return 1
+  fi
   if ! remove_generated_deployment; then
-    rc_die "generated deployment removal was incomplete; verified backup is at $backup_destination"
+    if [[ "$authentication_action" == 'backup' ]]; then
+      rc_die "generated deployment removal was incomplete; verified backup is at $backup_destination"
+    else
+      rc_die "generated deployment removal was incomplete; authentication data remains at $RC_INSTALL_ROOT/data"
+    fi
+    return 1
+  fi
+  if [[ "$authentication_action" == 'backup' ]] && ! rmdir -- "$RC_INSTALL_ROOT"; then
+    rc_die "install root removal was incomplete; verified backup is at $backup_destination"
     return 1
   fi
   if ! rm -f -- "$RC_COMMAND_PATH"; then
-    rc_die "management command removal failed; verified backup is at $backup_destination"
+    if [[ "$authentication_action" == 'backup' ]]; then
+      rc_die "management command removal failed; verified backup is at $backup_destination"
+    else
+      rc_die "management command removal failed; authentication data remains at $RC_INSTALL_ROOT/data"
+    fi
     return 1
   fi
-  printf 'ReachCommander was uninstalled. Verified backup: %s\n' "$backup_destination"
+  if [[ "$authentication_action" == 'backup' ]]; then
+    printf 'ReachCommander was uninstalled. Verified backup: %s\n' "$backup_destination"
+  else
+    printf 'ReachCommander was uninstalled. Authentication data retained at: %s\n' "$RC_INSTALL_ROOT/data"
+  fi
 }
 
 DOCTOR_FAILURES=0
@@ -632,6 +800,67 @@ doctor_sources() {
   rm -f -- "$source_output"
 }
 
+doctor_authentication_data() {
+  local runtime_uid="$1"
+  local runtime_gid="$2"
+  local path
+  local owner
+  local mode
+  local relative_path
+  if ! authentication_data_tree_is_safe; then
+    doctor_fail 'Authentication data tree contains an unsafe entry'
+    return
+  fi
+  doctor_pass 'Authentication data tree is structurally safe'
+
+  for relative_path in data data/auth data/keys; do
+    path="$RC_INSTALL_ROOT/$relative_path"
+    owner="$(stat -c '%u:%g' -- "$path" 2>/dev/null || true)"
+    mode="$(stat -c '%a' -- "$path" 2>/dev/null || true)"
+    if [[ "$owner" == "$runtime_uid:$runtime_gid" && "$mode" == '700' ]]; then
+      doctor_pass 'Authentication data directory ownership and mode are correct'
+    else
+      doctor_fail 'Authentication data directory ownership or mode is incorrect'
+    fi
+    if command -v setpriv >/dev/null 2>&1 && setpriv \
+      --reuid="$runtime_uid" \
+      --regid="$runtime_gid" \
+      --clear-groups \
+      -- sh -c 'test -r "$1" && test -w "$1" && test -x "$1"' reachcommander-doctor "$path"; then
+      doctor_pass 'Authentication data directory is accessible to the runtime identity'
+    else
+      doctor_fail 'Authentication data directory is not accessible to the runtime identity'
+    fi
+  done
+
+  while IFS= read -r -d '' path; do
+    owner="$(stat -c '%u:%g' -- "$path" 2>/dev/null || true)"
+    mode="$(stat -c '%a' -- "$path" 2>/dev/null || true)"
+    if [[ "$owner" == "$runtime_uid:$runtime_gid" && "$mode" == '600' ]]; then
+      doctor_pass 'Authentication data file ownership and mode are correct'
+    else
+      doctor_fail 'Authentication data file ownership or mode is incorrect'
+    fi
+  done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 2 -type f -print0)
+
+  if [[ -f "$RC_INSTALL_ROOT/data/auth/account.json" ]]; then
+    if python3 -m json.tool "$RC_INSTALL_ROOT/data/auth/account.json" >/dev/null 2>&1; then
+      doctor_pass 'Administrator account state is valid JSON'
+    else
+      doctor_fail 'Administrator account state is invalid JSON'
+    fi
+  else
+    doctor_warn 'Administrator account is not configured; first-run setup mode is active'
+  fi
+  if [[ -f "$RC_INSTALL_ROOT/data/auth/bootstrap.json" ]]; then
+    if python3 -m json.tool "$RC_INSTALL_ROOT/data/auth/bootstrap.json" >/dev/null 2>&1; then
+      doctor_pass 'First-run setup state is valid JSON'
+    else
+      doctor_fail 'First-run setup state is invalid JSON'
+    fi
+  fi
+}
+
 command_doctor() {
   local bind_address=''
   local port=''
@@ -701,6 +930,7 @@ command_doctor() {
     [[ "$runtime_gid" =~ ^[1-9][0-9]*$ ]]; then
     doctor_pass 'Runtime UID and GID are non-root'
     doctor_sources "$runtime_uid" "$runtime_gid"
+    doctor_authentication_data "$runtime_uid" "$runtime_gid"
   else
     doctor_fail 'Runtime UID or GID is invalid'
   fi

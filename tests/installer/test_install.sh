@@ -100,6 +100,7 @@ source_prompt_input() {
   local second_access="${4:-RW}"
   local first_id="${5:-family-media}"
   local second_id="${6:-movies}"
+  local https_acknowledgement="${7:-I have HTTPS}"
   printf '%s\n' \
     '' \
     '' \
@@ -117,7 +118,7 @@ source_prompt_input() {
     'n' \
     "$first_id" \
     "$second_id" \
-    'I have authenticated HTTPS'
+    "$https_acknowledgement"
 }
 
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
@@ -140,8 +141,11 @@ collision_input="$(printf '%s\n' \
   '' '' '' '' \
   'Media' "$SOURCE_ONE" '' 'RO' 'y' \
   'Media' "$SOURCE_TWO" '' 'media-two' 'RW' 'n' \
-  'media' 'media-two' 'I have authenticated HTTPS')"
+  'media' 'media-two' 'I have HTTPS')"
 run_installer "$collision_input" "$TEST_ROOT/collision.out"
+if (( last_status != 0 )); then
+  cat -- "$TEST_ROOT/collision.out" >&2
+fi
 assert_equal "0" "$last_status" "source ID collision recovery status"
 grep -q '"id": "media-two"' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json" || fail "replacement source ID missing"
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
@@ -151,7 +155,7 @@ pass "source ID collisions prompt for a distinct replacement"
 overlap_input="$(printf '%s\n' \
   '' '' '' '' \
   'Installer Parent' "$TEST_ROOT" 'installer-parent' 'RO' 'n' \
-  'installer-parent' 'installer-parent' 'I have authenticated HTTPS')"
+  'installer-parent' 'installer-parent' 'I have HTTPS')"
 run_installer "$overlap_input" "$TEST_ROOT/overlap.out"
 (( last_status != 0 )) || fail "source ancestor of installer paths must be rejected"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "overlapping source installed deployment"
@@ -172,6 +176,16 @@ fi
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
 mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
 
+legacy_acknowledgement_input="$(source_prompt_input \
+  'Family Media' 'RO' 'Movies' 'RW' 'family-media' 'movies' \
+  'I have authenticated HTTPS')"
+run_installer "$legacy_acknowledgement_input" "$TEST_ROOT/legacy-acknowledgement.out"
+(( last_status != 0 )) || fail "legacy HTTPS acknowledgement must be rejected"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "legacy acknowledgement installed deployment"
+rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
+mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+pass "installer requires the exact I have HTTPS acknowledgement"
+
 install_input="$(source_prompt_input)"
 run_installer "$install_input" "$TEST_ROOT/install.out"
 if (( last_status != 0 )); then
@@ -187,6 +201,12 @@ done
 [[ -f "$REACHCOMMANDER_TEST_LOCK_PATH" ]] || fail "fixed external lock missing"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/command.lock" ]] || fail "deployment contains a replaceable lock inode"
 [[ -x "$REACHCOMMANDER_TEST_COMMAND_PATH" ]] || fail "management command was not installed"
+for authentication_directory in data data/auth data/keys; do
+  [[ -d "$REACHCOMMANDER_TEST_INSTALL_ROOT/$authentication_directory" ]] ||
+    fail "missing authentication directory $authentication_directory"
+  [[ ! -L "$REACHCOMMANDER_TEST_INSTALL_ROOT/$authentication_directory" ]] ||
+    fail "authentication directory is symlinked: $authentication_directory"
+done
 grep -q '^REACHCOMMANDER_BIND_ADDRESS=127.0.0.1$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "loopback default missing"
 grep -q '^REACHCOMMANDER_PORT=8092$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "port default missing"
 grep -q '^REACHCOMMANDER_UID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "UID default missing"
@@ -194,6 +214,8 @@ grep -q '^REACHCOMMANDER_GID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || 
 grep -q '^REACHCOMMANDER_IMAGE=ghcr.io/dragosniamtu/reach-commander@sha256:a\{64\}$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "digest pin missing"
 grep -q 'read_only: true' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RO mount missing"
 grep -q 'read_only: false' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RW mount missing"
+grep -A2 -F 'target: /data' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" |
+  grep -q 'read_only: false' || fail "authentication data mount is not writable"
 assert_equal "stable" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel")" "saved channel"
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "first source canary"
 assert_equal "keep two" "$(cat -- "$SOURCE_TWO/canary.txt")" "second source canary"
@@ -207,9 +229,44 @@ case "$(uname -s)" in
     assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config")" "config directory mode"
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json")" "source configuration mode"
     assert_equal "600" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env")" "environment mode"
+    for authentication_directory in data data/auth data/keys; do
+      assert_equal \
+        "700" \
+        "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/$authentication_directory")" \
+        "$authentication_directory mode"
+    done
     pass "runtime configuration modes permit non-root container reads"
     ;;
 esac
+
+printf '{"username":"installer-test","passwordHash":"fixture","securityStamp":"fixture"}\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/account.json"
+printf '{"verifier":"fixture"}\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/bootstrap.json"
+printf '<key id="installer-fixture" />\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml"
+chmod 0600 \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/account.json" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/bootstrap.json" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml"
+authentication_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
+
+printf 'unexpected\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/unexpected.txt"
+run_installer $'n\n' "$TEST_ROOT/unexpected-auth-data.out"
+(( last_status != 0 )) || fail "unexpected authentication data entry must be rejected"
+rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/unexpected.txt"
+pass "installer rejects unexpected authentication data entries before writes"
+
+if ln -s -- "$SOURCE_ONE/canary.txt" "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-linked.xml" 2>/dev/null &&
+  [[ -L "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-linked.xml" ]]; then
+  run_installer $'n\n' "$TEST_ROOT/symlink-auth-data.out"
+  (( last_status != 0 )) || fail "symlinked authentication data must be rejected"
+  rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-linked.xml"
+  pass "installer rejects symlinks below authentication data"
+else
+  rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-linked.xml"
+  skip "installer rejects symlinks below authentication data" "filesystem does not expose POSIX symlinks"
+fi
 
 deployment_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
@@ -226,6 +283,10 @@ if (( last_status != 0 )); then
 fi
 assert_equal "0" "$last_status" "successful reconfiguration status"
 grep -q 'Renamed Media' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json" || fail "reconfigured source name missing"
+assert_equal \
+  "$authentication_before" \
+  "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" \
+  "reconfiguration authentication data"
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "reconfiguration source canary"
 pass "healthy reconfiguration replaces generated configuration"
 

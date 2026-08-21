@@ -133,6 +133,67 @@ reject_installer_path_overlap() {
   done
 }
 
+authentication_path_is_mount_point() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import os
+import sys
+
+candidate = os.path.realpath(sys.argv[1])
+try:
+    with open('/proc/self/mountinfo', encoding='utf-8') as mounts:
+        for line in mounts:
+            fields = line.split()
+            if len(fields) < 5:
+                continue
+            mount_path = fields[4]
+            for escaped, value in ((r'\040', ' '), (r'\011', '\t'), (r'\012', '\n'), (r'\134', '\\')):
+                mount_path = mount_path.replace(escaped, value)
+            if os.path.realpath(mount_path) == candidate:
+                raise SystemExit(0)
+except FileNotFoundError:
+    pass
+raise SystemExit(1)
+PY
+}
+
+validate_authentication_data_tree() {
+  local data_root="$RC_INSTALL_ROOT/data"
+  local path
+  local relative_path
+  local invalid=0
+  if [[ ! -e "$data_root" ]]; then
+    return 0
+  fi
+  if [[ ! -d "$data_root" || -L "$data_root" ]] || authentication_path_is_mount_point "$data_root"; then
+    rc_die 'authentication data root must be a real, unmounted directory'
+    return 1
+  fi
+  while IFS= read -r -d '' path; do
+    if [[ -L "$path" ]] || authentication_path_is_mount_point "$path"; then
+      invalid=1
+      break
+    fi
+    relative_path="${path#"$data_root"/}"
+    case "$relative_path" in
+      auth | keys)
+        [[ -d "$path" ]] || invalid=1
+        ;;
+      auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
+        [[ -f "$path" ]] || invalid=1
+        ;;
+      *)
+        invalid=1
+        ;;
+    esac
+    (( invalid == 0 )) || break
+  done < <(find "$data_root" -xdev -mindepth 1 -print0)
+  if (( invalid != 0 )); then
+    rc_die 'authentication data tree contains an unsafe entry'
+    return 1
+  fi
+}
+
 assert_generated_layout_safe() {
   local generated_path
   if [[ -e "$RC_INSTALL_ROOT" && ! -d "$RC_INSTALL_ROOT" ]] || [[ -L "$RC_INSTALL_ROOT" ]]; then
@@ -145,12 +206,33 @@ assert_generated_layout_safe() {
     "$RC_INSTALL_ROOT/bin" \
     "$RC_INSTALL_ROOT/lib" \
     "$RC_INSTALL_ROOT/backups" \
+    "$RC_INSTALL_ROOT/data" \
+    "$RC_INSTALL_ROOT/data/auth" \
+    "$RC_INSTALL_ROOT/data/keys" \
     "$(dirname -- "$RC_COMMAND_PATH")"; do
     if [[ -L "$generated_path" ]] || [[ -e "$generated_path" && ! -d "$generated_path" ]]; then
       rc_die 'installer-owned directories must not be symlinks or files'
       return 1
     fi
   done
+  validate_authentication_data_tree
+}
+
+prepare_authentication_data() {
+  local directory
+  validate_authentication_data_tree || return 1
+  for directory in data data/auth data/keys; do
+    if [[ -L "$RC_INSTALL_ROOT/$directory" ]]; then
+      rc_die 'authentication data directories must not be symlinks'
+      return 1
+    fi
+    mkdir -p -- "$RC_INSTALL_ROOT/$directory" || return 1
+    chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
+  done
+  validate_authentication_data_tree || return 1
+  if (( EUID == 0 )); then
+    chown -R -- "$RUNTIME_UID:$RUNTIME_GID" "$RC_INSTALL_ROOT/data" || return 1
+  fi
 }
 
 check_source_access() {
@@ -640,9 +722,10 @@ prompt_value 'Default right source ID' "${SOURCE_IDS[0]}"
 DEFAULT_RIGHT="$REPLY_VALUE"
 validate_default_source "$DEFAULT_RIGHT" 'default right source'
 
-prompt_value "Type 'I have authenticated HTTPS' to confirm proxy protection" ''
-if [[ "$REPLY_VALUE" != 'I have authenticated HTTPS' ]]; then
-  rc_die 'authenticated HTTPS acknowledgement did not match'
+printf 'ReachCommander includes its own administrator login; proxy authentication is optional.\n'
+prompt_value "Type 'I have HTTPS' to confirm encrypted transport" ''
+if [[ "$REPLY_VALUE" != 'I have HTTPS' ]]; then
+  rc_die 'HTTPS acknowledgement did not match'
   exit 1
 fi
 
@@ -675,7 +758,7 @@ else
   INSTALL_TRANSACTION_ACTIVE=true
 fi
 
-if ! install_staged_deployment "$STAGE_ROOT"; then
+if ! install_staged_deployment "$STAGE_ROOT" || ! prepare_authentication_data; then
   if [[ "$HAD_EXISTING" == 'true' ]]; then
     if rollback_reconfiguration_transaction true; then
       rc_die 'reconfiguration write failed; the previous deployment was restored'
@@ -706,5 +789,5 @@ else
 fi
 
 printf 'ReachCommander is healthy at http://%s:%s\n' "$BIND_ADDRESS" "$PORT"
-printf 'Protect this endpoint with your authenticated HTTPS reverse proxy.\n'
+printf 'Publish this endpoint through an HTTPS reverse proxy; proxy authentication is optional.\n'
 printf 'Run reachcommander doctor to verify the deployment.\n'

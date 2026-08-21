@@ -46,11 +46,11 @@ A focused `PwaService` will own browser integration and expose signals for:
 - whether an install prompt is available;
 - whether the browser reports offline status;
 - whether a service-worker update is ready;
-- whether install or update activation is in progress.
+- whether installation is in progress.
 
 The service will capture `beforeinstallprompt`, clear it after use, respond to `appinstalled`, subscribe to browser online/offline events, and listen for Angular service-worker version events. Browser-only APIs will be guarded so unit tests and server-like environments remain safe.
 
-The install method will invoke the captured prompt once. The update method will activate the ready version and reload only after the user explicitly chooses **Reload**. Failed install or update actions leave the application usable and expose a concise status message.
+The install method will invoke the captured prompt once. When a ready version exists, the update action will reload only after the user explicitly chooses **Reload**; the Angular service worker then switches the reloaded client to the fully downloaded version. It will not call `activateUpdate()` before reloading because doing so can mix an updated shell with asset names from the running version. Failed installation or update downloads leave the application usable and expose a concise status message.
 
 ### User interface
 
@@ -68,7 +68,7 @@ When initial source loading fails, the message will distinguish a disconnected b
 - No file listing, source metadata, hardware telemetry, upload response, rename plan, archive plan, or operation result is intentionally cached by the PWA.
 - The service worker does not add offline mutation queues or background sync.
 - Authentication and TLS remain deployment responsibilities. Service workers require HTTPS except on localhost, so production documentation will retain the authenticated HTTPS reverse-proxy recommendation.
-- A newly deployed shell may coexist briefly with an older open tab until the user accepts the update. Hashed assets and explicit update activation prevent mixed-version asset replacement.
+- A newly deployed shell may coexist briefly with an older open tab until the user accepts the update. Hashed assets and a full reload prevent mixed-version asset replacement.
 
 ## Error handling
 
@@ -76,13 +76,13 @@ When initial source loading fails, the message will distinguish a disconnected b
 - A rejected install prompt clears the pending state without repeated prompting.
 - Service-worker registration or update failures do not block application startup.
 - Offline startup loads the cached shell and presents a network-required state rather than cached filesystem data.
-- Update activation failures retain the current working version and show a retryable message.
+- Update download failures retain the current working version and show a retryable message.
 
 ## Testing
 
 Implementation follows test-driven development:
 
-1. Unit tests define install prompt capture, dismissal, installation completion, online/offline state, update readiness, and explicit activation behavior.
+1. Unit tests define install prompt capture, dismissal, installation completion, online/offline state, update readiness, and explicit reload behavior.
 2. Shell component tests define conditional install controls and accessible offline/update notifications.
 3. Build verification asserts the production output contains `ngsw-worker.js`, `ngsw.json`, the manifest, and every declared icon.
 4. Browser acceptance serves the production build, verifies service-worker registration, reloads the shell offline, and confirms `/api` responses are absent from Cache Storage.

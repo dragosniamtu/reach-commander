@@ -136,13 +136,14 @@ Installation defaults to:
 │   ├── channel
 │   ├── current-image
 │   ├── previous-image
+│   ├── source-mounts.json
 │   └── command.lock
 ├── lib/
 │   └── common.sh
 └── backups/
 ```
 
-The installer also places the management command at `/usr/local/bin/reachcommander`. Files are created with a restrictive umask. The configuration directory is mounted read-only into the container.
+The installer also places the management command at `/usr/local/bin/reachcommander`. Files are created with a restrictive umask. The configuration directory is mounted read-only into the container. Canonical host paths and access modes are retained separately in root-owned `state/source-mounts.json`; this file is never mounted into or served by the application and is used only for diagnostics, reconfiguration, and uninstall safety checks.
 
 `.env` records operational values rather than source definitions:
 

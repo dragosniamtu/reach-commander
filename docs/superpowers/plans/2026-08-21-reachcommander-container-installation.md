@@ -103,11 +103,11 @@ set-image --env --image
 source-paths --sources
 ```
 
-`source-paths` writes NUL-delimited canonical paths. `set-image` atomically replaces only `REACHCOMMANDER_IMAGE` in a validated env file.
+`source-paths` reads installer-owned `state/source-mounts.json` and writes NUL-delimited canonical host paths. `set-image` atomically replaces only `REACHCOMMANDER_IMAGE` in a validated env file.
 
 - [ ] **Step 3: Write failing rendering and injection tests**
 
-Cover source names/paths containing spaces, apostrophes, colons, `#`, dollar signs, quotes, and leading hyphens. Assert generated files parse correctly and contain matching source IDs, target paths, access policy, and pane defaults. Assert the template has exactly one `# installer-source-mounts` marker.
+Cover source names/paths containing spaces, apostrophes, colons, `#`, dollar signs, quotes, and leading hyphens. Assert generated files parse correctly and contain matching source IDs, target paths, access policy, and pane defaults. Assert `state/source-mounts.json` contains canonical host paths and modes, is not referenced by Compose, and `source-paths` emits its paths as NUL-delimited values. Assert the template has exactly one `# installer-source-mounts` marker.
 
 - [ ] **Step 4: Implement atomic structured rendering**
 
@@ -139,7 +139,7 @@ services:
     restart: unless-stopped
 ```
 
-Each generated source mount must be a long-form bind mount targeting `/sources/<id>` with explicit `read_only`. Generate `sources.json` with container paths only, never host paths.
+Each generated source mount must be a long-form bind mount targeting `/sources/<id>` with explicit `read_only`. Generate `config/sources.json` with container paths only, never host paths. Generate root-owned `state/source-mounts.json` with source IDs, canonical host paths, and access modes; never mount it into the container.
 
 - [ ] **Step 5: Run tests and inspect representative output**
 
@@ -305,7 +305,7 @@ Perform these operations in order:
 5. resolve `stable` to a digest with `rc_pull_digest`;
 6. replace the image with the immutable digest and rerender;
 7. copy `render_config.py` to `bin/render_config.py` and `common.sh` to `lib/common.sh` in staging;
-8. write `state/channel`, `state/current-image`, `state/previous-image`, and `state/command.lock`;
+8. retain the rendered `state/source-mounts.json` and write `state/channel`, `state/current-image`, `state/previous-image`, and `state/command.lock`;
 9. validate the final staged deployment;
 10. atomically move it into the fixed install root;
 11. install `reachcommander` at the fixed command path;
@@ -379,7 +379,7 @@ Warnings do not fail the command; one or more failures return status `1`.
 
 - [ ] **Step 4: Implement non-mutating diagnostics**
 
-Read source paths using `bin/render_config.py source-paths`. Never repair permissions, rewrite files, pull images, or restart a service from `doctor`. Redact environment values except the public image, bind address, port, UID, and GID.
+Read source paths using `bin/render_config.py source-paths --sources state/source-mounts.json`. Never repair permissions, rewrite files, pull images, or restart a service from `doctor`. Redact environment values except the public image, bind address, port, UID, and GID.
 
 - [ ] **Step 5: Run tests and ShellCheck**
 
@@ -478,7 +478,7 @@ Create temporary canary trees for the install root, backup root, each configured
 
 - [ ] **Step 2: Implement a fail-closed uninstall plan**
 
-Use `bin/render_config.py source-paths` to obtain NUL-delimited canonical paths. Before displaying a prompt, verify:
+Use `bin/render_config.py source-paths --sources state/source-mounts.json` to obtain NUL-delimited canonical host paths. Before displaying a prompt, verify:
 
 - install root, command path, and backup root equal their production constants;
 - none is a symlink;

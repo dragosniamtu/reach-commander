@@ -23,6 +23,7 @@ export class CommanderStore {
   private readonly activePanelState = signal<PanelSide>('left');
   private nextTabNumber = 0;
   private nextRequestToken = 0;
+  private sessionGeneration = 0;
   private initialization: Promise<void> | null = null;
 
   readonly sources = this.sourceState.asReadonly();
@@ -418,12 +419,28 @@ export class CommanderStore {
   }
 
   initialize(): Promise<void> {
-    this.initialization ??= this.initializeCore();
+    this.initialization ??= this.initializeCore(this.sessionGeneration);
     return this.initialization;
   }
 
-  private async initializeCore(): Promise<void> {
+  reset(): void {
+    this.sessionGeneration += 1;
+    this.nextRequestToken += 1;
+    this.nextTabNumber = 0;
+    this.initialization = null;
+    this.sourceState.set([]);
+    this.leftPanelState.set(emptyPanel());
+    this.rightPanelState.set(emptyPanel());
+    this.activePanelState.set('left');
+    this.persistence.clear();
+  }
+
+  private async initializeCore(sessionGeneration: number): Promise<void> {
     const sources = await this.api.getSources();
+    if (sessionGeneration !== this.sessionGeneration) {
+      return;
+    }
+
     if (sources.length === 0) {
       throw new Error('ReachCommander requires at least one configured source.');
     }
@@ -434,6 +451,10 @@ export class CommanderStore {
     this.rightPanelState.set(this.restorePanel('right', persisted?.right, sources));
     this.activePanelState.set(persisted?.activePanel ?? 'left');
     await Promise.all([this.loadPanel('left'), this.loadPanel('right')]);
+    if (sessionGeneration !== this.sessionGeneration) {
+      return;
+    }
+
     this.persist();
   }
 

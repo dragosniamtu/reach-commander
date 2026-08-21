@@ -15,6 +15,8 @@ import {
   ArchiveExtractionStore,
 } from '../../../core/state/archive-extraction-store';
 import { PwaService } from '../../../core/pwa/pwa.service';
+import { AuthenticationStore } from '../../../core/auth/authentication-store';
+import { ProtectedStateResetService } from '../../../core/auth/protected-state-reset.service';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -27,6 +29,7 @@ describe('CommanderShellComponent system metrics integration', () => {
   const metrics = {
     start: vi.fn(),
     stop: vi.fn(),
+    reset: vi.fn(),
     state: signal({
       snapshot: null,
       pending: false,
@@ -43,6 +46,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     rightPanel: signal<PanelState>(panel()),
     activePanel: signal<'left' | 'right'>('left'),
     initialize: vi.fn(() => Promise.resolve()),
+    reset: vi.fn(),
     refresh: vi.fn(() => Promise.resolve()),
     clearSelection: vi.fn(),
     createMultiRenameContext: vi.fn(() => null),
@@ -57,6 +61,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     start: vi.fn(() => true),
     cancel: vi.fn(() => true),
     close: vi.fn(() => true),
+    reset: vi.fn(),
   };
   const multiRename = {
     state: signal<MultiRenameState>(closedMultiRenameState()),
@@ -87,6 +92,17 @@ describe('CommanderShellComponent system metrics integration', () => {
     reloadForUpdate: vi.fn(),
     dismissUpdate: vi.fn(),
   };
+  const authentication = {
+    state: signal({
+      phase: 'authenticated' as const,
+      username: 'dragos',
+      pending: false,
+      errorCode: null,
+      errorMessage: null,
+    }),
+    logout: vi.fn(() => Promise.resolve()),
+    changePassword: vi.fn(() => Promise.resolve()),
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -112,6 +128,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: MultiRenameStore, useValue: multiRename },
         { provide: ArchiveExtractionStore, useValue: archiveExtraction },
         { provide: PwaService, useValue: pwa },
+        { provide: AuthenticationStore, useValue: authentication },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -121,6 +138,7 @@ describe('CommanderShellComponent system metrics integration', () => {
   it('places the widget last, opens details, and starts only one polling lifecycle', () => {
     const actions = fixture.nativeElement.querySelector('.top-actions');
     expect(actions.lastElementChild?.tagName).toBe('APP-SYSTEM-METRICS-WIDGET');
+    expect(actions.lastElementChild?.previousElementSibling?.tagName).toBe('APP-ACCOUNT-MENU');
     expect(metrics.start).toHaveBeenCalledOnce();
 
     (
@@ -137,6 +155,16 @@ describe('CommanderShellComponent system metrics integration', () => {
   it('stops polling when the shell is destroyed', () => {
     fixture.destroy();
     expect(metrics.stop).toHaveBeenCalledOnce();
+  });
+
+  it('clears every protected workspace store when authentication locks', () => {
+    TestBed.inject(ProtectedStateResetService).reset();
+
+    expect(store.reset).toHaveBeenCalledOnce();
+    expect(metrics.reset).toHaveBeenCalledOnce();
+    expect(upload.reset).toHaveBeenCalledOnce();
+    expect(multiRename.close).toHaveBeenCalledOnce();
+    expect(archiveExtraction.close).toHaveBeenCalledOnce();
   });
 
   it('handles Escape by closing metrics before commander state changes', () => {

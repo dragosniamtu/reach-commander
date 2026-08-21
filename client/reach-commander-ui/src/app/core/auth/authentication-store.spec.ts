@@ -8,16 +8,23 @@ import {
   SetupCommand,
 } from './authentication.models';
 import { AuthenticationStore } from './authentication-store';
+import { ProtectedStateResetService } from './protected-state-reset.service';
 
 describe('AuthenticationStore', () => {
   let api: FakeAuthenticationApi;
   let channel: AuthenticationChannel;
   let store: AuthenticationStore;
+  let protectedState: { reset: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     api = new FakeAuthenticationApi();
     channel = new AuthenticationChannel();
-    store = new AuthenticationStore(api as unknown as AuthenticationApi, channel);
+    protectedState = { reset: vi.fn() };
+    store = new AuthenticationStore(
+      api as unknown as AuthenticationApi,
+      channel,
+      protectedState as unknown as ProtectedStateResetService,
+    );
   });
 
   it.each([
@@ -162,6 +169,7 @@ describe('AuthenticationStore', () => {
       errorCode: null,
       errorMessage: null,
     });
+    expect(protectedState.reset).toHaveBeenCalledOnce();
   });
 
   it('keeps the authenticated session on expected password validation failure', async () => {
@@ -180,6 +188,7 @@ describe('AuthenticationStore', () => {
 
     expect(store.state().phase).toBe('authenticated');
     expect(store.state().username).toBe('dragos');
+    expect(protectedState.reset).not.toHaveBeenCalled();
     expect(store.state().errorCode).toBe('invalid_credentials');
     expect(JSON.stringify(store.state())).not.toContain(command.currentPassword);
     expect(JSON.stringify(store.state())).not.toContain(command.newPassword);
@@ -199,6 +208,7 @@ describe('AuthenticationStore', () => {
     expect(channel.token()).toBe('csrf-token-2');
     expect(store.state().phase).toBe('authenticated');
     expect(store.state().username).toBe('dragos');
+    expect(protectedState.reset).not.toHaveBeenCalled();
   });
 
   it('locks immediately when the channel reports an unexpected unauthorized response', async () => {
@@ -210,6 +220,7 @@ describe('AuthenticationStore', () => {
     expect(store.state().phase).toBe('anonymous');
     expect(store.state().username).toBeNull();
     expect(channel.token()).toBeNull();
+    expect(protectedState.reset).toHaveBeenCalledOnce();
   });
 });
 

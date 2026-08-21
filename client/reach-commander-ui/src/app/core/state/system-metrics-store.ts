@@ -16,13 +16,7 @@ export interface SystemMetricsStoreState {
 
 @Injectable({ providedIn: 'root' })
 export class SystemMetricsStore {
-  private readonly mutableState = signal<SystemMetricsStoreState>({
-    snapshot: null,
-    pending: false,
-    errorCode: null,
-    requestToken: 0,
-    nowEpochMilliseconds: Date.now(),
-  });
+  private readonly mutableState = signal<SystemMetricsStoreState>(emptyMetricsState());
   private started = false;
   private nextRequestToken = 0;
   private timer: number | null = null;
@@ -73,6 +67,13 @@ export class SystemMetricsStore {
       requestToken,
       nowEpochMilliseconds: Date.now(),
     }));
+  }
+
+  reset(): void {
+    this.stop();
+    this.refreshAfterCurrent = false;
+    const requestToken = ++this.nextRequestToken;
+    this.mutableState.set(emptyMetricsState(requestToken));
   }
 
   refresh(): void {
@@ -205,4 +206,14 @@ export class SystemMetricsStore {
       ? 'metrics_not_ready'
       : 'request_failed';
   }
+}
+
+function emptyMetricsState(requestToken = 0): SystemMetricsStoreState {
+  return {
+    snapshot: null,
+    pending: false,
+    errorCode: null,
+    requestToken,
+    nowEpochMilliseconds: Date.now(),
+  };
 }

@@ -36,6 +36,8 @@ import {
 } from '../active-panel-toolbar/active-panel-toolbar.component';
 import { PwaService } from '../../../core/pwa/pwa.service';
 import { PwaStatusComponent } from '../../pwa/pwa-status.component';
+import { AccountMenuComponent } from '../../auth/account-menu.component';
+import { ProtectedStateResetService } from '../../../core/auth/protected-state-reset.service';
 
 @Component({
   selector: 'app-commander-shell',
@@ -49,6 +51,7 @@ import { PwaStatusComponent } from '../../pwa/pwa-status.component';
     ActivePanelToolbarComponent,
     ArchiveExtractionDialogComponent,
     PwaStatusComponent,
+    AccountMenuComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -108,6 +111,7 @@ export class CommanderShellComponent implements OnInit {
 
   private readonly keyboard = inject(CommanderKeyboardService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly protectedState = inject(ProtectedStateResetService);
 
   constructor() {
     this.keyboard.commands.pipe(takeUntilDestroyed()).subscribe((command) => this.execute(command));
@@ -115,6 +119,18 @@ export class CommanderShellComponent implements OnInit {
       this.keyboard.stop();
       this.metricsStore.stop();
     });
+    const unregisterProtectedState = this.protectedState.register(() => {
+      this.store.reset();
+      this.metricsStore.reset();
+      this.uploadStore.reset();
+      this.multiRename.close();
+      this.archiveExtraction.close();
+      this.commandStatus.set(null);
+      this.initializationError.set(null);
+      this.menuOpen.set(false);
+      this.metricsOpen.set(false);
+    });
+    this.destroyRef.onDestroy(unregisterProtectedState);
     this.archiveExtraction.setCompletionHandler((source, destination) => {
       void Promise.all([this.store.refresh(source), this.store.refresh(destination)]);
     });

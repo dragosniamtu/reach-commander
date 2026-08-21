@@ -34,6 +34,7 @@
       >
         ⚙
       </button>
+      <app-account-menu />
       <app-system-metrics-widget
         [snapshot]="metricsStore.effectiveSnapshot()"
         [effectiveState]="metricsStore.effectiveState() ?? 'loading'"

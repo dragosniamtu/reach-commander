@@ -1,0 +1,232 @@
+:host {
+  position: relative;
+  display: block;
+}
+
+.account-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 150px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text-4);
+  background: var(--surface-3);
+  cursor: pointer;
+}
+
+.account-trigger:hover:not(:disabled),
+.account-trigger[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  color: var(--text-2);
+}
+
+.account-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 70%, transparent);
+}
+
+.account-name {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu {
+  position: absolute;
+  z-index: 35;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 190px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-3);
+  box-shadow: 0 16px 45px rgb(0 0 0 / 0.45);
+}
+
+.account-identity {
+  display: grid;
+  gap: 3px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.account-identity span {
+  color: var(--text-4);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.account-identity strong {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.account-menu > button {
+  width: 100%;
+  height: 35px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-menu > button:hover,
+.account-menu > button:focus-visible {
+  color: var(--accent-text);
+  background: var(--accent-dim);
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(2 6 10 / 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.password-dialog {
+  width: min(100%, 430px);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface-1);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.58);
+}
+
+.password-dialog header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.password-dialog header span {
+  color: var(--accent-text);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.13em;
+}
+
+.password-dialog h2 {
+  margin: 4px 0 0;
+  color: var(--text-1);
+  font-size: 18px;
+}
+
+.dialog-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  color: var(--text-3);
+  background: transparent;
+  font-size: 21px;
+  cursor: pointer;
+}
+
+.password-dialog form {
+  display: grid;
+  gap: 7px;
+  padding: 16px 18px 18px;
+}
+
+.password-dialog label {
+  margin-top: 5px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.password-dialog input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+.password-visibility {
+  justify-self: start;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  color: var(--accent-text);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.form-message {
+  min-height: 18px;
+  margin: 3px 0 0;
+  color: var(--danger-text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-actions button {
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 4px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dialog-actions button:disabled,
+.dialog-close:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.secondary-action {
+  border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  background: var(--surface-3);
+}
+
+.primary-action {
+  border: 1px solid var(--accent);
+  color: #041216;
+  background: var(--accent);
+}
+
+.primary-action:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.sr-announcement {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

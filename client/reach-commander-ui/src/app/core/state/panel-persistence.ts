@@ -86,6 +86,14 @@ export class PanelPersistence {
       // Browser storage can be disabled or full; panel operation must still succeed.
     }
   }
+
+  clear(): void {
+    try {
+      this.storage.removeItem(PanelPersistence.storageKey);
+    } catch {
+      // Locking must still complete when browser storage is unavailable.
+    }
+  }
 }
 
 function durablePanel(panel: PanelState): PersistedPanelState {

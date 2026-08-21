@@ -94,6 +94,21 @@ describe('SystemMetricsStore', () => {
     expect(store.state().snapshot).toBeNull();
   });
 
+  it('resets metrics and ignores a response from the previous authenticated session', async () => {
+    const late = deferred<SystemMetricsDto>();
+    api.metricsHandler = () => late.promise;
+    store.start();
+
+    store.reset();
+    late.resolve(systemMetricsResponse());
+    await Promise.resolve();
+
+    expect(store.state().snapshot).toBeNull();
+    expect(store.state().pending).toBe(false);
+    expect(store.state().errorCode).toBeNull();
+    expect(api.metricsRequests).toBe(1);
+  });
+
   it('maps only the safe not-ready problem code and preserves the previous snapshot', async () => {
     api.metricsHandler = () => Promise.resolve(systemMetricsResponse());
     store.start();

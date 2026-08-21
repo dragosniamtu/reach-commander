@@ -60,6 +60,30 @@ describe('CommanderStore', () => {
     expect(store.rightPanel().entries.map((item) => item.name)).toEqual(['right.txt']);
   });
 
+  it('resets the workspace and ignores responses from the previous authenticated session', async () => {
+    const listing = deferred<readonly FileEntryDto[]>();
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.listHandler = () => listing.promise;
+    const store = new CommanderStore(api);
+
+    const initialization = store.initialize();
+    await Promise.resolve();
+    expect(store.sources()).toHaveLength(1);
+
+    store.reset();
+    listing.resolve([entry('from-previous-session.txt')]);
+    await initialization;
+
+    expect(store.sources()).toEqual([]);
+    expect(store.leftPanel().tabs).toEqual([]);
+    expect(store.leftPanel().entries).toEqual([]);
+    expect(store.rightPanel().tabs).toEqual([]);
+    expect(store.activePanel()).toBe('left');
+    expect(localStorage.getItem('reachcommander.panel-state.v1')).toBeNull();
+  });
+
   it('changes only the requested panel source and active tab', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true }),

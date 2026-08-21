@@ -2,6 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Injectable, signal } from '@angular/core';
 import { AuthenticationApi } from './authentication-api';
 import { AuthenticationChannel } from './authentication-channel';
+import { ProtectedStateResetService } from './protected-state-reset.service';
 import {
   AuthenticationSessionDto,
   AuthenticationViewState,
@@ -30,6 +31,7 @@ export class AuthenticationStore {
   constructor(
     private readonly api: AuthenticationApi,
     private readonly channel: AuthenticationChannel,
+    private readonly protectedState: ProtectedStateResetService,
   ) {
     this.channel.unauthorized$.subscribe(() => this.lock());
   }
@@ -125,6 +127,7 @@ export class AuthenticationStore {
 
   lock(): void {
     this.channel.clearAntiforgeryToken();
+    this.protectedState.reset();
     this.mutableState.set({
       phase: 'anonymous',
       username: null,

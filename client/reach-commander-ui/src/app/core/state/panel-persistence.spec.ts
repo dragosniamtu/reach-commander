@@ -111,6 +111,15 @@ describe('PanelPersistence', () => {
       expect(persistence.load()).toBeNull();
     }
   });
+
+  it('clears the persisted workspace when the authenticated user locks', () => {
+    const persistence = new PanelPersistence(localStorage);
+    localStorage.setItem(PanelPersistence.storageKey, '{"sensitive":"workspace"}');
+
+    persistence.clear();
+
+    expect(localStorage.getItem(PanelPersistence.storageKey)).toBeNull();
+  });
 });
 
 function persistedV1Panel(sourceId: string, path: string) {

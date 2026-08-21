@@ -1,0 +1,126 @@
+<button
+  #accountTrigger
+  type="button"
+  class="account-trigger"
+  data-testid="account-menu-trigger"
+  aria-haspopup="menu"
+  [attr.aria-expanded]="menuOpen()"
+  [disabled]="auth.state().pending"
+  (click)="toggleMenu()"
+>
+  <span class="account-dot" aria-hidden="true"></span>
+  <span class="account-name">{{ auth.state().username }}</span>
+  <span aria-hidden="true">▾</span>
+</button>
+
+@if (menuOpen()) {
+  <div class="account-menu" data-testid="account-menu" role="menu" aria-label="Account">
+    <div class="account-identity">
+      <span>Signed in as</span>
+      <strong>{{ auth.state().username }}</strong>
+    </div>
+    <button
+      type="button"
+      role="menuitem"
+      data-testid="change-password"
+      (click)="openPasswordDialog()"
+    >
+      Change password
+    </button>
+    <button type="button" role="menuitem" data-testid="logout" (click)="logout()">Logout</button>
+  </div>
+}
+
+@if (passwordDialogOpen()) {
+  <div
+    class="dialog-backdrop"
+    (mousedown)="$event.target === $event.currentTarget && closePasswordDialog()"
+  >
+    <section
+      class="password-dialog"
+      data-testid="change-password-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="change-password-title"
+      cdkTrapFocus
+      [cdkTrapFocusAutoCapture]="true"
+    >
+      <header>
+        <div>
+          <span>ACCOUNT SECURITY</span>
+          <h2 id="change-password-title">Change password</h2>
+        </div>
+        <button
+          type="button"
+          class="dialog-close"
+          aria-label="Close change password dialog"
+          [disabled]="auth.state().pending"
+          (click)="closePasswordDialog()"
+        >
+          ×
+        </button>
+      </header>
+
+      <form [formGroup]="passwordForm" (ngSubmit)="submitPasswordChange()">
+        <label for="current-password">Current password</label>
+        <input
+          id="current-password"
+          formControlName="currentPassword"
+          [type]="showPasswords() ? 'text' : 'password'"
+          autocomplete="current-password"
+          minlength="12"
+          maxlength="128"
+        />
+
+        <label for="new-password">New password</label>
+        <input
+          id="new-password"
+          formControlName="newPassword"
+          [type]="showPasswords() ? 'text' : 'password'"
+          autocomplete="new-password"
+          minlength="12"
+          maxlength="128"
+        />
+
+        <label for="confirm-password">Confirm new password</label>
+        <input
+          id="confirm-password"
+          formControlName="confirmPassword"
+          [type]="showPasswords() ? 'text' : 'password'"
+          autocomplete="new-password"
+          minlength="12"
+          maxlength="128"
+        />
+
+        <button
+          type="button"
+          class="password-visibility"
+          [attr.aria-pressed]="showPasswords()"
+          (click)="showPasswords.update((show) => !show)"
+        >
+          {{ showPasswords() ? 'Hide passwords' : 'Show passwords' }}
+        </button>
+
+        <p class="form-message" role="status" aria-live="polite">
+          {{ localError() ?? auth.state().errorMessage ?? '' }}
+        </p>
+
+        <div class="dialog-actions">
+          <button
+            type="button"
+            class="secondary-action"
+            [disabled]="auth.state().pending"
+            (click)="closePasswordDialog()"
+          >
+            Cancel
+          </button>
+          <button type="submit" class="primary-action" [disabled]="auth.state().pending">
+            {{ auth.state().pending ? 'Changing…' : 'Change password' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+}
+
+<span class="sr-announcement" role="status" aria-live="polite">{{ announcement() }}</span>

@@ -191,6 +191,29 @@ describe('UploadStore', () => {
     expect(store.state().context).toBeNull();
     expect(store.state().files).toEqual([]);
   });
+
+  it('force-resets an active upload and clears files, callbacks, and cached limits', async () => {
+    const completed = vi.fn();
+    store.open(uploadContext(), [file('private.txt', 3)], completed);
+    await settlePromises();
+    store.start();
+    const request = api.uploadRequests[0]!;
+    request.events.next({ kind: 'progress', loadedBytes: 3, totalBytes: 3 });
+    expect(store.state().phase).toBe('finalizing');
+
+    store.reset();
+    request.events.next({ kind: 'completed', result: uploadResult() });
+
+    expect(request.cancelled).toBe(1);
+    expect(completed).not.toHaveBeenCalled();
+    expect(store.state().phase).toBe('closed');
+    expect(store.state().files).toEqual([]);
+    expect(store.state().context).toBeNull();
+
+    store.open(uploadContext(), [file('next.txt', 1)], vi.fn());
+    await settlePromises();
+    expect(api.limitRequests).toBe(2);
+  });
 });
 
 class FakeUploadApi extends CommanderApiPort {

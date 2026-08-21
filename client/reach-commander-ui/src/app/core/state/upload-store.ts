@@ -159,6 +159,13 @@ export class UploadStore {
     return true;
   }
 
+  reset(): void {
+    this.releaseActiveRequest();
+    this.completionCallback = null;
+    this.limitsCache = null;
+    this.mutableState.set(closedState(++this.nextRequestToken));
+  }
+
   private async loadLimits(requestToken: number): Promise<void> {
     this.mutableState.update((state) =>
       state.requestToken === requestToken

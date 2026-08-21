@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using ReachCommander.Application.Authentication;
 using ReachCommander.Application.Sources;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.SystemMetrics;
@@ -22,6 +24,7 @@ using ReachCommander.Infrastructure.Archives.Catalog;
 using ReachCommander.Infrastructure.Archives.Volumes;
 using ReachCommander.Infrastructure.Archives.Worker;
 using ReachCommander.Infrastructure.Archives.Extraction;
+using ReachCommander.Infrastructure.Authentication;
 
 namespace ReachCommander.Infrastructure;
 
@@ -34,6 +37,17 @@ public static class DependencyInjection
         services
             .AddOptions<ReachCommanderOptions>()
             .Bind(configuration.GetSection(ReachCommanderOptions.SectionName));
+        services.AddSingleton(_ => AuthenticationDataPaths.Resolve(
+            configuration["Authentication:DataPath"],
+            OperatingSystem.IsWindows(),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
+        services.AddSingleton<FileAuthenticationRepository>();
+        services.AddSingleton<IPasswordHasher<AdministratorAccountDocument>,
+            PasswordHasher<AdministratorAccountDocument>>();
+        services.AddSingleton<AdministratorAccountService>();
+        services.AddSingleton<IAdministratorAccountService>(provider =>
+            provider.GetRequiredService<AdministratorAccountService>());
+        services.AddHostedService<AuthenticationBootstrapHostedService>();
         services.AddSingleton<ISourceCatalog, JsonSourceCatalog>();
         services.AddSingleton<IPathSecurityService, PathSecurityService>();
         services.AddSingleton<IFileBrowser, LocalFileBrowser>();

@@ -215,14 +215,22 @@ internal sealed class FileAuthenticationRepository
                     FileShare.None,
                     bufferSize: 1,
                     FileOptions.Asynchronous);
-                if (!OperatingSystem.IsWindows())
+                try
                 {
-                    File.SetUnixFileMode(
-                        _paths.LockPath,
-                        UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                }
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        File.SetUnixFileMode(
+                            _paths.LockPath,
+                            UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
 
-                return stream;
+                    return stream;
+                }
+                catch
+                {
+                    await stream.DisposeAsync();
+                    throw;
+                }
             }
             catch (IOException) when (attempt < maximumAttempts - 1)
             {

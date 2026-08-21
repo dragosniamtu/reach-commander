@@ -26,10 +26,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     DOTNET_EnableDiagnostics=0 \
+    Authentication__DataPath=/data \
     ReachCommander__SourcesPath=/config/sources.json
 EXPOSE 8080
 COPY --from=server-build --chown=1000:1000 /app/publish/ ./
-RUN mkdir -p /host/proc/net /host/sys
+RUN mkdir -p /host/proc/net /host/sys /data && chown 1000:1000 /data
 USER 1000:1000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://127.0.0.1:8080/health || exit 1

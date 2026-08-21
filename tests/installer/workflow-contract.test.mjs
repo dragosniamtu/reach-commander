@@ -161,6 +161,12 @@ test('container smoke uses the real rendered non-root configuration', async () =
   assert.match(smoke, /render_config\.py[\s\S]*add-source/);
   assert.match(smoke, /render_config\.py[\s\S]*render/);
   assert.match(smoke, /--user 1000:1000/);
+  assert.match(smoke, /mkdir -p "\$smoke_root\/data\/auth" "\$smoke_root\/data\/keys"/);
+  assert.match(smoke, /chown -R 1000:1000 "\$smoke_root\/data"/);
+  assert.match(smoke, /type=bind,source=\$smoke_root\/data,target=\/data/);
+  for (const hardening of ['--read-only', '--cap-drop ALL', '--security-opt no-new-privileges']) {
+    assert.ok(smoke.includes(hardening), `missing hardened smoke option: ${hardening}`);
+  }
   assert.doesNotMatch(smoke, /cat >[^\n]*sources\.json/);
   assert.doesNotMatch(smoke, /chmod 0644[^\n]*sources\.json/);
 });

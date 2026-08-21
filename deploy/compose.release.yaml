@@ -10,6 +10,10 @@ services:
         source: ./config
         target: /config
         read_only: true
+      - type: bind
+        source: ./data
+        target: /data
+        read_only: false
       # installer-source-mounts
     read_only: true
     tmpfs:

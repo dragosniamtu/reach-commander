@@ -249,6 +249,9 @@ class RendererTestCase(unittest.TestCase):
             self.assertIn("source: '/srv/-Media''s: #$\" Collection'", compose)
             self.assertIn("target: '/sources/media'", compose)
             self.assertIn("read_only: true", compose)
+            self.assertIn("source: ./data", compose)
+            self.assertIn("target: /data", compose)
+            self.assertRegex(compose, r"target: /data\s+read_only: false")
             self.assertNotIn("source-mounts.json", compose)
             self.assertNotIn("# installer-source-mounts", compose)
 

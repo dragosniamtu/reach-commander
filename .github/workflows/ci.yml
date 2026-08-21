@@ -176,7 +176,10 @@ jobs:
           }
           trap cleanup EXIT
           mkdir -p "$smoke_root/source"
+          mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys"
           chmod 0755 "$smoke_root" "$smoke_root/source"
+          chmod 0700 "$smoke_root/data" "$smoke_root/data/auth" "$smoke_root/data/keys"
+          sudo chown -R 1000:1000 "$smoke_root/data"
           python3 deploy/render_config.py create-request \
             --output "$smoke_root/request.json" \
             --bind-address 127.0.0.1 \
@@ -206,6 +209,7 @@ jobs:
             --security-opt no-new-privileges \
             --publish 127.0.0.1::8080 \
             --mount "type=bind,source=$smoke_root/deployment/config,target=/config,readonly" \
+            --mount "type=bind,source=$smoke_root/data,target=/data" \
             --mount "type=bind,source=$smoke_root/source,target=/sources/smoke,readonly" \
             reachcommander:smoke
           healthy=false

@@ -10,6 +10,7 @@ services:
       - "8092:8080"
     volumes:
       - ./config:/config:ro
+      - reachcommander-data:/data
       - ./dev-sources/downloads:/sources/downloads:ro
       - ./dev-sources/media:/sources/media:ro
     read_only: true
@@ -20,3 +21,6 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+
+volumes:
+  reachcommander-data:

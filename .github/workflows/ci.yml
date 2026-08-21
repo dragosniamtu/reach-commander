@@ -85,8 +85,16 @@ jobs:
         run: npm test -- --watch=false
         working-directory: client/reach-commander-ui
 
+      - name: Verify PWA source contract
+        run: npm run test:pwa
+        working-directory: client/reach-commander-ui
+
       - name: Build Angular
         run: npm run build
+        working-directory: client/reach-commander-ui
+
+      - name: Verify production PWA
+        run: npm run verify:pwa
         working-directory: client/reach-commander-ui
 
       - name: Publish API

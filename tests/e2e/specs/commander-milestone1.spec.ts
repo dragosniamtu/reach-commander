@@ -17,6 +17,7 @@ test('operates two independent panes and restores the commander workspace', asyn
   await right.getByTestId('source-media').click();
   await expect(left.getByTestId('source-downloads')).toHaveAttribute('aria-pressed', 'true');
   await expect(right.getByTestId('source-media')).toHaveAttribute('aria-pressed', 'true');
+  await expect(right.locator('tr[data-path="/Extracted"]')).toBeVisible();
 
   await right.click();
   await page.keyboard.press('ArrowDown');

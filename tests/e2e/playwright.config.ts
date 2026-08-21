@@ -5,6 +5,8 @@ export default defineConfig({
   outputDir: '../../artifacts/playwright-results',
   globalSetup: './support/seed-fixtures.ts',
   fullyParallel: false,
+  // Browser scenarios intentionally share one seeded filesystem tree.
+  workers: 1,
   retries: 0,
   reporter: [['list'], ['html', { outputFolder: '../../artifacts/playwright-report', open: 'never' }]],
   use: {

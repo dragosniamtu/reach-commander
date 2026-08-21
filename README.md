@@ -6,7 +6,7 @@
 [![Angular 22](https://img.shields.io/badge/Angular-22-DD0031)](https://angular.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](Dockerfile)
 
-ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an Angular 22 interface with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on Windows and Linux.
+ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on Windows and Linux.
 
 ![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
 
@@ -21,15 +21,16 @@ ReachCommander demonstrates more than a file-browser UI:
 - **Streamed upload safety:** multipart files are bounded, staged beside their destination, committed all-or-nothing, and serialized with renames through a shared directory lock.
 - **Isolated archive handling:** ZIP, RAR, and 7z parsing runs in a bounded child worker; previews are immutable, extraction is conflict-safe, and the worker never receives destination paths.
 - **Cross-platform observability:** Windows and Linux collectors normalize CPU, memory, storage, GPU, temperature, fan, network, and uptime data without shelling out to vendor tools.
+- **Installable without data leakage:** Angular's production service worker caches only the versioned application shell; filesystem listings and every `/api` response remain network-only.
 - **Testable accessibility:** keyboard-first pane control, focus trapping/restoration, live regions, explicit RO/RW semantics, and deterministic browser acceptance at desktop and compact widths.
 
 | Layer | Technology |
 |---|---|
-| Frontend | Angular 22 standalone components, Signals, RxJS, Angular CDK A11y |
+| Frontend | Angular 22 standalone components, Signals, RxJS, Angular CDK A11y, installable PWA shell |
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
-| Deployment | Single-origin publish, hardened Docker Compose, Windows and Ubuntu support |
-| Quality | 477 cross-platform .NET tests, 187 Angular tests, and 18 real-browser scenarios |
+| Deployment | Single-origin PWA publish, hardened Docker Compose, Windows and Ubuntu support |
+| Quality | 477 cross-platform .NET tests, 198 Angular tests, 2 PWA contract tests, and 19 real-browser scenarios |
 
 ## What ReachCommander includes
 
@@ -46,6 +47,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Read-only virtual browsing for supported single and multi-volume ZIP, RAR, and 7z archives.
 - F5 extraction of selected archive entries or one focused unopened archive, with immutable review, live progress, cancellation, conflict blocking, and recovery guidance.
 - Live CPU, memory, storage, GPU, thermal, fan, network, and uptime telemetry when the host exposes it.
+- Installable PWA delivery with offline shell startup, explicit updates, and network-only filesystem/API data.
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
@@ -56,8 +58,8 @@ Copy, move, delete, single-item F4 rename, downloads, file previews, authenticat
 ReachCommander is a modular monolith. Angular and ASP.NET Core are delivered from one origin in production.
 
 ```text
-Browser
-  └─ Angular 22 standalone UI (Signals)
+Browser / installed PWA
+  └─ Angular 22 standalone UI (Signals + static-shell service worker)
        └─ logical sourceId + relativePath only
             └─ ASP.NET Core 10 API
                  ├─ Application contracts
@@ -276,6 +278,14 @@ $env:ReachCommander__SourcesPath = (Resolve-Path .\config\sources.local.json).Pa
 dotnet artifacts/publish/ReachCommander.Api.dll --urls http://127.0.0.1:8092
 ```
 
+## Progressive Web App
+
+Production builds can install ReachCommander as a standalone app. Use **Install app** in the top bar when the browser offers it, or use the browser's installation menu. Rejecting the prompt does not affect normal browser use. Service workers require HTTPS in production; browsers permit `localhost` as the development exception, but a LAN HTTP address is not an installable secure context.
+
+The service worker caches only the versioned Angular shell, styles, and branding assets. The shell can therefore reopen when the network or ReachCommander server is unavailable, where it displays a network-required notice. Live file data and every operation still require the server: no `/api` response, file listing, source metadata, telemetry result, upload result, rename plan, archive plan, or archive operation is cached for offline use. There is no background mutation queue or offline synchronization.
+
+When a complete application update has downloaded, ReachCommander displays **Update available** without interrupting the current file operation. Select **Reload** when ready to switch to the new version, or **Later** to keep the current version until a future reload.
+
 ## Active-panel toolbar and search
 
 The toolbar on the left side of the top bar always reflects the active panel, source, and logical directory; hardware monitoring remains on the right. Opening Multi-Rename or Add files captures that context, so switching panels cannot redirect an operation already under review.
@@ -422,6 +432,7 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 - A symlink that escapes its source is rejected even if the final target exists.
 - Multi-Rename, Add files, and archive extraction are the only current write paths. All require explicit `readOnly: false`, re-resolve logical paths beneath a configured source, reject symbolic-link targets, and serialize overlapping directory mutations. The archive worker never receives the destination root or final names.
 - The checked-in sample bind mounts remain read-only, providing defense in depth until an administrator opts a narrow source into writes at both configuration and filesystem layers.
+- The PWA service worker has no API data groups and explicitly excludes `/api/**` and `/health` from navigation fallback; it cannot provide stale filesystem or operation results offline.
 - Filesystem exceptions are converted to stable, non-leaking Problem Details. Automated tests use temporary fixture trees, never developer data.
 
 This boundary protects the configured filesystem roots; it is not a substitute for authentication, host permissions, network isolation, TLS, backups, malware scanning, or container hardening. ReachCommander still has no built-in authentication, so place it behind an authenticated HTTPS reverse proxy and do not expose it publicly.
@@ -439,7 +450,9 @@ Angular:
 ```powershell
 Push-Location client/reach-commander-ui
 npm test -- --watch=false
+npm run test:pwa
 npm run build
+npm run verify:pwa
 Pop-Location
 ```
 
@@ -454,7 +467,7 @@ Pop-Location
 ```
 
 Failed Playwright runs retain screenshots, traces, and an HTML report under `artifacts/`.
-Archive fixture generation, immutable upstream provenance, expected catalogs, and all 37 SHA-256 hashes are documented in the [fixture inventory](tests/fixtures/archives/README.md). CI runs the complete backend suite on Windows and Ubuntu, then Angular, publish-layout, and Chromium acceptance on Ubuntu.
+Archive fixture generation, immutable upstream provenance, expected catalogs, and all 37 SHA-256 hashes are documented in the [fixture inventory](tests/fixtures/archives/README.md). The PWA checks validate the source manifest/cache boundary and the generated worker output; Playwright then proves the published shell reloads offline without caching `/api/sources`. CI runs the complete backend suite on Windows and Ubuntu, then Angular, PWA, publish-layout, and Chromium acceptance on Ubuntu.
 
 ## Roadmap
 

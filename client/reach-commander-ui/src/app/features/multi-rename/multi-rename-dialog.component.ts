@@ -1,8 +1,11 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import {
+  AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   HostListener,
+  ViewChild,
   computed,
   inject,
   output,
@@ -37,7 +40,7 @@ const errorMessages: Readonly<Record<string, string>> = {
   templateUrl: './multi-rename-dialog.component.html',
   styleUrl: './multi-rename-dialog.component.scss',
 })
-export class MultiRenameDialogComponent {
+export class MultiRenameDialogComponent implements AfterViewInit {
   readonly store = inject(MultiRenameStore);
   readonly closeRequested = output<void>();
   readonly filesystemChanged = output<PanelSide>();
@@ -54,6 +57,12 @@ export class MultiRenameDialogComponent {
       (!state.operation?.recoveryRequired || this.recoveryReviewed())
     );
   });
+
+  @ViewChild('initialFocus') private initialFocus?: ElementRef<HTMLElement>;
+
+  ngAfterViewInit(): void {
+    this.initialFocus?.nativeElement.focus({ preventScroll: true });
+  }
   readonly summary = computed(() => {
     const state = this.store.state();
     const operation = state.operation;

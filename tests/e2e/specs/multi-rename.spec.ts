@@ -8,6 +8,7 @@ test("previews complete names, renames mixed entries, and safely undoes", async 
   const left = page.getByTestId("left-panel");
   await left.getByText("Rename Lab", { exact: true }).dblclick();
   await expect(left.locator(".path-status")).toHaveText("Downloads:/Rename Lab");
+  await expect(left.getByText("holiday-video.mp4", { exact: true })).toBeVisible();
   await left.click();
   await page.keyboard.press("Control+A");
   await page.keyboard.press("Control+M");
@@ -44,6 +45,7 @@ test("one conflict blocks the complete rename batch", async ({ page }) => {
 
   const left = page.getByTestId("left-panel");
   await left.getByText("Conflict Lab", { exact: true }).dblclick();
+  await expect(left.getByText("two.txt", { exact: true })).toBeVisible();
   await left.click();
   await page.keyboard.press("Control+A");
   await page.keyboard.press("Control+M");

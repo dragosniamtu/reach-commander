@@ -693,7 +693,7 @@ Update the README feature/architecture summaries to mention installable PWA deli
 - a ready update is applied only after the user selects **Reload**;
 - rejecting installation or dismissing an update does not affect normal browser use.
 
-Update quality counts to 197 Angular tests, 19 Playwright scenarios, and two PWA source-contract tests, while retaining 477 .NET tests and 37 archive fixture hashes.
+Update quality counts to 198 Angular tests after review coverage, 19 Playwright scenarios, and two PWA source-contract tests, while retaining 477 .NET tests and 37 archive fixture hashes.
 
 - [ ] **Step 3: Verify GREEN in the real browser and full project**
 
@@ -709,7 +709,7 @@ npx playwright test --workers=1
 dotnet publish src/ReachCommander.Api/ReachCommander.Api.csproj -c Release --no-restore -o artifacts/pwa-release -p:BuildAngularOnPublish=false
 ```
 
-Run Angular commands from `client/reach-commander-ui` and Playwright from `tests/e2e`. Expected: 477 .NET tests, two PWA source-contract tests, 197 Angular tests, warning-free production build, successful PWA artifact verification, 19 Playwright scenarios, and a publish tree containing `wwwroot/ngsw-worker.js`, `wwwroot/ngsw.json`, `wwwroot/manifest.webmanifest`, and all declared icons.
+Run Angular commands from `client/reach-commander-ui` and Playwright from `tests/e2e`. Expected: 477 .NET tests, two PWA source-contract tests, 198 Angular tests after review coverage, warning-free production build, successful PWA artifact verification, 19 Playwright scenarios, and a publish tree containing `wwwroot/ngsw-worker.js`, `wwwroot/ngsw.json`, `wwwroot/manifest.webmanifest`, and all declared icons.
 
 - [ ] **Step 4: Request independent review and resolve findings**
 

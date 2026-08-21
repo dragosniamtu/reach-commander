@@ -41,6 +41,18 @@ describe('MultiRenameDialogComponent', () => {
     expect((root.querySelector('[data-testid="rename-start"]') as HTMLButtonElement).disabled).toBe(
       true,
     );
+    expect(document.activeElement).toBe(root.querySelector('[role="dialog"]'));
+  });
+
+  it('keeps initial focus inside the modal while its preview is pending', () => {
+    fakeStore.state.set(openState({ previewPending: true }));
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    expect(
+      (root.querySelector('[aria-label="Close Multi-Rename"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[role="dialog"]'));
   });
 
   it('delegates immutable rule edits to the store', () => {

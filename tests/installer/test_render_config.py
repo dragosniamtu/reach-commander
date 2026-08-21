@@ -410,6 +410,29 @@ class RendererTestCase(unittest.TestCase):
                 (output / ".env").read_text(encoding="utf-8"),
             )
 
+    @unittest.skipIf(os.name == "nt", "Windows does not expose POSIX host modes")
+    def test_rendered_runtime_config_is_readable_by_the_non_root_container(self) -> None:
+        renderer = self.require_renderer()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "deployment"
+            renderer.render_deployment(
+                renderer.load_request(FIXTURE_PATH),
+                TEMPLATE_PATH,
+                output,
+            )
+
+            self.assertEqual(0o755, stat.S_IMODE((output / "config").stat().st_mode))
+            self.assertEqual(
+                0o644,
+                stat.S_IMODE((output / "config" / "sources.json").stat().st_mode),
+            )
+            self.assertEqual(0o700, stat.S_IMODE((output / "state").stat().st_mode))
+            self.assertEqual(
+                0o600,
+                stat.S_IMODE((output / "state" / "source-mounts.json").stat().st_mode),
+            )
+            self.assertEqual(0o600, stat.S_IMODE((output / ".env").stat().st_mode))
+
     def test_add_source_rejects_invalid_access_outside_argparse(self) -> None:
         renderer = self.require_renderer()
         with tempfile.TemporaryDirectory() as directory:

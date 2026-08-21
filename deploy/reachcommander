@@ -62,7 +62,7 @@ fi
 
 rc_init_paths
 rc_assert_safe_install_root
-if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' || EUID -eq 0 ]]; then
+if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]] || (( EUID == 0 )); then
   rc_require_root
 fi
 
@@ -122,12 +122,13 @@ trusted_image_digest() {
 atomic_copy_file() {
   local source="$1"
   local destination="$2"
+  local mode="${3:-0600}"
   local destination_directory
   local temporary
   destination_directory="$(dirname -- "$destination")"
   mkdir -p -- "$destination_directory"
   temporary="$(mktemp "$destination_directory/.reachcommander-copy.XXXXXX")"
-  if ! install -m 0600 -- "$source" "$temporary" || ! sync -f -- "$temporary"; then
+  if ! install -m "$mode" -- "$source" "$temporary" || ! sync -f -- "$temporary"; then
     rm -f -- "$temporary"
     rc_die 'failed to stage deployment state'
     return 1
@@ -176,10 +177,18 @@ restore_update_backup() {
   local backup_directory="$1"
   local relative_path
   for relative_path in "${UPDATE_BACKUP_FILES[@]}"; do
-    atomic_copy_file \
-      "$backup_directory/$relative_path" \
-      "$RC_INSTALL_ROOT/$relative_path" || return 1
+    if [[ "$relative_path" == 'config/sources.json' ]]; then
+      atomic_copy_file \
+        "$backup_directory/$relative_path" \
+        "$RC_INSTALL_ROOT/$relative_path" \
+        0644 || return 1
+    else
+      atomic_copy_file \
+        "$backup_directory/$relative_path" \
+        "$RC_INSTALL_ROOT/$relative_path" || return 1
+    fi
   done
+  chmod 0755 -- "$RC_INSTALL_ROOT/config"
 }
 
 remove_update_backup() {
@@ -214,9 +223,8 @@ maybe_interrupt_update() {
   local phase="$1"
   if [[
     "${REACHCOMMANDER_TESTING:-0}" == '1' &&
-    EUID -ne 0 &&
     "${REACHCOMMANDER_TEST_INTERRUPT_AFTER:-}" == "$phase"
-  ]]; then
+  ]] && (( EUID != 0 )); then
     kill -TERM "$$"
   fi
 }
@@ -492,6 +500,10 @@ command_uninstall() {
     rc_die 'an incomplete update transaction must be resolved before uninstall'
     return 1
   fi
+  if [[ -e "$RC_INSTALL_ROOT/state/install-transaction" ]]; then
+    rc_die 'an incomplete reconfiguration must be recovered by rerunning the installer before uninstall'
+    return 1
+  fi
   validate_uninstall_tree || return 1
   load_uninstall_sources || return 1
   validate_uninstall_separation || return 1
@@ -611,7 +623,7 @@ doctor_sources() {
       --reuid="$runtime_uid" \
       --regid="$runtime_gid" \
       --clear-groups \
-      -- sh -c 'test -r "$1" && test -x "$1"' reachcommander-doctor "$source_path"; then
+      -- sh -c "test -r \"\$1\" && test -x \"\$1\"" reachcommander-doctor "$source_path"; then
       doctor_pass 'Source path is accessible'
     else
       doctor_fail 'Source path is not accessible to the runtime identity'
@@ -648,6 +660,11 @@ command_doctor() {
     doctor_fail 'Incomplete update transaction requires manual review'
   else
     doctor_pass 'No incomplete update transaction is present'
+  fi
+  if [[ -e "$RC_INSTALL_ROOT/state/install-transaction" ]]; then
+    doctor_fail 'Incomplete reconfiguration transaction requires installer recovery'
+  else
+    doctor_pass 'No incomplete reconfiguration transaction is present'
   fi
 
   if python3 -m json.tool "$RC_INSTALL_ROOT/config/sources.json" >/dev/null 2>&1; then

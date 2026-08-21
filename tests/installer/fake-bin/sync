@@ -4,4 +4,14 @@ set -Eeuo pipefail
 if [[ -n "${FAKE_SYNC_LOG:-}" ]]; then
   printf '%s\0' "$@" >>"$FAKE_SYNC_LOG"
 fi
+if [[
+  -n "${FAKE_SYNC_FAIL_MATCH:-}" &&
+  "$*" == *"$FAKE_SYNC_FAIL_MATCH"* &&
+  ( -z "${FAKE_SYNC_FAIL_ONCE_FILE:-}" || ! -e "$FAKE_SYNC_FAIL_ONCE_FILE" )
+]]; then
+  if [[ -n "${FAKE_SYNC_FAIL_ONCE_FILE:-}" ]]; then
+    : >"$FAKE_SYNC_FAIL_ONCE_FILE"
+  fi
+  exit 1
+fi
 exit "${FAKE_SYNC_EXIT:-0}"

@@ -13,6 +13,7 @@
 - Work directly on `master`; do not create a branch or worktree.
 - Use test-first development for each behavior and commit after each task passes.
 - The production install root is fixed at `/opt/reachcommander`; the command path is fixed at `/usr/local/bin/reachcommander`.
+- The production command lock is fixed at `/opt/.reachcommander.lock`, outside the replaceable installation tree.
 - A path override is legal only when `REACHCOMMANDER_TESTING=1` and the caller is not root.
 - Never recursively change ownership or permissions on user source directories.
 - Never remove, move, or follow a configured source directory during uninstall or rollback.
@@ -34,7 +35,7 @@
 - `tests/installer/`: dependency-free unit, contract, fake-command, and transaction tests.
 - `.github/workflows/ci.yml`: verified smoke, multi-architecture publication, attestations, and release assets.
 - `docs/deployment/ubuntu.md`: end-user installation and operations guide.
-- `docs/deployment/{nginx.conf,Caddyfile,traefik.dynamic.yaml}`: authenticated HTTPS reverse-proxy examples.
+- `docs/deployment/{nginx.conf,Caddyfile,traefik.static.yaml,traefik.dynamic.yaml}`: authenticated HTTPS reverse-proxy examples.
 
 ---
 
@@ -214,7 +215,7 @@ Honor test path variables only when `REACHCOMMANDER_TESTING=1` and `EUID != 0`; 
 
 - [ ] **Step 3: Implement validators, lock, and Docker helpers**
 
-`rc_acquire_lock` creates `state`, opens `state/command.lock` on FD 9, and calls `flock -n 9`. `rc_compose` always calls `docker compose --project-directory "$RC_INSTALL_ROOT"` and accepts only caller-supplied Compose arguments.
+`rc_acquire_lock` validates and opens the fixed external `/opt/.reachcommander.lock` on FD 9, then calls `flock -n 9`. The lock must not live inside the deployment directory because reconfiguration and uninstall replace or remove that tree. `rc_compose` always calls `docker compose --project-directory "$RC_INSTALL_ROOT"` and accepts only caller-supplied Compose arguments.
 
 `rc_pull_digest(channel)` must:
 
@@ -233,7 +234,7 @@ Verify root ignores test overrides, non-root tests may use them, command argumen
 
 ```bash
 bash tests/installer/test_common.sh
-shellcheck deploy/lib/common.sh tests/installer/test_common.sh tests/installer/fake-bin/docker
+shellcheck -x --source-path=SCRIPTDIR deploy/lib/common.sh tests/installer/test_common.sh tests/installer/fake-bin/docker
 ```
 
 - [ ] **Step 6: Commit**
@@ -290,7 +291,9 @@ Cover:
 - interruption during staging;
 - existing installation decline;
 - successful reconfiguration;
-- unhealthy reconfiguration restoring the full previous deployment.
+- unhealthy reconfiguration restoring the full previous deployment;
+- a write failure and signal interruption restoring the exact previous files;
+- next-run recovery from a verified reconfiguration journal left by a hard failure.
 
 Canary files in every source and each source ancestor must remain unchanged in all cases.
 
@@ -305,19 +308,19 @@ Perform these operations in order:
 5. resolve `stable` to a digest with `rc_pull_digest`;
 6. replace the image with the immutable digest and rerender;
 7. copy `render_config.py` to `bin/render_config.py` and `common.sh` to `lib/common.sh` in staging;
-8. retain the rendered `state/source-mounts.json` and write `state/channel`, `state/current-image`, `state/previous-image`, and `state/command.lock`;
+8. retain the rendered `state/source-mounts.json` and write `state/channel`, `state/current-image`, and `state/previous-image`;
 9. validate the final staged deployment;
-10. atomically move it into the fixed install root;
+10. for reconfiguration, create a verified full backup and persistent transaction marker before replacing any file in the fixed install root;
 11. install `reachcommander` at the fixed command path;
 12. start only the ReachCommander Compose service and wait up to 60 seconds for health.
 
-For an existing deployment, take a complete installer-owned backup before replacement. If health fails, restore the previous directory and command, recreate the previous service, and verify its health. For a failed first install, run `compose down` without `-v`, retain validated configuration plus bounded diagnostics, and report recovery commands.
+For an existing deployment, take a complete verified installer-owned backup before replacement. If a write, signal, or health failure occurs, restore the previous directory and command, recreate the previous service, and verify its health. If the process or host dies before cleanup, the next installer run recovers the verified journal before accepting input. For a failed first install, run `compose down` without `-v`, retain validated configuration plus bounded diagnostics, and report recovery commands.
 
 - [ ] **Step 5: Run tests and static analysis**
 
 ```bash
 bash tests/installer/test_install.sh
-shellcheck deploy/install.sh tests/installer/test_install.sh
+shellcheck -x --source-path=SCRIPTDIR deploy/install.sh tests/installer/test_install.sh
 ```
 
 - [ ] **Step 6: Commit**
@@ -385,7 +388,7 @@ Read source paths using `bin/render_config.py source-paths --sources state/sourc
 
 ```bash
 bash tests/installer/test_command.sh
-shellcheck deploy/reachcommander tests/installer/test_command.sh
+shellcheck -x --source-path=SCRIPTDIR deploy/reachcommander tests/installer/test_command.sh
 ```
 
 - [ ] **Step 6: Commit**
@@ -445,7 +448,7 @@ Inject termination after each atomic state write and before/after Compose recrea
 ```bash
 bash tests/installer/test_common.sh
 bash tests/installer/test_command.sh
-shellcheck deploy/lib/common.sh deploy/reachcommander tests/installer/test_command.sh
+shellcheck -x --source-path=SCRIPTDIR deploy/lib/common.sh deploy/reachcommander tests/installer/test_command.sh
 ```
 
 - [ ] **Step 5: Commit**
@@ -504,7 +507,7 @@ If backup or Docker teardown fails, keep the command and deployment so the opera
 
 ```bash
 bash tests/installer/test_command.sh
-shellcheck deploy/reachcommander deploy/lib/common.sh tests/installer/test_command.sh
+shellcheck -x --source-path=SCRIPTDIR deploy/reachcommander deploy/lib/common.sh tests/installer/test_command.sh
 ```
 
 - [ ] **Step 5: Commit**
@@ -586,7 +589,7 @@ Explain entry points, installed files, channel semantics, and that the bundle ha
 ```bash
 node --test tests/installer/release-tags.test.mjs
 bash tests/installer/test_package.sh
-shellcheck deploy/package-installer.sh tests/installer/test_package.sh
+shellcheck -x --source-path=SCRIPTDIR deploy/package-installer.sh tests/installer/test_package.sh
 ```
 
 - [ ] **Step 6: Commit**
@@ -616,6 +619,11 @@ Parse the workflow as text/JSON-safe YAML and assert:
 - publication uses `contents: write`, `packages: write`, `attestations: write`, and `id-token: write` only in its job;
 - Buildx targets `linux/amd64,linux/arm64`, enables `sbom: true`, and uses `provenance: mode=max`;
 - tag builds prove the commit is contained in `origin/master`;
+- stable tag builds prove the candidate is the newest stable version reachable from `origin/master`;
+- one global concurrency group serializes candidate promotion;
+- tag workflows are non-cancelling and a retry reuses an existing immutable version only when its OCI revision matches `GITHUB_SHA`;
+- Buildx pushes a unique candidate tag, verifies it, and only then promotes the candidate digest to channel tags;
+- conflicting immutable complete-version tags fail closed, while an older retry repairs only its exact tag and release assets without moving channel aliases backward;
 - release assets run only for stable semantic tags;
 - manifest verification distinguishes runnable platforms from attestation descriptors.
 
@@ -630,7 +638,10 @@ bash tests/installer/test_install.sh
 bash tests/installer/test_command.sh
 bash tests/installer/test_package.sh
 node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs
-shellcheck deploy/install.sh deploy/reachcommander deploy/lib/common.sh deploy/package-installer.sh
+shellcheck -x --source-path=SCRIPTDIR \
+  deploy/install.sh deploy/reachcommander deploy/lib/common.sh deploy/package-installer.sh \
+  tests/installer/test_common.sh tests/installer/test_install.sh \
+  tests/installer/test_command.sh tests/installer/test_package.sh
 ```
 
 Keep all existing .NET, Angular, PWA, production-build, publish-layout, and Playwright gates.
@@ -641,9 +652,9 @@ After backend and acceptance success, build the candidate image, allocate a loop
 
 - [ ] **Step 4: Add GHCR publication**
 
-Use checkout with full history, the pure tag script, job-scoped `GITHUB_TOKEN`, QEMU, Buildx, GHCR login, and build/push actions. Apply OCI labels for title, description, source, revision, version, license, and documentation. Use GitHub Actions cache. Push only when the tag list is non-empty.
+Use checkout with full history, the pure tag script, job-scoped `GITHUB_TOKEN`, QEMU, Buildx, GHCR login, and build/push actions. Apply OCI labels for title, description, source, revision, version, license, and documentation. Use GitHub Actions cache. Push only a unique candidate tag when the tag list is non-empty.
 
-After push, inspect the remote manifest and require runnable `linux/amd64` and `linux/arm64` entries. Permit non-runnable attestation descriptors. Verify published tag names equal the tag-script result.
+After the candidate push, select a retry-safe source. A pre-existing complete-version tag is reusable only when its OCI revision matches the event commit; otherwise fail closed. Inspect the selected remote manifest and require runnable `linux/amd64` and `linux/arm64` entries plus the expected attestations. Permit non-runnable attestation descriptors. Only after verification, promote the selected digest to every safe tag in one serialized operation and verify each tag resolves to that digest. When a newer stable version now exists, a retry may repair only its exact immutable tag so moving aliases never regress.
 
 - [ ] **Step 5: Add stable GitHub Release assets**
 
@@ -704,19 +715,27 @@ node --test tests/installer/docs-contract.test.mjs
 The recommended command sequence must be version-pinned, reviewable, and checksum-first:
 
 ```bash
-mkdir -p /tmp/reachcommander-install
-cd /tmp/reachcommander-install
+(
+set -Eeuo pipefail
+INSTALL_WORKDIR="$(mktemp -d /tmp/reachcommander-install.XXXXXX)"
+chmod 0700 "$INSTALL_WORKDIR"
+trap 'rm -rf -- "$INSTALL_WORKDIR"' EXIT
+cd "$INSTALL_WORKDIR"
 REACHCOMMANDER_VERSION=v1.0.0
 REACHCOMMANDER_RELEASE_URL="https://github.com/dragosniamtu/reach-commander/releases/download/${REACHCOMMANDER_VERSION}"
-curl --fail --location --remote-name \
+curl --fail --location --output reachcommander-installer.tar.gz \
   "${REACHCOMMANDER_RELEASE_URL}/reachcommander-installer.tar.gz"
-curl --fail --location --remote-name \
+curl --fail --location --output SHA256SUMS \
   "${REACHCOMMANDER_RELEASE_URL}/SHA256SUMS"
-sha256sum --check SHA256SUMS
+[[ "$(wc -l <SHA256SUMS)" -eq 1 ]]
+grep --extended-regexp --quiet \
+  '^[0-9a-f]{64}  reachcommander-installer\.tar\.gz$' SHA256SUMS
+sha256sum --check --strict SHA256SUMS
 tar -xzf reachcommander-installer.tar.gz
 cd reachcommander-installer
 less install.sh
 sudo ./install.sh
+)
 ```
 
 Explain how to replace `v1.0.0` with a selected stable version. A separate, clearly marked convenience example may use `latest/download`, but the recommended root-install flow remains pinned to one release URL so the archive and checksum cannot be fetched from different releases.
@@ -729,7 +748,7 @@ Nginx must include Basic Auth (or an explicit replace-with-SSO marker), TLS plac
 
 Caddy must include HTTPS host syntax, `basic_auth`, a 50 GB request-body limit, forwarded headers where needed, and `reverse_proxy 127.0.0.1:8092`.
 
-Traefik dynamic configuration must define an HTTPS router, BasicAuth middleware, service URL `http://127.0.0.1:8092`, body-size buffering policy compatible with large uploads, and forwarded-header behavior. State that host-network reachability may require the administrator's existing Traefik deployment to use a host gateway/address instead of literal loopback.
+Traefik static and dynamic configuration must define an HTTPS router, a trusted certificate resolver (or documented trusted-certificate alternative), BasicAuth middleware, service URL `http://127.0.0.1:8092`, six-hour upstream timeouts, body-size buffering policy compatible with large uploads, and forwarded-header behavior. State that host-network reachability may require the administrator's existing Traefik deployment to use a host gateway/address instead of literal loopback.
 
 - [ ] **Step 4: Update the project README**
 
@@ -739,7 +758,7 @@ Add a concise “Install on Ubuntu” path linking to the guide. Keep the existi
 
 ```bash
 node --test tests/installer/docs-contract.test.mjs
-rg -n "curl.*\|.*(sh|bash)|wget.*\|.*(sh|bash)" README.md docs deploy
+rg -n "curl.*\|.*(sh|bash)|wget.*\|.*(sh|bash)" README.md docs/deployment deploy
 git diff --check
 ```
 
@@ -770,7 +789,7 @@ node --test \
   tests/installer/release-tags.test.mjs \
   tests/installer/workflow-contract.test.mjs \
   tests/installer/docs-contract.test.mjs
-shellcheck \
+shellcheck -x --source-path=SCRIPTDIR \
   deploy/install.sh \
   deploy/reachcommander \
   deploy/lib/common.sh \

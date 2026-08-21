@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -70,6 +70,109 @@ test('image name cannot inject GitHub output lines', async () => {
     () => tagsForRef('refs/heads/master', `${image}\npackages=write`),
     /image/i,
   );
+});
+
+test('only the newest stable repository tag may promote moving stable tags', async () => {
+  const { assertStablePromotion, promotionTagsForRef } = await loadPolicy();
+  assert.doesNotThrow(() =>
+    assertStablePromotion('v12.4.0', [
+      'v1.99.0',
+      'v12.3.9',
+      'v12.4.0-beta.1',
+      'v12.4.0',
+      'documentation-tag',
+    ]),
+  );
+  assert.throws(
+    () => assertStablePromotion('v12.3.9', ['v12.3.9', 'v12.4.0']),
+    /newest stable/i,
+  );
+  assert.throws(
+    () => assertStablePromotion('v12.4.0-beta.1', ['v12.4.0-beta.1']),
+    /stable version/i,
+  );
+  assert.throws(
+    () => assertStablePromotion('v12x4x0', ['v12x4x0']),
+    /stable version/i,
+  );
+  assert.deepEqual(
+    promotionTagsForRef(
+      'refs/tags/v12.3.9',
+      image,
+      ['v12.3.9', 'v12.4.0'],
+      true,
+    ),
+    [`${image}:v12.3.9`],
+  );
+  assert.deepEqual(
+    promotionTagsForRef(
+      'refs/tags/v12.4.0',
+      image,
+      ['v12.3.9', 'v12.4.0'],
+      false,
+    ),
+    [
+      `${image}:v12.4.0`,
+      `${image}:v12.4`,
+      `${image}:v12`,
+      `${image}:stable`,
+    ],
+  );
+  assert.deepEqual(
+    promotionTagsForRef('refs/heads/master', image, [], false),
+    [`${image}:edge`],
+  );
+  assert.throws(
+    () =>
+      promotionTagsForRef(
+        'refs/tags/v12.3.9',
+        image,
+        ['v12.3.9', 'v12.4.0'],
+        false,
+      ),
+    /newest stable/i,
+  );
+});
+
+test('stable-promotion CLI validates tags read from a file', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'reachcommander-promotion-'));
+  try {
+    const tags = join(directory, 'tags.txt');
+    await writeFile(tags, 'v2.0.0\nv2.1.0\nv2.1.0-beta.1\n', 'utf8');
+    const accepted = spawnSync(
+      process.execPath,
+      [fileURLToPath(moduleUrl), 'assert-stable-promotion', 'v2.1.0', tags],
+      { cwd: repositoryRoot, encoding: 'utf8' },
+    );
+    assert.equal(accepted.status, 0, accepted.stderr);
+    const rejected = spawnSync(
+      process.execPath,
+      [fileURLToPath(moduleUrl), 'assert-stable-promotion', 'v2.0.0', tags],
+      { cwd: repositoryRoot, encoding: 'utf8' },
+    );
+    assert.notEqual(rejected.status, 0);
+
+    const promotionOutput = join(directory, 'promotion-output.txt');
+    const resumed = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(moduleUrl),
+        'resolve-promotion-tags',
+        'refs/tags/v2.0.0',
+        image,
+        tags,
+        'true',
+        promotionOutput,
+      ],
+      { cwd: repositoryRoot, encoding: 'utf8' },
+    );
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const promotionContent = await readFile(promotionOutput, 'utf8');
+    assert.match(promotionContent, new RegExp(`${image}:v2\\.0\\.0`));
+    assert.doesNotMatch(promotionContent, /:stable/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('CLI writes escaped GitHub outputs for a stable release', async () => {

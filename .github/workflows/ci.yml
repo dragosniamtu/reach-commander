@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   backend:
@@ -84,7 +84,15 @@ jobs:
           bash tests/installer/test_command.sh
           bash tests/installer/test_package.sh
           node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs tests/installer/docs-contract.test.mjs
-          shellcheck deploy/install.sh deploy/reachcommander deploy/lib/common.sh deploy/package-installer.sh
+          shellcheck -x --source-path=SCRIPTDIR \
+            deploy/install.sh \
+            deploy/reachcommander \
+            deploy/lib/common.sh \
+            deploy/package-installer.sh \
+            tests/installer/test_common.sh \
+            tests/installer/test_install.sh \
+            tests/installer/test_command.sh \
+            tests/installer/test_package.sh
 
       - name: Restore .NET dependencies
         run: dotnet restore ReachCommander.slnx
@@ -167,24 +175,28 @@ jobs:
             rm -rf -- "$smoke_root"
           }
           trap cleanup EXIT
-          mkdir -p "$smoke_root/config" "$smoke_root/source"
-          chmod 0755 "$smoke_root" "$smoke_root/config" "$smoke_root/source"
-          cat >"$smoke_root/config/sources.json" <<'JSON'
-          {
-            "sources": [
-              {
-                "id": "smoke",
-                "name": "Smoke",
-                "path": "/sources/smoke",
-                "enabled": true,
-                "readOnly": true,
-                "defaultLeft": true,
-                "defaultRight": true
-              }
-            ]
-          }
-          JSON
-          chmod 0644 "$smoke_root/config/sources.json"
+          mkdir -p "$smoke_root/source"
+          chmod 0755 "$smoke_root" "$smoke_root/source"
+          python3 deploy/render_config.py create-request \
+            --output "$smoke_root/request.json" \
+            --bind-address 127.0.0.1 \
+            --port 38092 \
+            --uid 1000 \
+            --gid 1000 \
+            --image ghcr.io/dragosniamtu/reach-commander:stable
+          python3 deploy/render_config.py add-source \
+            --request "$smoke_root/request.json" \
+            --id smoke \
+            --name Smoke \
+            --host-path "$smoke_root/source" \
+            --access ro \
+            --default-left true \
+            --default-right true
+          python3 deploy/render_config.py render \
+            --request "$smoke_root/request.json" \
+            --template deploy/compose.release.yaml \
+            --output "$smoke_root/deployment"
+          docker compose --project-directory "$smoke_root/deployment" config --quiet
           docker run --rm --detach \
             --name reachcommander-smoke \
             --user 1000:1000 \
@@ -193,7 +205,7 @@ jobs:
             --cap-drop ALL \
             --security-opt no-new-privileges \
             --publish 127.0.0.1::8080 \
-            --mount "type=bind,source=$smoke_root/config,target=/config,readonly" \
+            --mount "type=bind,source=$smoke_root/deployment/config,target=/config,readonly" \
             --mount "type=bind,source=$smoke_root/source,target=/sources/smoke,readonly" \
             reachcommander:smoke
           healthy=false
@@ -220,6 +232,9 @@ jobs:
     needs: [backend, acceptance, container-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    concurrency:
+      group: reachcommander-container-publication
+      cancel-in-progress: false
     permissions:
       contents: write
       packages: write
@@ -251,6 +266,14 @@ jobs:
         id: release
         run: node deploy/release-tags.mjs "$GITHUB_REF" "$IMAGE" "$GITHUB_OUTPUT"
 
+      - name: Allocate unique candidate tag
+        id: candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          candidate="$IMAGE:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf 'tag=%s\n' "$candidate" >>"$GITHUB_OUTPUT"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -264,14 +287,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish amd64 and arm64 image
+      - name: Publish amd64 and arm64 candidate image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.release.outputs.tags }}
+          tags: ${{ steps.candidate.outputs.tag }}
           labels: |
             org.opencontainers.image.title=ReachCommander
             org.opencontainers.image.description=Self-hosted dual-pane file manager for Windows development and Ubuntu deployment
@@ -285,20 +308,92 @@ jobs:
           sbom: true
           provenance: mode=max
 
-      - name: Verify tags, runnable platforms, and attestation manifests
+      - name: Select retry-safe publication source
+        id: publication_source
         shell: bash
         env:
-          PUBLISHED_TAGS: ${{ steps.release.outputs.tags }}
+          CANDIDATE_DIGEST: ${{ steps.build.outputs.digest }}
+          CANDIDATE_TAG: ${{ steps.candidate.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -Eeuo pipefail
-          primary_tag=''
-          while IFS= read -r published_tag; do
-            [[ -n "$published_tag" ]] || continue
-            primary_tag="${primary_tag:-$published_tag}"
-            docker buildx imagetools inspect "$published_tag" >/dev/null
-          done <<<"$PUBLISHED_TAGS"
-          [[ -n "$primary_tag" ]]
-          docker buildx imagetools inspect --raw "$primary_tag" >manifest.json
+          [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          selected_reference="$CANDIDATE_TAG"
+          selected_digest="$CANDIDATE_DIGEST"
+          reused_immutable=false
+
+          if [[ -n "$VERSION" ]]; then
+            version_reference="$IMAGE:$VERSION"
+            if docker buildx imagetools inspect --raw "$version_reference" \
+              >existing-version-manifest.json \
+              2>existing-version-error.txt; then
+              existing_digest="sha256:$(sha256sum existing-version-manifest.json | cut -d' ' -f1)"
+              docker pull --quiet --platform linux/amd64 "$version_reference" >/dev/null
+              existing_revision="$(
+                docker image inspect \
+                  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+                  "$version_reference"
+              )"
+              if [[ "$existing_revision" != "$GITHUB_SHA" ]]; then
+                printf 'ReachCommander: immutable tag %s belongs to revision %s, not %s.\n' \
+                  "$version_reference" "$existing_revision" "$GITHUB_SHA" >&2
+                exit 1
+              fi
+              selected_reference="$version_reference"
+              selected_digest="$existing_digest"
+              reused_immutable=true
+              printf 'Reusing retry-safe immutable publication %s at %s.\n' \
+                "$selected_reference" "$selected_digest"
+            elif grep --extended-regexp --ignore-case --quiet \
+              '(manifest unknown|not found)' existing-version-error.txt; then
+              printf 'Immutable publication %s does not exist yet.\n' "$version_reference"
+            else
+              cat existing-version-error.txt >&2
+              printf 'ReachCommander: could not safely determine whether immutable tag %s exists.\n' \
+                "$version_reference" >&2
+              exit 1
+            fi
+          fi
+
+          [[ "$selected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'reference=%s\n' "$selected_reference" >>"$GITHUB_OUTPUT"
+          printf 'digest=%s\n' "$selected_digest" >>"$GITHUB_OUTPUT"
+          printf 'reused=%s\n' "$reused_immutable" >>"$GITHUB_OUTPUT"
+
+      - name: Resolve retry-safe promotion tags
+        id: promotion_tags
+        shell: bash
+        env:
+          REUSED_IMMUTABLE: ${{ steps.publication_source.outputs.reused }}
+          STABLE_RELEASE: ${{ steps.release.outputs.stableRelease }}
+        run: |
+          set -Eeuo pipefail
+          : >repository-tags.txt
+          if [[ "$STABLE_RELEASE" == 'true' ]]; then
+            git fetch --no-tags origin master
+            git fetch --tags origin
+            git tag --merged origin/master >repository-tags.txt
+          fi
+          node deploy/release-tags.mjs \
+            resolve-promotion-tags \
+            "$GITHUB_REF" \
+            "$IMAGE" \
+            repository-tags.txt \
+            "$REUSED_IMMUTABLE" \
+            "$GITHUB_OUTPUT"
+
+      - name: Verify publication source platforms and attestations
+        shell: bash
+        env:
+          SOURCE_DIGEST: ${{ steps.publication_source.outputs.digest }}
+          SOURCE_REFERENCE: ${{ steps.publication_source.outputs.reference }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$SOURCE_REFERENCE" >/dev/null
+          docker buildx imagetools inspect --raw "$SOURCE_REFERENCE" >manifest.json
+          actual_source_digest="sha256:$(sha256sum manifest.json | cut -d' ' -f1)"
+          [[ "$actual_source_digest" == "$SOURCE_DIGEST" ]]
           node <<'NODE'
           const fs = require('node:fs');
           const document = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
@@ -323,6 +418,35 @@ jobs:
             throw new Error('Expected provenance/SBOM attestation-manifest descriptors.');
           }
           NODE
+
+      - name: Promote verified image tags
+        shell: bash
+        env:
+          SOURCE_DIGEST: ${{ steps.publication_source.outputs.digest }}
+          TARGET_TAGS: ${{ steps.promotion_tags.outputs.tags }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          promotion_arguments=()
+          while IFS= read -r target_tag; do
+            [[ -n "$target_tag" ]] || continue
+            promotion_arguments+=(--tag "$target_tag")
+          done <<<"$TARGET_TAGS"
+          (( ${#promotion_arguments[@]} > 0 ))
+          docker buildx imagetools create \
+            "${promotion_arguments[@]}" \
+            "$IMAGE@$SOURCE_DIGEST"
+
+          while IFS= read -r target_tag; do
+            [[ -n "$target_tag" ]] || continue
+            actual_digest="sha256:$(
+              docker buildx imagetools inspect --raw "$target_tag" |
+                sha256sum |
+                cut -d' ' -f1
+            )"
+            [[ "$actual_digest" == "$SOURCE_DIGEST" ]]
+          done <<<"$TARGET_TAGS"
 
       - name: Build and verify stable installer assets
         if: steps.release.outputs.stableRelease == 'true'

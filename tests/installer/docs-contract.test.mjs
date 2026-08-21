@@ -20,15 +20,24 @@ test('Ubuntu guide uses a version-pinned, checksum-verified installation flow', 
     'REACHCOMMANDER_VERSION=v1.0.0',
     'reachcommander-installer.tar.gz',
     'SHA256SUMS',
-    'sha256sum --check SHA256SUMS',
+    'sha256sum --check --strict SHA256SUMS',
     'sudo ./install.sh',
     '/opt/reachcommander',
     '/usr/local/bin/reachcommander',
     '/var/backups/reachcommander',
+    '/opt/.reachcommander.lock',
+    'The first installation always resolves `stable`',
+    'Rerun the same installer bundle to recover',
   ]) {
     assert.ok(guide.includes(required), `Ubuntu guide is missing: ${required}`);
   }
   assert.match(guide, /inspect.*install\.sh/is);
+  assert.ok((guide.match(/set -Eeuo pipefail/g) ?? []).length >= 2);
+  assert.ok((guide.match(/mktemp -d/g) ?? []).length >= 2);
+  assert.ok((guide.match(/chmod 0700/g) ?? []).length >= 2);
+  assert.ok((guide.match(/sha256sum --check --strict SHA256SUMS/g) ?? []).length >= 2);
+  assert.ok(guide.split('reachcommander-installer\\.tar\\.gz').length - 1 >= 2);
+  assert.doesNotMatch(guide, /mkdir -p \/tmp\/reachcommander-install/);
 });
 
 test('Ubuntu guide documents the security and lifecycle contracts', async () => {
@@ -57,10 +66,11 @@ test('Ubuntu guide documents the security and lifecycle contracts', async () => 
 });
 
 test('reverse-proxy examples enforce HTTPS authentication and large-upload settings', async () => {
-  const [nginx, caddy, traefik] = await Promise.all([
+  const [nginx, caddy, traefik, traefikStatic] = await Promise.all([
     readRequired('docs/deployment/nginx.conf'),
     readRequired('docs/deployment/Caddyfile'),
     readRequired('docs/deployment/traefik.dynamic.yaml'),
+    readRequired('docs/deployment/traefik.static.yaml'),
   ]);
 
   for (const directive of [
@@ -91,6 +101,19 @@ test('reverse-proxy examples enforce HTTPS authentication and large-upload setti
   ]) {
     assert.ok(traefik.includes(directive), `Traefik example is missing: ${directive}`);
   }
+  assert.match(traefik, /tls:\s*\n\s+certResolver: letsencrypt/);
+  for (const directive of [
+    'websecure:',
+    'address: ":443"',
+    'readTimeout: 6h',
+    'writeTimeout: 6h',
+    'idleTimeout: 6h',
+    'certificatesResolvers:',
+    'letsencrypt:',
+    'storage: /var/lib/traefik/acme.json',
+  ]) {
+    assert.ok(traefikStatic.includes(directive), `Traefik static example is missing: ${directive}`);
+  }
 });
 
 test('README points operators to the Ubuntu guide without replacing development setup', async () => {
@@ -108,6 +131,7 @@ test('published operator material never pipes downloaded code into a shell', asy
     'docs/deployment/nginx.conf',
     'docs/deployment/Caddyfile',
     'docs/deployment/traefik.dynamic.yaml',
+    'docs/deployment/traefik.static.yaml',
     'deploy/README.md',
   ];
   const content = (await Promise.all(paths.map(readRequired))).join('\n');

@@ -5,6 +5,7 @@ RC_IMAGE_REPOSITORY='ghcr.io/dragosniamtu/reach-commander'
 RC_PRODUCTION_INSTALL_ROOT='/opt/reachcommander'
 RC_PRODUCTION_COMMAND_PATH='/usr/local/bin/reachcommander'
 RC_PRODUCTION_BACKUP_ROOT='/var/backups/reachcommander'
+RC_PRODUCTION_LOCK_PATH='/opt/.reachcommander.lock'
 
 rc_die() {
   printf 'ReachCommander: %s\n' "$1" >&2
@@ -15,6 +16,7 @@ rc_init_paths() {
   RC_INSTALL_ROOT="$RC_PRODUCTION_INSTALL_ROOT"
   RC_COMMAND_PATH="$RC_PRODUCTION_COMMAND_PATH"
   RC_BACKUP_ROOT="$RC_PRODUCTION_BACKUP_ROOT"
+  RC_LOCK_PATH="$RC_PRODUCTION_LOCK_PATH"
 
   if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
     [[ -n "${REACHCOMMANDER_TEST_BASE:-}" ]] || {
@@ -24,13 +26,19 @@ rc_init_paths() {
     RC_INSTALL_ROOT="${REACHCOMMANDER_TEST_INSTALL_ROOT:-}"
     RC_COMMAND_PATH="${REACHCOMMANDER_TEST_COMMAND_PATH:-}"
     RC_BACKUP_ROOT="${REACHCOMMANDER_TEST_BACKUP_ROOT:-}"
-    [[ -n "$RC_INSTALL_ROOT" && -n "$RC_COMMAND_PATH" && -n "$RC_BACKUP_ROOT" ]] || {
+    RC_LOCK_PATH="${REACHCOMMANDER_TEST_LOCK_PATH:-}"
+    [[
+      -n "$RC_INSTALL_ROOT" &&
+      -n "$RC_COMMAND_PATH" &&
+      -n "$RC_BACKUP_ROOT" &&
+      -n "$RC_LOCK_PATH"
+    ]] || {
       rc_die 'all test paths are required'
       return 1
     }
   fi
 
-  export RC_INSTALL_ROOT RC_COMMAND_PATH RC_BACKUP_ROOT
+  export RC_INSTALL_ROOT RC_COMMAND_PATH RC_BACKUP_ROOT RC_LOCK_PATH
 }
 
 rc_require_commands() {
@@ -143,12 +151,22 @@ rc_validate_channel() {
 }
 
 rc_acquire_lock() {
-  mkdir -p -- "$RC_INSTALL_ROOT/state" || {
+  local lock_directory
+  lock_directory="$(dirname -- "$RC_LOCK_PATH")"
+  mkdir -p -- "$lock_directory" || {
     rc_die 'cannot create command lock directory'
     return 1
   }
-  exec 9>"$RC_INSTALL_ROOT/state/command.lock" || {
+  if [[ -L "$RC_LOCK_PATH" || -e "$RC_LOCK_PATH" && ! -f "$RC_LOCK_PATH" ]]; then
+    rc_die 'command lock path is not a regular file'
+    return 1
+  fi
+  exec 9>>"$RC_LOCK_PATH" || {
     rc_die 'cannot open command lock'
+    return 1
+  }
+  chmod 0600 -- "$RC_LOCK_PATH" || {
+    rc_die 'cannot protect command lock'
     return 1
   }
   if ! flock -n 9; then
@@ -278,15 +296,18 @@ rc_assert_safe_install_root() {
   local install_root
   local command_path
   local backup_root
+  local lock_path
   local test_base
   if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
     test_base="$(readlink -m -- "${REACHCOMMANDER_TEST_BASE:-}")" || return 1
     install_root="$(readlink -m -- "$RC_INSTALL_ROOT")" || return 1
     command_path="$(readlink -m -- "$RC_COMMAND_PATH")" || return 1
     backup_root="$(readlink -m -- "$RC_BACKUP_ROOT")" || return 1
+    lock_path="$(readlink -m -- "$RC_LOCK_PATH")" || return 1
     case "$install_root" in "$test_base"/*) ;; *) rc_die 'unsafe test install root'; return 1 ;; esac
     case "$command_path" in "$test_base"/*) ;; *) rc_die 'unsafe test command path'; return 1 ;; esac
     case "$backup_root" in "$test_base"/*) ;; *) rc_die 'unsafe test backup root'; return 1 ;; esac
+    case "$lock_path" in "$test_base"/*) ;; *) rc_die 'unsafe test lock path'; return 1 ;; esac
   else
     [[ "$RC_INSTALL_ROOT" == "$RC_PRODUCTION_INSTALL_ROOT" ]] || {
       rc_die 'production install root is not fixed'
@@ -300,8 +321,12 @@ rc_assert_safe_install_root() {
       rc_die 'production backup root is not fixed'
       return 1
     }
+    [[ "$RC_LOCK_PATH" == "$RC_PRODUCTION_LOCK_PATH" ]] || {
+      rc_die 'production lock path is not fixed'
+      return 1
+    }
   fi
-  for install_root in "$RC_INSTALL_ROOT" "$RC_COMMAND_PATH" "$RC_BACKUP_ROOT"; do
+  for install_root in "$RC_INSTALL_ROOT" "$RC_COMMAND_PATH" "$RC_BACKUP_ROOT" "$RC_LOCK_PATH"; do
     if [[ "$install_root" == '/' || -L "$install_root" ]]; then
       rc_die 'installer-owned path is broad or symlinked'
       return 1

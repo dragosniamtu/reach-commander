@@ -6,7 +6,6 @@ REPOSITORY_ROOT="$(cd -- "$TEST_DIRECTORY/../.." && pwd)"
 COMMAND_SOURCE="$REPOSITORY_ROOT/deploy/reachcommander"
 RENDERER="$REPOSITORY_ROOT/deploy/render_config.py"
 TEMPLATE="$REPOSITORY_ROOT/deploy/compose.release.yaml"
-FIXTURE="$TEST_DIRECTORY/fixtures/valid-request.json"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
 
 if [[ ! -f "$COMMAND_SOURCE" ]]; then
@@ -48,13 +47,13 @@ python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output 
 printf 'stable\n' >"$INSTALL_ROOT/state/channel"
 grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
 : >"$INSTALL_ROOT/state/previous-image"
-: >"$INSTALL_ROOT/state/command.lock"
 
 export REACHCOMMANDER_TESTING=1
 export REACHCOMMANDER_TEST_BASE="$TEST_ROOT"
 export REACHCOMMANDER_TEST_INSTALL_ROOT="$INSTALL_ROOT"
 export REACHCOMMANDER_TEST_COMMAND_PATH="$COMMAND_PATH"
 export REACHCOMMANDER_TEST_BACKUP_ROOT="$TEST_ROOT/backups"
+export REACHCOMMANDER_TEST_LOCK_PATH="$TEST_ROOT/.reachcommander.lock"
 export FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
 export FAKE_FLOCK_LOG="$TEST_ROOT/flock.log"
 export FAKE_DOCKER_HEALTH=healthy
@@ -170,6 +169,13 @@ assert_equal "0" "$last_status" "healthy doctor status"
 [[ ! -s "$FAKE_FLOCK_LOG" ]] || fail "doctor acquired a mutating lock"
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "doctor deployment mutation"
 pass "doctor reports a healthy deployment without mutating it"
+
+printf '%s\n' "$INSTALL_ROOT/backups/.reconfigure-transaction" >"$INSTALL_ROOT/state/install-transaction"
+run_command doctor
+assert_equal "1" "$last_status" "doctor interrupted reconfiguration status"
+[[ "$last_output" == *'[FAIL] Incomplete reconfiguration transaction requires installer recovery'* ]] || fail "doctor reconfiguration transaction failure missing"
+rm -f -- "$INSTALL_ROOT/state/install-transaction"
+pass "doctor detects an interrupted installer reconfiguration"
 
 cp -- "$INSTALL_ROOT/.env" "$TEST_ROOT/env.backup"
 sed 's/^REACHCOMMANDER_BIND_ADDRESS=.*/REACHCOMMANDER_BIND_ADDRESS=0.0.0.0/' "$TEST_ROOT/env.backup" >"$INSTALL_ROOT/.env"
@@ -382,6 +388,7 @@ run_command_with_input 'uninstall ReachCommander' uninstall
 assert_equal "0" "$last_status" "successful uninstall status"
 [[ ! -e "$INSTALL_ROOT" ]] || fail "successful uninstall retained install root"
 [[ ! -e "$COMMAND_PATH" ]] || fail "successful uninstall retained command"
+[[ -f "$REACHCOMMANDER_TEST_LOCK_PATH" ]] || fail "external lock was removed while held"
 backup_count="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
 assert_equal "1" "$backup_count" "successful uninstall backup count"
 backup_destination="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -print -quit)"

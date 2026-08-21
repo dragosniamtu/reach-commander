@@ -65,7 +65,7 @@ Tags follow these rules:
 | Verified tag `v1.3.0-beta.1` | `v1.3.0-beta.1` only |
 | Pull request | No image publication |
 
-Version tags must point to a commit contained in `master`. A release job rejects malformed tags and refuses to move `stable` for any tag containing a prerelease suffix. There is no mutable `latest` tag, preventing ambiguity between stable and development channels.
+Version tags must point to a commit contained in `master`. A first stable promotion must be the newest stable version reachable from `master`, and prereleases never move `stable`. A retry of an older version may repair only its immutable version tag and release assets; it cannot move channel aliases backward. There is no mutable `latest` tag, preventing ambiguity between stable and development channels.
 
 The first published GHCR package must be connected to the public repository and made public through GitHub's package settings. The image carries OCI title, description, source repository, revision, version, license, and documentation labels.
 
@@ -79,14 +79,15 @@ commit or tag
   -> 198 Angular tests + 2 PWA contract tests + production build
   -> API publish validation + 19 Chromium scenarios
   -> amd64 container smoke test and /health check
-  -> amd64/arm64 Buildx publication
-  -> manifest, tag-policy, SBOM, and provenance verification
+  -> amd64/arm64 Buildx candidate publication
+  -> candidate manifest, tag-policy, SBOM, and provenance verification
+  -> serialized promotion of the verified candidate digest to public channel tags
   -> versioned installer release assets for stable version tags
 ```
 
-GitHub Container Registry authentication uses the job-scoped `GITHUB_TOKEN` with `packages: write`. Image publication uses official Docker setup, metadata, login, and build/push actions. Buildx publishes `linux/amd64` and `linux/arm64` as one manifest, with GitHub Actions caching, `mode=max` provenance, and an SBOM attestation. No registry password or personal access token is stored.
+GitHub Container Registry authentication uses the job-scoped `GITHUB_TOKEN` with `packages: write`. Image publication uses official Docker setup, metadata, login, and build/push actions. Buildx first publishes `linux/amd64` and `linux/arm64` as one uniquely named candidate manifest, with GitHub Actions caching, `mode=max` provenance, and an SBOM attestation. No registry password or personal access token is stored.
 
-Before a multi-platform push, CI builds and runs an amd64 image, waits for its container health check, requests `/health`, and removes the temporary test container. After publication, CI inspects the remote manifest and asserts that both required runnable platforms exist and that the emitted tags match the channel policy. Additional non-runnable attestation descriptors are allowed.
+Before a multi-platform push, CI builds and runs an amd64 image, waits for its container health check, requests `/health`, and removes the temporary test container. Publication jobs are globally serialized, and tag workflows are never cancelled by another run. CI inspects the uniquely tagged candidate manifest and asserts that both required runnable platforms and the expected attestations exist; only then does it atomically promote that candidate digest to channel tags. On retry, an existing complete-version tag is reused only when its OCI revision exactly matches the event commit, and its manifest is verified again before aliases or assets are repaired. A conflicting immutable tag fails closed. Every promoted tag is re-read and compared with the verified digest. Additional non-runnable attestation descriptors are allowed.
 
 For a non-prerelease semantic tag, the workflow creates or updates the corresponding GitHub Release and uploads:
 
@@ -136,14 +137,13 @@ Installation defaults to:
 │   ├── channel
 │   ├── current-image
 │   ├── previous-image
-│   ├── source-mounts.json
-│   └── command.lock
+│   └── source-mounts.json
 ├── lib/
 │   └── common.sh
 └── backups/
 ```
 
-The installer also places the management command at `/usr/local/bin/reachcommander`. Files are created with a restrictive umask. The configuration directory is mounted read-only into the container. Canonical host paths and access modes are retained separately in root-owned `state/source-mounts.json`; this file is never mounted into or served by the application and is used only for diagnostics, reconfiguration, and uninstall safety checks.
+The installer also places the management command at `/usr/local/bin/reachcommander` and uses the fixed external lock `/opt/.reachcommander.lock`. Keeping the lock outside the replaceable deployment tree preserves one lock inode across reconfiguration and uninstall. Files are created with a restrictive umask; only `config/` and `config/sources.json` receive the directory-read and file-read modes required by the unprivileged container. The configuration directory is mounted read-only into the container. Canonical host paths and access modes are retained separately in root-owned `state/source-mounts.json`; this file is never mounted into or served by the application and is used only for diagnostics, reconfiguration, and uninstall safety checks.
 
 `.env` records operational values rather than source definitions:
 
@@ -186,8 +186,10 @@ The flow is:
 8. Require explicit confirmation that an authenticated HTTPS reverse proxy will protect the loopback service.
 9. Generate JSON and Compose in a temporary directory using structured serialization, not string interpolation.
 10. Validate JSON, run `docker compose config`, pull `stable`, resolve its digest, and write the digest-pinned `.env`.
-11. Atomically install the validated files, start the service, and poll Docker's health status with a bounded timeout.
+11. For reconfiguration, persist a verified backup plus transaction marker, install the validated files, start the service, and poll Docker's health status with a bounded timeout. Remove the journal only after success.
 12. Print the local endpoint, container status, reverse-proxy documentation links, and management commands.
+
+If reconfiguration fails or is interrupted, the installer restores the complete previous deployment and command from the journal. A later installer run detects and recovers any verified journal left by a hard process or host failure before accepting new input.
 
 Source IDs use lowercase ASCII letters, digits, hyphens, and underscores and must be unique. Container targets are generated as `/sources/<source-id>`. Host paths may contain spaces because the generator writes structured, correctly quoted YAML.
 
@@ -246,7 +248,7 @@ Purging configuration is a separate, explicit confirmation. Tests treat deletion
 
 ## Reverse-proxy boundary
 
-ReachCommander has no built-in authentication. The installer therefore binds to loopback and requires the administrator to acknowledge that an authenticated HTTPS reverse proxy is responsible for access control and TLS. Documentation supplies Nginx, Caddy, and Traefik examples.
+ReachCommander has no built-in authentication. The installer therefore binds to loopback and requires the administrator to acknowledge that an authenticated HTTPS reverse proxy is responsible for access control and TLS. Documentation supplies Nginx, Caddy, and separate Traefik static/dynamic examples; the static example defines trusted certificate resolution and long-lived upstream timeouts.
 
 Proxy examples must preserve streaming behavior for large uploads, avoid request buffering where supported, set an explicit maximum request size compatible with ReachCommander's upload limits, use adequate upstream timeouts for long operations, forward standard proxy headers, and expose the application at one origin. The documentation states that HTTPS is also required for installing the PWA outside `localhost`.
 
@@ -260,14 +262,14 @@ The installer does not request proxy credentials or modify existing proxy config
 - Image-pull failure leaves the existing deployment untouched.
 - Port conflicts and unhealthy startup trigger rollback during updates.
 - Initial-install startup failure leaves validated configuration and diagnostics but removes the failed container; source paths remain untouched.
-- Interrupt handling removes only installer-owned temporary files and never a source path.
-- Concurrent management commands are serialized with an installer-owned lock under `/opt/reachcommander/state`.
+- Interrupt handling restores a journaled reconfiguration or removes only installer-owned partial first-install files; it never mutates a source path.
+- Concurrent installer and management commands are serialized with the fixed installer-owned lock `/opt/.reachcommander.lock`, outside the replaceable deployment tree.
 
 ## Testing strategy
 
 ### Static checks
 
-- ShellCheck all shipped shell scripts.
+- ShellCheck all shipped production and installer-test shell scripts while following the shared library.
 - Verify executable modes, shebangs, strict-mode setup, and absence of unexpanded release placeholders.
 - Parse generated JSON and run `docker compose config` against representative source names and paths, including spaces.
 
@@ -282,6 +284,7 @@ A dependency-free shell test harness places fake `docker`, `curl`, and filesyste
 - invalid port and occupied-port behavior;
 - Compose/JSON generation equivalence;
 - prerequisite, pull, startup, and health-check failures;
+- write failures, signal interruption, and next-run recovery of a reconfiguration journal;
 - update no-op, successful update, explicit version rollback, and automatic rollback;
 - management-command locking;
 - uninstall preservation of every source directory and ancestor.
@@ -292,7 +295,7 @@ Test-only path overrides are accepted only by unprivileged test entry points and
 
 - Keep all existing .NET, Angular, PWA, publish-layout, and Playwright checks.
 - Build and run an amd64 release image and verify `/health` before publication.
-- Inspect the pushed manifest for the required `linux/amd64` and `linux/arm64` runnable platforms while allowing non-runnable attestation descriptors.
+- Inspect the candidate manifest for the required `linux/amd64` and `linux/arm64` runnable platforms and expected attestations before promoting its digest to channel tags.
 - Verify `edge`, stable, semantic, and prerelease tag policy from event fixtures.
 - Verify release archive contents and `SHA256SUMS`.
 - Verify image source/version labels, SBOM, and provenance attestations.

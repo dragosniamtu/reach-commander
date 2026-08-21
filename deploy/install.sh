@@ -10,6 +10,9 @@ COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
 MANAGEMENT_COMMAND="$SCRIPT_DIRECTORY/reachcommander"
 WORK_ROOT=''
 INSTALL_COMMITTED=false
+INSTALL_TRANSACTION_ACTIVE=false
+HAD_EXISTING=false
+RECONFIGURE_BACKUP_DIRECTORY=''
 
 if [[ ! -f "$COMMON_LIBRARY" ]]; then
   printf 'ReachCommander: installer bundle is missing lib/common.sh\n' >&2
@@ -59,9 +62,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 prompt_value() {
   local prompt="$1"
@@ -158,9 +158,9 @@ check_source_access() {
   local access="$2"
   local runtime_uid="$3"
   local runtime_gid="$4"
-  local access_test='test -r "$1" && test -x "$1"'
+  local access_test="test -r \"\$1\" && test -x \"\$1\""
   if [[ "$access" == 'rw' ]]; then
-    access_test='test -r "$1" && test -w "$1" && test -x "$1"'
+    access_test="test -r \"\$1\" && test -w \"\$1\" && test -x \"\$1\""
   fi
   if ! setpriv \
     --reuid="$runtime_uid" \
@@ -290,10 +290,12 @@ copy_atomic() {
   local destination="$2"
   local mode="$3"
   local destination_directory
+  local destination_name
   local temporary
   destination_directory="$(dirname -- "$destination")"
+  destination_name="$(basename -- "$destination")"
   mkdir -p -- "$destination_directory"
-  temporary="$(mktemp "$destination_directory/.reachcommander-copy.XXXXXX")"
+  temporary="$(mktemp "$destination_directory/.${destination_name}.reachcommander-copy.XXXXXX")"
   if ! install -m "$mode" -- "$source" "$temporary" || ! sync -f -- "$temporary"; then
     rm -f -- "$temporary"
     rc_die 'failed to stage an installer-owned file'
@@ -323,6 +325,9 @@ file_mode() {
     bin/*)
       printf '0755\n'
       ;;
+    config/sources.json)
+      printf '0644\n'
+      ;;
     *)
       printf '0600\n'
       ;;
@@ -334,15 +339,35 @@ backup_existing_deployment() {
   local relative_path
   mkdir -p -- "$backup_directory/deployment" "$backup_directory/command"
   for relative_path in "${DEPLOYMENT_FILES[@]}"; do
-    if [[ -f "$RC_INSTALL_ROOT/$relative_path" ]]; then
-      mkdir -p -- "$backup_directory/deployment/$(dirname -- "$relative_path")"
-      cp -p -- \
+    if [[ ! -f "$RC_INSTALL_ROOT/$relative_path" || -L "$RC_INSTALL_ROOT/$relative_path" ]]; then
+      rc_die 'existing deployment is incomplete or symlinked'
+      return 1
+    fi
+    mkdir -p -- "$backup_directory/deployment/$(dirname -- "$relative_path")"
+    if ! install -m "$(file_mode "$relative_path")" -- \
+      "$RC_INSTALL_ROOT/$relative_path" \
+      "$backup_directory/deployment/$relative_path" ||
+      ! sync -f -- "$backup_directory/deployment/$relative_path" ||
+      ! cmp -s -- \
         "$RC_INSTALL_ROOT/$relative_path" \
-        "$backup_directory/deployment/$relative_path"
+        "$backup_directory/deployment/$relative_path"; then
+      rc_die 'existing deployment backup could not be verified'
+      return 1
     fi
   done
-  if [[ -f "$RC_COMMAND_PATH" ]]; then
-    cp -p -- "$RC_COMMAND_PATH" "$backup_directory/command/reachcommander"
+  if [[ ! -f "$RC_COMMAND_PATH" || -L "$RC_COMMAND_PATH" ]]; then
+    rc_die 'existing management command is missing or symlinked'
+    return 1
+  fi
+  if ! install -m 0755 -- \
+    "$RC_COMMAND_PATH" \
+    "$backup_directory/command/reachcommander" ||
+    ! sync -f -- "$backup_directory/command/reachcommander" ||
+    ! cmp -s -- \
+      "$RC_COMMAND_PATH" \
+      "$backup_directory/command/reachcommander"; then
+    rc_die 'existing management command backup could not be verified'
+    return 1
   fi
 }
 
@@ -353,61 +378,229 @@ install_staged_deployment() {
     copy_atomic \
       "$stage_root/$relative_path" \
       "$RC_INSTALL_ROOT/$relative_path" \
-      "$(file_mode "$relative_path")"
+      "$(file_mode "$relative_path")" || return 1
+    maybe_interrupt_install "$relative_path"
   done
-  copy_atomic "$MANAGEMENT_COMMAND" "$RC_COMMAND_PATH" 0755
+  chmod 0755 -- "$RC_INSTALL_ROOT/config" || return 1
+  chmod 0644 -- "$RC_INSTALL_ROOT/config/sources.json" || return 1
+  copy_atomic "$MANAGEMENT_COMMAND" "$RC_COMMAND_PATH" 0755 || return 1
 }
 
 restore_deployment() {
   local backup_directory="$1"
   local relative_path
   for relative_path in "${DEPLOYMENT_FILES[@]}"; do
-    if [[ -f "$backup_directory/deployment/$relative_path" ]]; then
-      copy_atomic \
-        "$backup_directory/deployment/$relative_path" \
-        "$RC_INSTALL_ROOT/$relative_path" \
-        "$(file_mode "$relative_path")"
+    [[ -f "$backup_directory/deployment/$relative_path" ]] || {
+      rc_die 'reconfiguration recovery backup is incomplete'
+      return 1
+    }
+    copy_atomic \
+      "$backup_directory/deployment/$relative_path" \
+      "$RC_INSTALL_ROOT/$relative_path" \
+      "$(file_mode "$relative_path")" || return 1
+  done
+  chmod 0755 -- "$RC_INSTALL_ROOT/config" || return 1
+  chmod 0644 -- "$RC_INSTALL_ROOT/config/sources.json" || return 1
+  [[ -f "$backup_directory/command/reachcommander" ]] || {
+    rc_die 'reconfiguration command backup is incomplete'
+    return 1
+  }
+  copy_atomic \
+    "$backup_directory/command/reachcommander" \
+    "$RC_COMMAND_PATH" \
+    0755 || return 1
+}
+
+remove_reconfiguration_backup() {
+  local backup_directory="$1"
+  local expected="$RC_INSTALL_ROOT/backups/.reconfigure-transaction"
+  local directory
+  local relative_path
+  [[ "$(readlink -m -- "$backup_directory")" == "$(readlink -m -- "$expected")" ]] || {
+    rc_die 'refusing to remove an unexpected reconfiguration backup'
+    return 1
+  }
+  [[ -d "$backup_directory" && ! -L "$backup_directory" ]] || {
+    rc_die 'reconfiguration backup is missing or symlinked'
+    return 1
+  }
+  for directory in \
+    deployment \
+    deployment/config \
+    deployment/state \
+    deployment/bin \
+    deployment/lib \
+    command; do
+    if [[ -L "$backup_directory/$directory" || -e "$backup_directory/$directory" && ! -d "$backup_directory/$directory" ]]; then
+      rc_die 'reconfiguration backup contains an unsafe directory'
+      return 1
     fi
   done
-  if [[ -f "$backup_directory/command/reachcommander" ]]; then
-    copy_atomic \
-      "$backup_directory/command/reachcommander" \
-      "$RC_COMMAND_PATH" \
-      0755
+  for relative_path in "${DEPLOYMENT_FILES[@]}"; do
+    rm -f -- "$backup_directory/deployment/$relative_path"
+  done
+  rm -f -- "$backup_directory/command/reachcommander"
+  for directory in \
+    deployment/config \
+    deployment/state \
+    deployment/bin \
+    deployment/lib \
+    deployment \
+    command; do
+    if [[ -d "$backup_directory/$directory" ]]; then
+      rmdir -- "$backup_directory/$directory" || return 1
+    fi
+  done
+  rmdir -- "$backup_directory"
+}
+
+begin_reconfiguration_transaction() {
+  local marker="$RC_INSTALL_ROOT/state/install-transaction"
+  RECONFIGURE_BACKUP_DIRECTORY="$RC_INSTALL_ROOT/backups/.reconfigure-transaction"
+  if [[ -e "$marker" || -e "$RECONFIGURE_BACKUP_DIRECTORY" ]]; then
+    rc_die 'an incomplete reconfiguration transaction requires recovery'
+    return 1
   fi
+  mkdir -p -- "$RC_INSTALL_ROOT/backups"
+  chmod 0700 -- "$RC_INSTALL_ROOT/backups"
+  backup_existing_deployment "$RECONFIGURE_BACKUP_DIRECTORY" || return 1
+  rc_atomic_write "$marker" "$RECONFIGURE_BACKUP_DIRECTORY"$'\n' || return 1
+  INSTALL_TRANSACTION_ACTIVE=true
+}
+
+complete_reconfiguration_transaction() {
+  local marker="$RC_INSTALL_ROOT/state/install-transaction"
+  rm -f -- "$marker"
+  remove_reconfiguration_backup "$RECONFIGURE_BACKUP_DIRECTORY"
+  INSTALL_TRANSACTION_ACTIVE=false
+}
+
+rollback_reconfiguration_transaction() {
+  local restart_previous="${1:-true}"
+  local marker="$RC_INSTALL_ROOT/state/install-transaction"
+  if ! restore_deployment "$RECONFIGURE_BACKUP_DIRECTORY"; then
+    rc_die 'reconfiguration rollback could not restore the previous files'
+    return 1
+  fi
+  if [[ "$restart_previous" == 'true' ]]; then
+    if ! rc_compose up -d reachcommander || ! rc_wait_healthy reachcommander 60; then
+      rc_die 'reconfiguration rollback could not restore the previous healthy service'
+      return 1
+    fi
+  fi
+  rm -f -- "$marker"
+  remove_reconfiguration_backup "$RECONFIGURE_BACKUP_DIRECTORY" || return 1
+  INSTALL_TRANSACTION_ACTIVE=false
+}
+
+recover_incomplete_reconfiguration() {
+  local marker="$RC_INSTALL_ROOT/state/install-transaction"
+  local expected="$RC_INSTALL_ROOT/backups/.reconfigure-transaction"
+  local recorded=''
+  if [[ ! -e "$marker" && ! -e "$expected" ]]; then
+    return 0
+  fi
+  if [[ ! -e "$marker" && -d "$expected" && ! -L "$expected" ]]; then
+    remove_reconfiguration_backup "$expected"
+    return 0
+  fi
+  if [[ ! -f "$marker" || -L "$marker" || ! -d "$expected" || -L "$expected" ]]; then
+    rc_die 'incomplete reconfiguration state is unsafe; manual recovery is required'
+    return 1
+  fi
+  IFS= read -r recorded <"$marker" || true
+  if [[ "$recorded" != "$expected" ]]; then
+    rc_die 'incomplete reconfiguration marker is invalid; manual recovery is required'
+    return 1
+  fi
+  RECONFIGURE_BACKUP_DIRECTORY="$expected"
+  INSTALL_TRANSACTION_ACTIVE=true
+  if ! rollback_reconfiguration_transaction true; then
+    rc_die 'automatic reconfiguration recovery failed; manual recovery is required'
+    return 1
+  fi
+  printf 'Recovered an interrupted ReachCommander reconfiguration.\n'
+}
+
+remove_partial_initial_deployment() {
+  local relative_path
+  local directory
+  for relative_path in "${DEPLOYMENT_FILES[@]}" 'state/install-transaction'; do
+    rm -f -- "$RC_INSTALL_ROOT/$relative_path"
+  done
+  rm -f -- "$RC_COMMAND_PATH"
+  for directory in config state bin lib backups; do
+    if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
+      rmdir -- "$RC_INSTALL_ROOT/$directory" 2>/dev/null || true
+    fi
+  done
+  if [[ -d "$RC_INSTALL_ROOT" ]]; then
+    rmdir -- "$RC_INSTALL_ROOT" 2>/dev/null || true
+  fi
+  INSTALL_TRANSACTION_ACTIVE=false
+}
+
+maybe_interrupt_install() {
+  local relative_path="$1"
+  local phase=''
+  case "$relative_path" in
+    state/current-image) phase='current-image' ;;
+  esac
+  if [[
+    -n "$phase" &&
+    "${REACHCOMMANDER_TESTING:-0}" == '1' &&
+    "${REACHCOMMANDER_TEST_INSTALL_INTERRUPT_AFTER:-}" == "$phase"
+  ]] && (( EUID != 0 )); then
+    kill -TERM "$$"
+  fi
+}
+
+handle_install_signal() {
+  local status="$1"
+  trap - HUP INT TERM
+  if [[ "$INSTALL_TRANSACTION_ACTIVE" == 'true' ]]; then
+    if [[ "$HAD_EXISTING" == 'true' ]]; then
+      if ! rollback_reconfiguration_transaction true; then
+        printf 'ReachCommander: interrupted reconfiguration requires manual recovery.\n' >&2
+      fi
+    else
+      rc_compose down >/dev/null 2>&1 || true
+      remove_partial_initial_deployment
+    fi
+  fi
+  exit "$status"
 }
 
 handle_start_failure() {
   local had_existing="$1"
-  local backup_directory="$2"
   rc_compose logs --tail 200 reachcommander >&2 || true
   if [[ "$had_existing" == 'true' ]]; then
-    restore_deployment "$backup_directory" || {
+    rollback_reconfiguration_transaction true || {
       rc_die 'reconfiguration failed and the previous files could not be restored'
       return 3
     }
-    if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
-      rc_die 'reconfiguration was unhealthy; the previous deployment was restored'
-      return 2
-    fi
-    rc_die 'reconfiguration and automatic rollback were both unhealthy'
-    return 3
+    rc_die 'reconfiguration was unhealthy; the previous deployment was restored'
+    return 2
   fi
   rc_compose down >/dev/null 2>&1 || true
   rc_die 'initial startup was unhealthy; validated configuration was retained'
   return 2
 }
 
+trap 'handle_install_signal 129' HUP
+trap 'handle_install_signal 130' INT
+trap 'handle_install_signal 143' TERM
+
 preflight
 rc_init_paths
 rc_assert_safe_install_root
 assert_generated_layout_safe
-if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' || EUID -eq 0 ]]; then
+if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]] || (( EUID == 0 )); then
   rc_require_root
 fi
 rc_acquire_lock
+recover_incomplete_reconfiguration
 
-HAD_EXISTING=false
 if [[ -f "$RC_INSTALL_ROOT/.env" || -f "$RC_INSTALL_ROOT/compose.yaml" ]]; then
   HAD_EXISTING=true
   prompt_value 'A ReachCommander deployment exists. Reconfigure it? (y/N)' 'n'
@@ -415,6 +608,10 @@ if [[ -f "$RC_INSTALL_ROOT/.env" || -f "$RC_INSTALL_ROOT/compose.yaml" ]]; then
     printf 'ReachCommander deployment left unchanged.\n'
     exit 0
   fi
+fi
+if [[ "$HAD_EXISTING" == 'false' && -e "$RC_COMMAND_PATH" ]]; then
+  rc_die 'management command exists without a complete deployment'
+  exit 1
 fi
 
 invoking_ids="$(rc_invoking_ids)"
@@ -454,7 +651,6 @@ mkdir -p -- "$install_parent"
 WORK_ROOT="$(mktemp -d "$install_parent/.reachcommander-install.XXXXXX")"
 REQUEST_PATH="$WORK_ROOT/request.json"
 STAGE_ROOT="$WORK_ROOT/deployment"
-BACKUP_DIRECTORY="$WORK_ROOT/previous"
 
 write_request "$REQUEST_PATH" "$RC_IMAGE_REPOSITORY:stable"
 python3 "$RENDERER" render \
@@ -471,21 +667,42 @@ install -m 0600 -- "$COMMON_LIBRARY" "$STAGE_ROOT/lib/common.sh"
 rc_atomic_write "$STAGE_ROOT/state/channel" $'stable\n'
 rc_atomic_write "$STAGE_ROOT/state/current-image" "$RESOLVED_IMAGE"$'\n'
 rc_atomic_write "$STAGE_ROOT/state/previous-image" ''
-touch -- "$STAGE_ROOT/state/command.lock"
-chmod 0600 -- "$STAGE_ROOT/state/command.lock"
 docker compose --project-directory "$STAGE_ROOT" config --quiet
 
 if [[ "$HAD_EXISTING" == 'true' ]]; then
-  backup_existing_deployment "$BACKUP_DIRECTORY"
+  begin_reconfiguration_transaction
+else
+  INSTALL_TRANSACTION_ACTIVE=true
 fi
 
-install_staged_deployment "$STAGE_ROOT"
+if ! install_staged_deployment "$STAGE_ROOT"; then
+  if [[ "$HAD_EXISTING" == 'true' ]]; then
+    if rollback_reconfiguration_transaction true; then
+      rc_die 'reconfiguration write failed; the previous deployment was restored'
+      exit 2
+    fi
+    rc_die 'reconfiguration write failed and rollback requires manual recovery'
+    exit 3
+  fi
+  remove_partial_initial_deployment
+  rc_die 'initial deployment files could not be installed'
+  exit 1
+fi
 INSTALL_COMMITTED=true
 
 if ! rc_compose up -d reachcommander || ! rc_wait_healthy reachcommander 60; then
   failure_status=0
-  handle_start_failure "$HAD_EXISTING" "$BACKUP_DIRECTORY" || failure_status=$?
+  if [[ "$HAD_EXISTING" == 'false' ]]; then
+    INSTALL_TRANSACTION_ACTIVE=false
+  fi
+  handle_start_failure "$HAD_EXISTING" || failure_status=$?
   exit "$failure_status"
+fi
+
+if [[ "$HAD_EXISTING" == 'true' ]]; then
+  complete_reconfiguration_transaction
+else
+  INSTALL_TRANSACTION_ACTIVE=false
 fi
 
 printf 'ReachCommander is healthy at http://%s:%s\n' "$BIND_ADDRESS" "$PORT"

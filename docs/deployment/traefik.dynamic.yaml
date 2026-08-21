@@ -8,7 +8,8 @@ http:
       rule: Host(`reachcommander.example.com`)
       entryPoints:
         - websecure
-      tls: {}
+      tls:
+        certResolver: letsencrypt
       middlewares:
         - reachcommander-auth
         - reachcommander-upload-limit
@@ -40,4 +41,3 @@ http:
         dialTimeout: 30s
         responseHeaderTimeout: 6h
         idleConnTimeout: 6h
-

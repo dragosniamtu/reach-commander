@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# The production-path probe intentionally re-sources the library in a subshell.
+# shellcheck disable=SC2031
 set -Eeuo pipefail
 
 TEST_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,8 +21,9 @@ export REACHCOMMANDER_TEST_BASE="$TEST_ROOT"
 export REACHCOMMANDER_TEST_INSTALL_ROOT="$TEST_ROOT/install root"
 export REACHCOMMANDER_TEST_COMMAND_PATH="$TEST_ROOT/bin/reachcommander"
 export REACHCOMMANDER_TEST_BACKUP_ROOT="$TEST_ROOT/backups"
+export REACHCOMMANDER_TEST_LOCK_PATH="$TEST_ROOT/.reachcommander.lock"
 
-# shellcheck source=../../../deploy/lib/common.sh
+# shellcheck source=../../deploy/lib/common.sh
 source "$COMMON"
 
 tests_run=0
@@ -54,17 +57,19 @@ rc_init_paths
 assert_equal "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$RC_INSTALL_ROOT" "test install root"
 assert_equal "$REACHCOMMANDER_TEST_COMMAND_PATH" "$RC_COMMAND_PATH" "test command path"
 assert_equal "$REACHCOMMANDER_TEST_BACKUP_ROOT" "$RC_BACKUP_ROOT" "test backup root"
+assert_equal "$REACHCOMMANDER_TEST_LOCK_PATH" "$RC_LOCK_PATH" "test lock path"
 pass "test-only path overrides are explicit"
 
 production_paths="$({
   unset REACHCOMMANDER_TESTING REACHCOMMANDER_TEST_BASE
   unset REACHCOMMANDER_TEST_INSTALL_ROOT REACHCOMMANDER_TEST_COMMAND_PATH
-  unset REACHCOMMANDER_TEST_BACKUP_ROOT
+  unset REACHCOMMANDER_TEST_BACKUP_ROOT REACHCOMMANDER_TEST_LOCK_PATH
+  # shellcheck source=../../deploy/lib/common.sh
   source "$COMMON"
   rc_init_paths
-  printf '%s|%s|%s' "$RC_INSTALL_ROOT" "$RC_COMMAND_PATH" "$RC_BACKUP_ROOT"
+  printf '%s|%s|%s|%s' "$RC_INSTALL_ROOT" "$RC_COMMAND_PATH" "$RC_BACKUP_ROOT" "$RC_LOCK_PATH"
 })"
-assert_equal "/opt/reachcommander|/usr/local/bin/reachcommander|/var/backups/reachcommander" "$production_paths" "production paths"
+assert_equal "/opt/reachcommander|/usr/local/bin/reachcommander|/var/backups/reachcommander|/opt/.reachcommander.lock" "$production_paths" "production paths"
 pass "production ignores arbitrary path environment"
 
 rc_require_commands bash printf
@@ -113,6 +118,8 @@ pass "release channels are strictly validated"
 
 export FAKE_FLOCK_LOG="$TEST_ROOT/flock.log"
 rc_acquire_lock
+[[ -f "$RC_LOCK_PATH" ]] || fail "external lock file was not created"
+[[ ! -e "$RC_INSTALL_ROOT/state/command.lock" ]] || fail "lock must not live inside the replaceable deployment tree"
 mapfile -d '' flock_arguments <"$FAKE_FLOCK_LOG"
 assert_equal "-n" "${flock_arguments[0]}" "flock nonblocking argument"
 assert_equal "9" "${flock_arguments[1]}" "flock descriptor"
@@ -127,7 +134,8 @@ assert_equal "file name with spaces" "${docker_arguments[4]}" "whitespace remain
 pass "Compose always uses the fixed project directory and quoted argv"
 
 export FAKE_DOCKER_PRINT_ARGS=0
-export FAKE_DOCKER_DIGESTS=$'docker.io/untrusted/image@sha256:'"$(printf 'f%.0s' {1..64})"$'\nghcr.io/dragosniamtu/reach-commander@sha256:'"$(printf 'a%.0s' {1..64})"
+FAKE_DOCKER_DIGESTS=$'docker.io/untrusted/image@sha256:'"$(printf 'f%.0s' {1..64})"$'\nghcr.io/dragosniamtu/reach-commander@sha256:'"$(printf 'a%.0s' {1..64})"
+export FAKE_DOCKER_DIGESTS
 digest="$(rc_pull_digest stable)"
 assert_equal "ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})" "$digest" "resolved digest"
 export FAKE_DOCKER_DIGESTS='malformed'
@@ -159,9 +167,13 @@ pass "atomic writes preserve exact content"
 
 rc_assert_safe_install_root
 original_install_root="$RC_INSTALL_ROOT"
+original_lock_path="$RC_LOCK_PATH"
 RC_INSTALL_ROOT=/
 assert_fails "broad install root must fail" rc_assert_safe_install_root
 RC_INSTALL_ROOT="$original_install_root"
+RC_LOCK_PATH=/reachcommander.lock
+assert_fails "test lock outside the test base must fail" rc_assert_safe_install_root
+RC_LOCK_PATH="$original_lock_path"
 pass "install root safety rejects broad targets"
 
 if grep -Eq '(^|[^[:alnum:]_])eval([^[:alnum:]_]|$)' "$COMMON"; then

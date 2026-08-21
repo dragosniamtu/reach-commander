@@ -325,6 +325,8 @@ def render_deployment(
     atomic_write(output / "compose.yaml", compose)
     atomic_write(output / "config" / "sources.json", _json_document(sources))
     atomic_write(output / "state" / "source-mounts.json", _json_document(source_mounts))
+    (output / "config").chmod(0o755)
+    (output / "config" / "sources.json").chmod(0o644)
 
 
 def _raw_request(path: pathlib.Path) -> dict:

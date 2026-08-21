@@ -25,10 +25,14 @@ test('installer verification runs inside acceptance before publication', async (
     'bash tests/installer/test_command.sh',
     'bash tests/installer/test_package.sh',
     'node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs',
-    'shellcheck deploy/install.sh deploy/reachcommander deploy/lib/common.sh deploy/package-installer.sh',
+    'shellcheck -x --source-path=SCRIPTDIR \\',
   ]) {
     assert.ok(content.includes(command), `missing acceptance command: ${command}`);
   }
+  assert.match(
+    content,
+    /shellcheck -x --source-path=SCRIPTDIR[\s\S]*?deploy\/package-installer\.sh[\s\S]*?tests\/installer\/test_common\.sh[\s\S]*?tests\/installer\/test_install\.sh[\s\S]*?tests\/installer\/test_command\.sh[\s\S]*?tests\/installer\/test_package\.sh/,
+  );
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
 });
 
@@ -93,6 +97,49 @@ test('manifest verification requires runnable platforms and attestations', async
   assert.match(content, /unknown/);
 });
 
+test('publication verifies a unique candidate before globally serialized promotion', async () => {
+  const content = await workflow();
+  assert.match(
+    content,
+    /concurrency:\s*\n\s+group: ci-\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\s*\n\s+cancel-in-progress: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/v'\) \}\}/,
+  );
+  const publishStart = content.indexOf('  container-publish:');
+  assert.notEqual(publishStart, -1);
+  const publish = content.slice(publishStart);
+  assert.match(publish, /concurrency:\s*\n\s+group: reachcommander-container-publication\s*\n\s+cancel-in-progress: false/);
+  assert.match(publish, /candidate-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/);
+  assert.match(publish, /tags: \$\{\{ steps\.candidate\.outputs\.tag \}\}/);
+  assert.doesNotMatch(publish, /tags: \$\{\{ steps\.release\.outputs\.tags \}\}/);
+  assert.match(publish, /resolve-promotion-tags/);
+  assert.match(publish, /docker buildx imagetools create/);
+  assert.match(publish, /id: publication_source/);
+  assert.match(publish, /org\.opencontainers\.image\.revision/);
+  assert.match(publish, /GITHUB_SHA/);
+  assert.match(publish, /existing_digest/);
+  assert.match(publish, /steps\.publication_source\.outputs\.digest/);
+  assert.match(publish, /id: promotion_tags/);
+  assert.match(publish, /REUSED_IMMUTABLE/);
+  assert.match(
+    publish,
+    /Resolve retry-safe promotion tags[\s\S]*?git fetch --no-tags origin master[\s\S]*?git fetch --tags origin[\s\S]*?resolve-promotion-tags/,
+  );
+  assert.match(publish, /steps\.promotion_tags\.outputs\.tags/);
+  assert.doesNotMatch(publish, /already exists; immutable version tags cannot be replaced/);
+
+  const buildPosition = publish.indexOf('uses: docker/build-push-action@v6');
+  const sourcePosition = publish.indexOf('Select retry-safe publication source');
+  const promotionTagsPosition = publish.indexOf('Resolve retry-safe promotion tags');
+  const verifyPosition = publish.indexOf('Verify publication source platforms and attestations');
+  const promotePosition = publish.indexOf('Promote verified image tags');
+  assert.ok(
+    buildPosition >= 0 &&
+      sourcePosition > buildPosition &&
+      promotionTagsPosition > sourcePosition &&
+      verifyPosition > promotionTagsPosition &&
+      promotePosition > verifyPosition,
+  );
+});
+
 test('runtime image context excludes release-only and test content', async () => {
   const content = await readFile(dockerignoreUrl, 'utf8');
   for (const entry of ['deploy', 'docs', 'tests', '.github']) {
@@ -101,4 +148,19 @@ test('runtime image context excludes release-only and test content', async () =>
   assert.doesNotMatch(content, /^src$/m);
   assert.doesNotMatch(content, /^client$/m);
   assert.doesNotMatch(content, /^global\.json$/m);
+});
+
+test('container smoke uses the real rendered non-root configuration', async () => {
+  const content = await workflow();
+  const smokeStart = content.indexOf('  container-smoke:');
+  const publishStart = content.indexOf('  container-publish:');
+  assert.notEqual(smokeStart, -1);
+  assert.notEqual(publishStart, -1);
+  const smoke = content.slice(smokeStart, publishStart);
+  assert.match(smoke, /render_config\.py[\s\S]*create-request/);
+  assert.match(smoke, /render_config\.py[\s\S]*add-source/);
+  assert.match(smoke, /render_config\.py[\s\S]*render/);
+  assert.match(smoke, /--user 1000:1000/);
+  assert.doesNotMatch(smoke, /cat >[^\n]*sources\.json/);
+  assert.doesNotMatch(smoke, /chmod 0644[^\n]*sources\.json/);
 });

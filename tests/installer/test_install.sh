@@ -34,12 +34,14 @@ export REACHCOMMANDER_TEST_BASE="$TEST_ROOT"
 export REACHCOMMANDER_TEST_INSTALL_ROOT="$TEST_ROOT/install root"
 export REACHCOMMANDER_TEST_COMMAND_PATH="$TEST_ROOT/bin/reachcommander"
 export REACHCOMMANDER_TEST_BACKUP_ROOT="$TEST_ROOT/external backups"
+export REACHCOMMANDER_TEST_LOCK_PATH="$TEST_ROOT/.reachcommander.lock"
 export SUDO_UID=1000
 export SUDO_GID=1000
 export FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
 export FAKE_FLOCK_LOG="$TEST_ROOT/flock.log"
 export FAKE_SYNC_LOG="$TEST_ROOT/sync.log"
-export FAKE_DOCKER_DIGESTS="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})"
+FAKE_DOCKER_DIGESTS="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})"
+export FAKE_DOCKER_DIGESTS
 export FAKE_DOCKER_HEALTH=healthy
 export FAKE_DOCKER_COMPOSE_EXIT=0
 export FAKE_DOCKER_CONFIG_EXIT=0
@@ -81,6 +83,14 @@ run_installer() {
   printf '%s\n' "$input" | bash "$BUNDLE/install.sh" >"$output" 2>&1
   last_status=$?
   set -e
+}
+
+active_deployment_fingerprint() {
+  find "$REACHCOMMANDER_TEST_INSTALL_ROOT" \
+    -path "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups" -prune -o \
+    -type f -print0 |
+    sort -z |
+    xargs -0 sha256sum
 }
 
 source_prompt_input() {
@@ -170,10 +180,12 @@ fi
 assert_equal "0" "$last_status" "first installation status"
 for required_file in \
   .env compose.yaml config/sources.json state/source-mounts.json \
-  state/channel state/current-image state/previous-image state/command.lock \
+  state/channel state/current-image state/previous-image \
   bin/render_config.py lib/common.sh; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$required_file" ]] || fail "missing installed $required_file"
 done
+[[ -f "$REACHCOMMANDER_TEST_LOCK_PATH" ]] || fail "fixed external lock missing"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/command.lock" ]] || fail "deployment contains a replaceable lock inode"
 [[ -x "$REACHCOMMANDER_TEST_COMMAND_PATH" ]] || fail "management command was not installed"
 grep -q '^REACHCOMMANDER_BIND_ADDRESS=127.0.0.1$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "loopback default missing"
 grep -q '^REACHCOMMANDER_PORT=8092$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "port default missing"
@@ -186,6 +198,18 @@ assert_equal "stable" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "first source canary"
 assert_equal "keep two" "$(cat -- "$SOURCE_TWO/canary.txt")" "second source canary"
 pass "first install renders mixed sources and starts a digest-pinned service"
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    skip "runtime configuration modes permit non-root container reads" "Windows does not expose POSIX host modes"
+    ;;
+  *)
+    assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config")" "config directory mode"
+    assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json")" "source configuration mode"
+    assert_equal "600" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env")" "environment mode"
+    pass "runtime configuration modes permit non-root container reads"
+    ;;
+esac
 
 deployment_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
@@ -204,6 +228,73 @@ assert_equal "0" "$last_status" "successful reconfiguration status"
 grep -q 'Renamed Media' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json" || fail "reconfigured source name missing"
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "reconfiguration source canary"
 pass "healthy reconfiguration replaces generated configuration"
+
+deployment_before="$(active_deployment_fingerprint)"
+command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+export FAKE_SYNC_FAIL_MATCH="$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.reconfigure-transaction/deployment/.env"
+export FAKE_SYNC_FAIL_ONCE_FILE="$TEST_ROOT/backup-sync-failed-once"
+run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-backup-failure.out"
+(( last_status != 0 )) || fail "reconfiguration backup failure must stop installation"
+assert_equal "$deployment_before" "$(active_deployment_fingerprint)" "backup-failure active deployment"
+assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" "backup-failure command"
+[[ -d "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.reconfigure-transaction" ]] || fail "partial backup fixture was not retained"
+unset FAKE_SYNC_FAIL_MATCH FAKE_SYNC_FAIL_ONCE_FILE
+run_installer $'n\n' "$TEST_ROOT/reconfigure-backup-retry.out"
+assert_equal "0" "$last_status" "next installer run should clear an orphaned partial backup"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.reconfigure-transaction" ]] || fail "orphaned partial backup remains"
+assert_equal "$deployment_before" "$(active_deployment_fingerprint)" "orphan-cleanup active deployment"
+pass "partial reconfiguration backup is cleaned safely on the next run"
+
+deployment_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum)"
+command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+export FAKE_SYNC_FAIL_MATCH="$REACHCOMMANDER_TEST_INSTALL_ROOT/state/.current-image"
+export FAKE_SYNC_FAIL_ONCE_FILE="$TEST_ROOT/sync-failed-once"
+reconfigure_write_failure_input=$'y\n'"$(source_prompt_input 'Write Failure Media' 'RO' 'Write Failure Movies' 'RW' 'write-failure-media' 'write-failure-movies')"
+run_installer "$reconfigure_write_failure_input" "$TEST_ROOT/reconfigure-write-failure.out"
+(( last_status != 0 )) || fail "reconfiguration write failure must be reported"
+assert_equal "$deployment_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum)" "write-failure deployment rollback"
+assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" "write-failure command rollback"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/install-transaction" ]] || fail "completed rollback retained install marker"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.reconfigure-transaction" ]] || fail "completed rollback retained install backup"
+unset FAKE_SYNC_FAIL_MATCH FAKE_SYNC_FAIL_ONCE_FILE
+pass "reconfiguration write failure restores the complete prior deployment"
+
+deployment_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum)"
+command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+export REACHCOMMANDER_TEST_INSTALL_INTERRUPT_AFTER=current-image
+run_installer "$reconfigure_write_failure_input" "$TEST_ROOT/reconfigure-interrupt.out"
+assert_equal "143" "$last_status" "reconfiguration interruption status"
+assert_equal "$deployment_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum)" "interrupted deployment rollback"
+assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" "interrupted command rollback"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/install-transaction" ]] || fail "interrupted rollback retained install marker"
+unset REACHCOMMANDER_TEST_INSTALL_INTERRUPT_AFTER
+pass "reconfiguration interruption restores the complete prior deployment"
+
+deployment_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum)"
+recovery_backup="$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.reconfigure-transaction"
+mkdir -p \
+  "$recovery_backup/deployment/config" \
+  "$recovery_backup/deployment/state" \
+  "$recovery_backup/deployment/bin" \
+  "$recovery_backup/deployment/lib" \
+  "$recovery_backup/command"
+for recovery_file in \
+  .env compose.yaml config/sources.json state/source-mounts.json \
+  state/channel state/current-image state/previous-image \
+  bin/render_config.py lib/common.sh; do
+  cp -- \
+    "$REACHCOMMANDER_TEST_INSTALL_ROOT/$recovery_file" \
+    "$recovery_backup/deployment/$recovery_file"
+done
+cp -- "$REACHCOMMANDER_TEST_COMMAND_PATH" "$recovery_backup/command/reachcommander"
+printf '%s\n' "$recovery_backup" >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/install-transaction"
+printf 'corrupt interrupted state\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
+run_installer $'n\n' "$TEST_ROOT/recover-incomplete-reconfiguration.out"
+assert_equal "0" "$last_status" "incomplete reconfiguration recovery status"
+assert_equal "$deployment_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum)" "recovered deployment"
+[[ ! -e "$recovery_backup" ]] || fail "recovery backup remains after successful recovery"
+grep -q 'Recovered an interrupted ReachCommander reconfiguration' "$TEST_ROOT/recover-incomplete-reconfiguration.out" || fail "recovery message missing"
+pass "next installer run recovers a crash-persistent reconfiguration journal"
 
 export FAKE_DOCKER_CONFIG_EXIT=1
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"

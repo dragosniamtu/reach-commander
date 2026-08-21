@@ -115,6 +115,211 @@ command_restart() {
   rc_wait_healthy reachcommander 60
 }
 
+trusted_image_digest() {
+  [[ "${1:-}" =~ ^ghcr\.io/dragosniamtu/reach-commander@sha256:[0-9a-f]{64}$ ]]
+}
+
+atomic_copy_file() {
+  local source="$1"
+  local destination="$2"
+  local destination_directory
+  local temporary
+  destination_directory="$(dirname -- "$destination")"
+  mkdir -p -- "$destination_directory"
+  temporary="$(mktemp "$destination_directory/.reachcommander-copy.XXXXXX")"
+  if ! install -m 0600 -- "$source" "$temporary" || ! sync -f -- "$temporary"; then
+    rm -f -- "$temporary"
+    rc_die 'failed to stage deployment state'
+    return 1
+  fi
+  if ! mv -f -- "$temporary" "$destination"; then
+    rm -f -- "$temporary"
+    rc_die 'failed to replace deployment state'
+    return 1
+  fi
+}
+
+UPDATE_BACKUP_FILES=(
+  '.env'
+  'config/sources.json'
+  'state/source-mounts.json'
+  'state/channel'
+  'state/current-image'
+  'state/previous-image'
+)
+
+create_update_backup() {
+  local backup_root="$RC_INSTALL_ROOT/backups"
+  local backup_directory
+  local relative_path
+  if [[ -L "$backup_root" ]]; then
+    rc_die 'update backup directory must not be a symlink'
+    return 1
+  fi
+  mkdir -p -- "$backup_root"
+  chmod 0700 -- "$backup_root"
+  backup_directory="$(mktemp -d "$backup_root/.update.XXXXXX")"
+  for relative_path in "${UPDATE_BACKUP_FILES[@]}"; do
+    if [[ ! -f "$RC_INSTALL_ROOT/$relative_path" || -L "$RC_INSTALL_ROOT/$relative_path" ]]; then
+      rc_die 'deployment state cannot be backed up safely'
+      return 1
+    fi
+    mkdir -p -- "$backup_directory/$(dirname -- "$relative_path")"
+    install -m 0600 -- \
+      "$RC_INSTALL_ROOT/$relative_path" \
+      "$backup_directory/$relative_path"
+  done
+  printf '%s\n' "$backup_directory"
+}
+
+restore_update_backup() {
+  local backup_directory="$1"
+  local relative_path
+  for relative_path in "${UPDATE_BACKUP_FILES[@]}"; do
+    atomic_copy_file \
+      "$backup_directory/$relative_path" \
+      "$RC_INSTALL_ROOT/$relative_path" || return 1
+  done
+}
+
+remove_update_backup() {
+  local backup_directory="$1"
+  local canonical_backup_root
+  local canonical_backup
+  local relative_path
+  canonical_backup_root="$(readlink -m -- "$RC_INSTALL_ROOT/backups")"
+  canonical_backup="$(readlink -m -- "$backup_directory")"
+  case "$canonical_backup" in
+    "$canonical_backup_root"/.update.*)
+      ;;
+    *)
+      rc_die 'refusing to remove an unexpected update backup'
+      return 1
+      ;;
+  esac
+  if [[ -L "$backup_directory" ]]; then
+    rc_die 'refusing to follow an update backup symlink'
+    return 1
+  fi
+  for relative_path in "${UPDATE_BACKUP_FILES[@]}"; do
+    rm -f -- "$backup_directory/$relative_path"
+  done
+  rmdir -- \
+    "$backup_directory/config" \
+    "$backup_directory/state" \
+    "$backup_directory"
+}
+
+maybe_interrupt_update() {
+  local phase="$1"
+  if [[
+    "${REACHCOMMANDER_TESTING:-0}" == '1' &&
+    EUID -ne 0 &&
+    "${REACHCOMMANDER_TEST_INTERRUPT_AFTER:-}" == "$phase"
+  ]]; then
+    kill -TERM "$$"
+  fi
+}
+
+verify_update_state() {
+  local channel
+  local current_image
+  local environment_image
+  local previous_image=''
+  if [[ -e "$RC_INSTALL_ROOT/state/update-transaction" ]]; then
+    printf 'ReachCommander: an incomplete update transaction exists; run reachcommander doctor before retrying.\n' >&2
+    return 1
+  fi
+  if ! channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel")" ||
+    ! rc_validate_channel "$channel" >/dev/null 2>&1; then
+    rc_die 'saved update channel is invalid'
+    return 1
+  fi
+  if ! current_image="$(read_state_line "$RC_INSTALL_ROOT/state/current-image")" ||
+    ! trusted_image_digest "$current_image"; then
+    rc_die 'current image state is not a trusted digest'
+    return 1
+  fi
+  if ! environment_image="$(read_env_value REACHCOMMANDER_IMAGE)" ||
+    [[ "$environment_image" != "$current_image" ]]; then
+    rc_die 'environment image and current-image state are inconsistent; run reachcommander doctor'
+    return 1
+  fi
+  if [[ -s "$RC_INSTALL_ROOT/state/previous-image" ]]; then
+    previous_image="$(read_state_line "$RC_INSTALL_ROOT/state/previous-image")"
+    if ! trusted_image_digest "$previous_image"; then
+      rc_die 'previous image state is not a trusted digest'
+      return 1
+    fi
+  fi
+}
+
+command_update() {
+  local requested_channel="${1:-}"
+  local saved_channel
+  local current_image
+  local resolved_image
+  local backup_directory
+  local marker="$RC_INSTALL_ROOT/state/update-transaction"
+
+  if ! rc_acquire_lock; then
+    return 1
+  fi
+  if ! verify_update_state; then
+    return 1
+  fi
+  saved_channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel")"
+  current_image="$(read_state_line "$RC_INSTALL_ROOT/state/current-image")"
+  requested_channel="${requested_channel:-$saved_channel}"
+  if ! rc_validate_channel "$requested_channel" >/dev/null 2>&1; then
+    rc_die 'requested update channel is invalid'
+    return 1
+  fi
+  if ! resolved_image="$(rc_pull_digest "$requested_channel")"; then
+    return 1
+  fi
+  if [[ "$resolved_image" == "$current_image" ]]; then
+    printf 'ReachCommander is already running %s.\n' "$resolved_image"
+    return 0
+  fi
+
+  if ! backup_directory="$(create_update_backup)"; then
+    return 1
+  fi
+  rc_atomic_write "$marker" "$backup_directory"$'\n'
+  rc_atomic_write "$RC_INSTALL_ROOT/state/previous-image" "$current_image"$'\n'
+  python3 "$RC_INSTALL_ROOT/bin/render_config.py" set-image \
+    --env "$RC_INSTALL_ROOT/.env" \
+    --image "$resolved_image"
+  maybe_interrupt_update environment
+  rc_atomic_write "$RC_INSTALL_ROOT/state/current-image" "$resolved_image"$'\n'
+  maybe_interrupt_update current-image
+  rc_atomic_write "$RC_INSTALL_ROOT/state/channel" "$requested_channel"$'\n'
+  maybe_interrupt_update channel
+
+  if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
+    rm -f -- "$marker"
+    remove_update_backup "$backup_directory"
+    printf 'ReachCommander updated successfully to %s.\n' "$resolved_image"
+    return 0
+  fi
+
+  rc_compose logs --tail 200 reachcommander >&2 || true
+  rc_atomic_write "$RC_INSTALL_ROOT/state/failed-image" "$resolved_image"$'\n'
+  if ! restore_update_backup "$backup_directory"; then
+    printf 'ReachCommander: update failed and state restoration failed; manual recovery is required.\n' >&2
+    return 3
+  fi
+  rm -f -- "$marker"
+  remove_update_backup "$backup_directory" || true
+  if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
+    printf 'ReachCommander: update was unhealthy; the previous deployment was restored.\n' >&2
+    return 2
+  fi
+  printf 'ReachCommander: update and rollback were unhealthy; manual recovery is required.\n' >&2
+  return 3
+}
+
 DOCTOR_FAILURES=0
 
 doctor_pass() {
@@ -225,6 +430,12 @@ command_doctor() {
 
   doctor_required_files
 
+  if [[ -e "$RC_INSTALL_ROOT/state/update-transaction" ]]; then
+    doctor_fail 'Incomplete update transaction requires manual review'
+  else
+    doctor_pass 'No incomplete update transaction is present'
+  fi
+
   if python3 -m json.tool "$RC_INSTALL_ROOT/config/sources.json" >/dev/null 2>&1; then
     doctor_pass 'Application source configuration is valid JSON'
   else
@@ -316,8 +527,7 @@ case "$1" in
     command_doctor
     ;;
   update)
-    rc_die 'update is not available in this installer version'
-    exit 69
+    command_update "${2:-}"
     ;;
   uninstall)
     rc_die 'uninstall is not available in this installer version'

@@ -200,5 +200,132 @@ assert_equal "1" "$last_status" "doctor missing management command status"
 mv -- "$TEST_ROOT/reachcommander-away" "$COMMAND_PATH"
 pass "doctor fails when the fixed management command is unavailable"
 
+digest_a="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})"
+digest_b="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'b%.0s' {1..64})"
+digest_c="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'c%.0s' {1..64})"
+digest_d="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'd%.0s' {1..64})"
+digest_e="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'e%.0s' {1..64})"
+
+reset_update_baseline() {
+  local image="${1:-$digest_a}"
+  local channel="${2:-stable}"
+  python3 "$INSTALL_ROOT/bin/render_config.py" set-image --env "$INSTALL_ROOT/.env" --image "$image"
+  printf '%s\n' "$channel" >"$INSTALL_ROOT/state/channel"
+  printf '%s\n' "$image" >"$INSTALL_ROOT/state/current-image"
+  : >"$INSTALL_ROOT/state/previous-image"
+  rm -f -- "$INSTALL_ROOT/state/failed-image" "$INSTALL_ROOT/state/update-transaction"
+  rm -rf -- "$INSTALL_ROOT/backups"
+  mkdir -p "$INSTALL_ROOT/backups"
+  unset FAKE_DOCKER_HEALTH_FILE REACHCOMMANDER_TEST_INTERRUPT_AFTER
+  export FAKE_DOCKER_HEALTH=healthy
+  export FAKE_DOCKER_PULL_EXIT=0
+  export FAKE_FLOCK_EXIT=0
+}
+
+reset_update_baseline
+: >"$FAKE_DOCKER_LOG"
+run_command update latest
+assert_equal "1" "$last_status" "invalid update channel status"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "invalid channel invoked Docker"
+pass "update rejects malformed channels before Docker access"
+
+export FAKE_DOCKER_DIGESTS="$digest_a"
+: >"$FAKE_DOCKER_LOG"
+run_command update stable
+assert_equal "0" "$last_status" "no-op update status"
+[[ "$last_output" == *'already running'* ]] || fail "no-op update message missing"
+mapfile -d '' noop_args <"$FAKE_DOCKER_LOG"
+if printf '%s\n' "${noop_args[@]}" | grep -q '^up$'; then
+  fail "no-op update recreated the service"
+fi
+pass "update is a no-op when the resolved digest is current"
+
+export FAKE_DOCKER_DIGESTS="$digest_b"
+run_command update edge
+assert_equal "0" "$last_status" "successful explicit update status"
+assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "successful update channel"
+assert_equal "$digest_b" "$(cat -- "$INSTALL_ROOT/state/current-image")" "successful current image"
+assert_equal "$digest_a" "$(cat -- "$INSTALL_ROOT/state/previous-image")" "successful previous image"
+grep -Fxq "REACHCOMMANDER_IMAGE=$digest_b" "$INSTALL_ROOT/.env" || fail "successful environment image missing"
+[[ ! -e "$INSTALL_ROOT/state/update-transaction" ]] || fail "successful update marker leaked"
+pass "successful update atomically advances image and channel state"
+
+export FAKE_DOCKER_DIGESTS="$digest_c"
+run_command update
+assert_equal "0" "$last_status" "saved-channel update status"
+assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "saved update channel"
+assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "saved-channel image"
+assert_equal "$digest_b" "$(cat -- "$INSTALL_ROOT/state/previous-image")" "saved-channel previous image"
+pass "update without an argument discovers from the saved channel"
+
+state_before="$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image")"
+export FAKE_DOCKER_PULL_EXIT=1
+export FAKE_DOCKER_DIGESTS="$digest_d"
+run_command update stable
+(( last_status != 0 )) || fail "pull failure must fail update"
+assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image")" "pull failure state"
+export FAKE_DOCKER_PULL_EXIT=0
+pass "pull failure leaves all deployed state unchanged"
+
+printf '1\n0\n' >"$TEST_ROOT/update-compose-sequence"
+export FAKE_DOCKER_COMPOSE_SEQUENCE_FILE="$TEST_ROOT/update-compose-sequence"
+export FAKE_DOCKER_DIGESTS="$digest_d"
+run_command update stable
+assert_equal "2" "$last_status" "Compose failure rollback status"
+assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "Compose rollback channel"
+assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "Compose rollback current image"
+unset FAKE_DOCKER_COMPOSE_SEQUENCE_FILE
+pass "Compose recreation failure restores the previous healthy deployment"
+
+printf 'unhealthy\nhealthy\n' >"$TEST_ROOT/update-health-sequence"
+export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/update-health-sequence"
+export FAKE_DOCKER_DIGESTS="$digest_d"
+run_command update stable
+assert_equal "2" "$last_status" "automatic rollback status"
+[[ "$last_output" == *'previous deployment was restored'* ]] || fail "rollback success message missing"
+assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "rollback channel"
+assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "rollback current image"
+grep -Fxq "REACHCOMMANDER_IMAGE=$digest_c" "$INSTALL_ROOT/.env" || fail "rollback environment image missing"
+assert_equal "$digest_d" "$(cat -- "$INSTALL_ROOT/state/failed-image")" "failed digest record"
+pass "unhealthy update restores the previous healthy deployment"
+
+printf 'unhealthy\nunhealthy\n' >"$TEST_ROOT/update-health-sequence"
+export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/update-health-sequence"
+export FAKE_DOCKER_DIGESTS="$digest_e"
+run_command update stable
+assert_equal "3" "$last_status" "failed rollback status"
+[[ "$last_output" == *'manual recovery'* ]] || fail "failed rollback recovery message missing"
+assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "failed rollback restored state"
+assert_equal "$digest_e" "$(cat -- "$INSTALL_ROOT/state/failed-image")" "failed rollback digest record"
+unset FAKE_DOCKER_HEALTH_FILE
+export FAKE_DOCKER_HEALTH=healthy
+pass "failed automatic rollback reports manual recovery without losing prior state"
+
+reset_update_baseline
+export FAKE_DOCKER_DIGESTS="$digest_b"
+export FAKE_FLOCK_EXIT=1
+: >"$FAKE_DOCKER_LOG"
+run_command update edge
+(( last_status != 0 )) || fail "lock contention must fail update"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "contended update invoked Docker"
+export FAKE_FLOCK_EXIT=0
+pass "concurrent update is rejected before registry access"
+
+for interrupt_phase in environment current-image channel; do
+  reset_update_baseline
+  export FAKE_DOCKER_DIGESTS="$digest_b"
+  export REACHCOMMANDER_TEST_INTERRUPT_AFTER="$interrupt_phase"
+  run_command update edge
+  assert_equal "143" "$last_status" "interruption status after $interrupt_phase"
+  [[ -f "$INSTALL_ROOT/state/update-transaction" ]] || fail "interruption marker missing after $interrupt_phase"
+  unset REACHCOMMANDER_TEST_INTERRUPT_AFTER
+  : >"$FAKE_DOCKER_LOG"
+  run_command update edge
+  assert_equal "1" "$last_status" "incomplete transaction refusal after $interrupt_phase"
+  [[ "$last_output" == *'reachcommander doctor'* ]] || fail "doctor direction missing after $interrupt_phase"
+  [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "incomplete transaction accessed Docker after $interrupt_phase"
+done
+pass "interrupted state writes block later updates until diagnosis"
+
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "command source canary"
 printf '1..%d\n' "$tests_run"

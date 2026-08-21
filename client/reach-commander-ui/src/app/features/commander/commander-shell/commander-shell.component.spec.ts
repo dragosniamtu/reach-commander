@@ -14,6 +14,7 @@ import {
   ArchiveExtractionState,
   ArchiveExtractionStore,
 } from '../../../core/state/archive-extraction-store';
+import { PwaService } from '../../../core/pwa/pwa.service';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -76,6 +77,16 @@ describe('CommanderShellComponent system metrics integration', () => {
     cancel: vi.fn(() => Promise.resolve()),
     setCompletionHandler: vi.fn(),
   };
+  const pwa = {
+    canInstall: signal(false),
+    online: signal(true),
+    updateReady: signal(false),
+    installing: signal(false),
+    error: signal<string | null>(null),
+    install: vi.fn(() => Promise.resolve()),
+    reloadForUpdate: vi.fn(),
+    dismissUpdate: vi.fn(),
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -86,6 +97,11 @@ describe('CommanderShellComponent system metrics integration', () => {
     upload.state.set(closedUploadState());
     multiRename.state.set(closedMultiRenameState());
     archiveExtraction.state.set(closedArchiveExtractionState());
+    pwa.canInstall.set(false);
+    pwa.online.set(true);
+    pwa.updateReady.set(false);
+    pwa.installing.set(false);
+    pwa.error.set(null);
     await TestBed.configureTestingModule({
       imports: [CommanderShellComponent],
       providers: [
@@ -95,6 +111,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: UploadStore, useValue: upload },
         { provide: MultiRenameStore, useValue: multiRename },
         { provide: ArchiveExtractionStore, useValue: archiveExtraction },
+        { provide: PwaService, useValue: pwa },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -453,6 +470,68 @@ describe('CommanderShellComponent system metrics integration', () => {
     await handler('left', 'right');
     expect(store.refresh).toHaveBeenCalledWith('left');
     expect(store.refresh).toHaveBeenCalledWith('right');
+  });
+
+  it('shows the supported install action and delegates one click', () => {
+    pwa.canInstall.set(true);
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector(
+      '[data-testid="install-app"]',
+    ) as HTMLButtonElement;
+    expect(button).not.toBeNull();
+
+    button.click();
+
+    expect(pwa.install).toHaveBeenCalledOnce();
+  });
+
+  it('shows an accessible offline notice without stale-data claims', () => {
+    pwa.online.set(false);
+    fixture.detectChanges();
+
+    const notice = fixture.nativeElement.querySelector(
+      '[data-testid="connection-notice"]',
+    ) as HTMLElement;
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.textContent).toContain('offline');
+    expect(notice.textContent).toContain(
+      'Live file data and operations require the server',
+    );
+  });
+
+  it('reloads or dismisses a ready update only from the notice actions', () => {
+    pwa.updateReady.set(true);
+    fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector(
+      '[data-testid="reload-update"]',
+    ) as HTMLButtonElement).click();
+    expect(pwa.reloadForUpdate).toHaveBeenCalledOnce();
+
+    (fixture.nativeElement.querySelector(
+      '[data-testid="dismiss-update"]',
+    ) as HTMLButtonElement).click();
+    expect(pwa.dismissUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('reports an unreachable server and retries initialization explicitly', async () => {
+    store.initialize.mockRejectedValueOnce(new Error('unreachable'));
+
+    await fixture.componentInstance.retryInitialization();
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="connection-notice"]').textContent,
+    ).toContain('server is unavailable');
+
+    store.initialize.mockResolvedValueOnce(undefined);
+    (fixture.nativeElement.querySelector(
+      '[data-testid="retry-connection"]',
+    ) as HTMLButtonElement).click();
+    await fixture.whenStable();
+
+    expect(store.initialize).toHaveBeenCalledTimes(3);
   });
 });
 

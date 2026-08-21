@@ -34,6 +34,8 @@ import {
   ActivePanelToolbarComponent,
   ActivePanelToolbarContext,
 } from '../active-panel-toolbar/active-panel-toolbar.component';
+import { PwaService } from '../../../core/pwa/pwa.service';
+import { PwaStatusComponent } from '../../pwa/pwa-status.component';
 
 @Component({
   selector: 'app-commander-shell',
@@ -46,6 +48,7 @@ import {
     MultiRenameDialogComponent,
     ActivePanelToolbarComponent,
     ArchiveExtractionDialogComponent,
+    PwaStatusComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -57,6 +60,7 @@ export class CommanderShellComponent implements OnInit {
   readonly uploadStore = inject(UploadStore);
   readonly multiRename = inject(MultiRenameStore);
   readonly archiveExtraction = inject(ArchiveExtractionStore);
+  readonly pwa = inject(PwaService);
   readonly commandStatus = signal<string | null>(null);
   readonly initializationError = signal<string | null>(null);
   readonly menuOpen = signal(false);
@@ -119,9 +123,16 @@ export class CommanderShellComponent implements OnInit {
   ngOnInit(): void {
     this.keyboard.start();
     this.metricsStore.start();
-    void this.store.initialize().catch(() => {
-      this.initializationError.set('ReachCommander could not load its source configuration.');
-    });
+    void this.retryInitialization();
+  }
+
+  async retryInitialization(): Promise<void> {
+    this.initializationError.set(null);
+    try {
+      await this.store.initialize();
+    } catch {
+      this.initializationError.set('The ReachCommander server is unavailable.');
+    }
   }
 
   execute(command: CommanderCommand): void {

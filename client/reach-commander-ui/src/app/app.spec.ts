@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { provideServiceWorker } from '@angular/service-worker';
 import { EMPTY, Observable } from 'rxjs';
 import { App } from './app';
 import {
@@ -15,7 +16,10 @@ describe('App', () => {
     localStorage.clear();
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [{ provide: CommanderApiPort, useClass: AppTestApi }],
+      providers: [
+        provideServiceWorker('ngsw-worker.js', { enabled: false }),
+        { provide: CommanderApiPort, useClass: AppTestApi },
+      ],
     }).compileComponents();
   });
 

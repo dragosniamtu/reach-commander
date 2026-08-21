@@ -587,7 +587,9 @@ it('reports an unreachable server and retries initialization explicitly', async 
 Before changing the shell, extend the existing offline section of `tests/e2e/specs/pwa.spec.ts` with:
 
 ```ts
-await expect(page.getByTestId('connection-notice')).toContainText('offline');
+await expect(page.getByTestId('connection-notice')).toContainText(
+  /offline|server is unavailable/i,
+);
 ```
 
 - [ ] **Step 2: Run the focused shell spec and verify RED**

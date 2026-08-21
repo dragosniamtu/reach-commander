@@ -14,6 +14,17 @@
     />
     <div class="top-actions">
       <span class="read-mode"><i></i> CONTROLLED FILE OPERATIONS</span>
+      @if (pwa.canInstall()) {
+        <button
+          type="button"
+          class="install-app"
+          data-testid="install-app"
+          [disabled]="pwa.installing()"
+          (click)="pwa.install()"
+        >
+          {{ pwa.installing() ? 'Installing…' : 'Install app' }}
+        </button>
+      }
       <button type="button" disabled title="Transfers arrive in Milestone 3">Transfers</button>
       <button
         type="button"
@@ -31,6 +42,11 @@
       />
     </div>
   </header>
+
+  <app-pwa-status
+    [initializationError]="initializationError()"
+    (retryRequested)="retryInitialization()"
+  />
 
   @if (metricsOpen()) {
     <app-system-metrics-details
@@ -56,10 +72,6 @@
 
   @if (archiveExtraction.state().phase !== 'closed') {
     <app-archive-extraction-dialog (closeRequested)="closeArchiveExtraction()" />
-  }
-
-  @if (initializationError()) {
-    <div class="fatal-error" role="alert">{{ initializationError() }}</div>
   }
 
   <section class="panes" aria-label="Dual-pane file manager">

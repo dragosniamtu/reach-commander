@@ -1,0 +1,44 @@
+@if (!pwa.online() || initializationError() || pwa.updateReady() || pwa.error()) {
+  <section class="pwa-notices" aria-label="Application status">
+    @if (!pwa.online()) {
+      <div
+        class="pwa-notice pwa-notice--connection"
+        data-testid="connection-notice"
+        role="status"
+        aria-live="polite"
+      >
+        <span><strong>ReachCommander is offline.</strong> Live file data and operations require the server.</span>
+      </div>
+    } @else if (initializationError()) {
+      <div
+        class="pwa-notice pwa-notice--connection"
+        data-testid="connection-notice"
+        role="status"
+        aria-live="polite"
+      >
+        <span>{{ initializationError() }} Live file data and operations require the server.</span>
+        <button type="button" data-testid="retry-connection" (click)="retryRequested.emit()">
+          Retry
+        </button>
+      </div>
+    }
+
+    @if (pwa.updateReady()) {
+      <div class="pwa-notice pwa-notice--update" role="status" aria-live="polite">
+        <span><strong>Update available.</strong> Reload when you are ready.</span>
+        <div class="pwa-notice__actions">
+          <button type="button" data-testid="reload-update" (click)="pwa.reloadForUpdate()">
+            Reload
+          </button>
+          <button type="button" data-testid="dismiss-update" (click)="pwa.dismissUpdate()">
+            Later
+          </button>
+        </div>
+      </div>
+    }
+
+    @if (pwa.error()) {
+      <div class="pwa-notice pwa-notice--error" role="alert">{{ pwa.error() }}</div>
+    }
+  </section>
+}

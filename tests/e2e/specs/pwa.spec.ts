@@ -21,5 +21,8 @@ test('registers the production shell, keeps API data out of caches, and reloads 
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByText('ReachCommander', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('connection-notice')).toContainText(
+    /offline|server is unavailable/i,
+  );
   await context.setOffline(false);
 });

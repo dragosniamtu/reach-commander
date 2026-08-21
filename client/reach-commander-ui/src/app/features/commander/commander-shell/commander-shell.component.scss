@@ -78,6 +78,19 @@
   color: var(--text-4);
   background: var(--surface-3);
 }
+.top-actions .install-app {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.top-actions .install-app:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.top-actions .install-app:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 .read-mode {
   display: flex;
   align-items: center;
@@ -189,16 +202,6 @@
   font-size: 10px;
   line-height: 1.5;
 }
-.fatal-error {
-  position: absolute;
-  z-index: 30;
-  inset: 58px 16px auto;
-  padding: 12px;
-  border: 1px solid var(--danger);
-  border-radius: 5px;
-  color: var(--danger-text);
-  background: var(--danger-dim);
-}
 @media (max-width: 900px) {
   :host {
     overflow: auto;
@@ -225,7 +228,7 @@
   .brand-block > div {
     display: none;
   }
-  .top-actions > button {
+  .top-actions > button:not(.install-app) {
     display: none;
   }
 }

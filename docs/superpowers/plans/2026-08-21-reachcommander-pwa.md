@@ -484,7 +484,7 @@ export const PWA_RELOAD = new InjectionToken<() => void>('PWA_RELOAD', {
 - set a concise error on prompt rejection;
 - subscribe to `versionUpdates` only when `SwUpdate.isEnabled`;
 - set `updateReady` only for `VERSION_READY`;
-- report `VERSION_INSTALLATION_FAILED` and `VERSION_FAILED` without disrupting the current version;
+- report `VERSION_INSTALLATION_FAILED` without disrupting the current version; Angular 22.1.2 does not expose the later `VERSION_FAILED` event in `VersionEvent`;
 - call only `PWA_RELOAD` from `reloadForUpdate()` when `updateReady` is true;
 - clear `updateReady` from `dismissUpdate()`.
 

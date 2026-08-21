@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -12,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { e2eAuthStatePath, e2eSetupCodePath } from './authentication';
 
 interface SourceTemplate {
   id: string;
@@ -23,6 +25,31 @@ interface SourcesTemplate {
 }
 
 const healthUrl = 'http://127.0.0.1:8092/health';
+const setupCodePattern = /ReachCommander first-run setup code:\s+([A-Za-z0-9_-]{40,})/;
+
+function captureSetupCode(server: ReturnType<typeof spawn>): Promise<string> {
+  return new Promise((resolveCode, rejectCode) => {
+    let output = '';
+    let captured = false;
+    const mirror = (target: NodeJS.WriteStream) => (chunk: Buffer) => {
+      target.write(chunk);
+      output = (output + chunk.toString('utf8')).slice(-16_384);
+      const match = setupCodePattern.exec(output);
+      if (!captured && match?.[1]) {
+        captured = true;
+        resolveCode(match[1]);
+      }
+    };
+
+    server.stdout?.on('data', mirror(process.stdout));
+    server.stderr?.on('data', mirror(process.stderr));
+    server.once('exit', (code) => {
+      if (!captured) {
+        rejectCode(new Error(`ReachCommander exited before emitting a setup code (${code}).`));
+      }
+    });
+  });
+}
 
 async function waitForHealth(server: ReturnType<typeof spawn>): Promise<void> {
   const deadline = Date.now() + 60_000;
@@ -81,6 +108,7 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   }
 
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'reachcommander-e2e-'));
+  const authenticationDataRoot = join(fixtureRoot, 'auth-data');
   const downloadsRoot = join(fixtureRoot, 'Downloads');
   const mediaRoot = join(fixtureRoot, 'Media');
   const usbRoot = join(fixtureRoot, 'USB-unmounted');
@@ -159,28 +187,44 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
     throw new Error(`Could not publish ReachCommander (exit code ${publish.status ?? 1}).`);
   }
 
+  rmSync(e2eSetupCodePath, { force: true });
+  rmSync(e2eAuthStatePath, { force: true });
+  mkdirSync(dirname(e2eSetupCodePath), { recursive: true });
+
   const server = spawn('dotnet', [join(publishDirectory, 'ReachCommander.Api.dll')], {
     cwd: publishDirectory,
     env: {
       ...process.env,
-      ASPNETCORE_ENVIRONMENT: 'Production',
+      ASPNETCORE_ENVIRONMENT: 'Testing',
       ASPNETCORE_URLS: 'http://127.0.0.1:8092',
+      Authentication__DataPath: authenticationDataRoot,
       HardwareMetrics__Enabled: 'false',
       ReachCommander__SourcesPath: configurationPath,
     },
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const setupCodePromise = captureSetupCode(server);
 
   try {
-    await waitForHealth(server);
+    const [, setupCode] = await Promise.all([waitForHealth(server), setupCodePromise]);
+    writeFileSync(e2eSetupCodePath, `${setupCode}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    chmodSync(e2eSetupCodePath, 0o600);
   } catch (error) {
     await stopServer(server);
     rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(e2eSetupCodePath, { force: true });
+    rmSync(e2eAuthStatePath, { force: true });
     throw error;
   }
 
   return async () => {
     await stopServer(server);
     rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(e2eSetupCodePath, { force: true });
+    rmSync(e2eAuthStatePath, { force: true });
   };
 }

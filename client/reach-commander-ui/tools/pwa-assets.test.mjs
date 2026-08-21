@@ -51,6 +51,10 @@ test('enables only static production caching and excludes server endpoints', () 
   const config = readJson('ngsw-config.json');
   assert.equal(config.index, '/index.html');
   assert.equal(Object.hasOwn(config, 'dataGroups'), false);
-  assert.ok(config.navigationUrls.includes('!/api/**'));
+  const apiExclusion = config.navigationUrls.find((url) => url === '!/api/**');
+  assert.ok(apiExclusion);
+  const excludedPrefix = apiExclusion.slice(1, -2);
+  assert.ok('/api/auth/session'.startsWith(excludedPrefix));
+  assert.ok('/api/auth/antiforgery'.startsWith(excludedPrefix));
   assert.ok(config.navigationUrls.includes('!/health'));
 });

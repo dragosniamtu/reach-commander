@@ -23,7 +23,19 @@ for (const path of required) {
 
 const ngsw = JSON.parse(readFileSync(join(output, 'ngsw.json'), 'utf8'));
 assert.equal((ngsw.dataGroups ?? []).length, 0, 'API data groups must stay empty.');
+for (const group of ngsw.assetGroups ?? []) {
+  const urls = [...(group.urls ?? []), ...(group.patterns ?? [])];
+  assert.equal(
+    urls.some((url) => url.includes('/api/') || url.includes('api\\/')),
+    false,
+    `API responses must not appear in the ${group.name} asset group.`,
+  );
+}
 const navigationRules = ngsw.navigationUrls ?? [];
 assert.ok(navigationRules.some((entry) => !entry.positive && entry.regex.includes('api')));
+const apiRule = navigationRules.find((entry) => !entry.positive && entry.regex.includes('api'));
+assert.ok(apiRule, 'The generated worker must contain a negative API navigation rule.');
+assert.match('/api/auth/session', new RegExp(apiRule.regex));
+assert.match('/api/auth/antiforgery', new RegExp(apiRule.regex));
 assert.ok(navigationRules.some((entry) => !entry.positive && entry.regex.includes('health')));
 console.log('ReachCommander PWA build verified.');

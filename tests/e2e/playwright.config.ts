@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { e2eAuthStatePath } from './support/authentication';
 
 export default defineConfig({
   testDir: './specs',
@@ -19,8 +20,19 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'auth-setup',
+      testMatch: /auth\.setup\.ts/,
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: 'chromium',
+      dependencies: ['auth-setup'],
+      testMatch: /.*\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+        storageState: e2eAuthStatePath,
+      },
     },
   ],
 });

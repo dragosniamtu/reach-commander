@@ -17,12 +17,18 @@ test('registers the production shell, keeps API data out of caches, and reloads 
     .toBe(true);
 
   expect(await page.evaluate(async () => Boolean(await caches.match('/api/sources')))).toBe(false);
+  expect(await page.evaluate(async () => Boolean(await caches.match('/api/auth/session')))).toBe(
+    false,
+  );
+  expect(
+    await page.evaluate(async () => Boolean(await caches.match('/api/auth/antiforgery'))),
+  ).toBe(false);
 
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByText('ReachCommander', { exact: true })).toBeVisible();
-  await expect(page.getByTestId('connection-notice')).toContainText(
-    /offline|server is unavailable/i,
-  );
+  await expect(page.getByRole('heading', { name: 'Connection required' })).toBeVisible();
+  await expect(page.getByTestId('left-panel')).toHaveCount(0);
+  await expect(page.locator('tbody tr')).toHaveCount(0);
   await context.setOffline(false);
 });

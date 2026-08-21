@@ -1,0 +1,17 @@
+{
+  "bindAddress": "127.0.0.1",
+  "port": 8092,
+  "uid": 1000,
+  "gid": 1000,
+  "image": "ghcr.io/dragosniamtu/reach-commander@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sources": [
+    {
+      "id": "media",
+      "name": "Media",
+      "hostPath": "/srv/Family Media",
+      "readOnly": true,
+      "defaultLeft": true,
+      "defaultRight": true
+    }
+  ]
+}

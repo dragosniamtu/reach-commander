@@ -1,0 +1,21 @@
+services:
+  reachcommander:
+    image: ${REACHCOMMANDER_IMAGE}
+    container_name: reachcommander
+    user: "${REACHCOMMANDER_UID}:${REACHCOMMANDER_GID}"
+    ports:
+      - "${REACHCOMMANDER_BIND_ADDRESS}:${REACHCOMMANDER_PORT}:8080"
+    volumes:
+      - type: bind
+        source: ./config
+        target: /config
+        read_only: true
+      # installer-source-mounts
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

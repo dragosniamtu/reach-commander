@@ -92,6 +92,15 @@ run_command() {
   set -e
 }
 
+run_command_with_input() {
+  local input="$1"
+  shift
+  set +e
+  last_output="$(printf '%s\n' "$input" | bash "$COMMAND_SOURCE" "$@" 2>&1)"
+  last_status=$?
+  set -e
+}
+
 for invocation in \
   'unknown' \
   'status extra' \
@@ -326,6 +335,68 @@ for interrupt_phase in environment current-image channel; do
   [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "incomplete transaction accessed Docker after $interrupt_phase"
 done
 pass "interrupted state writes block later updates until diagnosis"
+
+reset_update_baseline
+printf 'ancestor canary\n' >"$TEST_ROOT/ancestor-canary.txt"
+deployment_before="$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
+command_before="$(sha256sum "$COMMAND_PATH")"
+: >"$FAKE_DOCKER_LOG"
+run_command_with_input 'cancel' uninstall
+(( last_status != 0 )) || fail "uninstall cancellation must be nonzero"
+assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "cancelled uninstall deployment"
+assert_equal "$command_before" "$(sha256sum "$COMMAND_PATH")" "cancelled uninstall command"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "cancelled uninstall invoked Docker"
+pass "uninstall requires the exact destructive confirmation"
+
+cp -- "$INSTALL_ROOT/state/source-mounts.json" "$TEST_ROOT/source-mounts.backup"
+sed -E \
+  's#"hostPath": "[^"]+"#"hostPath": "'"$TEST_ROOT"'"#' \
+  "$TEST_ROOT/source-mounts.backup" \
+  >"$INSTALL_ROOT/state/source-mounts.json"
+: >"$FAKE_DOCKER_LOG"
+run_command_with_input 'uninstall ReachCommander' uninstall
+(( last_status != 0 )) || fail "overlapping uninstall paths must be rejected"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "overlap rejection invoked Docker"
+cp -- "$TEST_ROOT/source-mounts.backup" "$INSTALL_ROOT/state/source-mounts.json"
+assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "overlap uninstall source canary"
+pass "uninstall rejects installer paths that overlap a configured source"
+
+printf 'not a directory\n' >"$REACHCOMMANDER_TEST_BACKUP_ROOT"
+run_command_with_input 'uninstall ReachCommander' uninstall
+(( last_status != 0 )) || fail "backup creation failure must stop uninstall"
+[[ -d "$INSTALL_ROOT" && -x "$COMMAND_PATH" ]] || fail "backup failure removed deployment"
+rm -f -- "$REACHCOMMANDER_TEST_BACKUP_ROOT"
+pass "backup failure preserves the active deployment and command"
+
+export FAKE_DOCKER_COMPOSE_EXIT=1
+run_command_with_input 'uninstall ReachCommander' uninstall
+(( last_status != 0 )) || fail "Compose-down failure must stop uninstall"
+[[ -d "$INSTALL_ROOT" && -x "$COMMAND_PATH" ]] || fail "Compose failure removed deployment"
+assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "Compose failure source canary"
+rm -rf -- "$REACHCOMMANDER_TEST_BACKUP_ROOT"
+export FAKE_DOCKER_COMPOSE_EXIT=0
+pass "Compose-down failure preserves deployment after external backup"
+
+: >"$FAKE_DOCKER_LOG"
+run_command_with_input 'uninstall ReachCommander' uninstall
+assert_equal "0" "$last_status" "successful uninstall status"
+[[ ! -e "$INSTALL_ROOT" ]] || fail "successful uninstall retained install root"
+[[ ! -e "$COMMAND_PATH" ]] || fail "successful uninstall retained command"
+backup_count="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+assert_equal "1" "$backup_count" "successful uninstall backup count"
+backup_destination="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[[ "$(basename -- "$backup_destination")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || fail "backup timestamp is not UTC"
+[[ -f "$backup_destination/deployment/config/sources.json" ]] || fail "backup source configuration missing"
+[[ -f "$backup_destination/deployment/state/source-mounts.json" ]] || fail "backup source metadata missing"
+[[ -f "$backup_destination/reachcommander-command" ]] || fail "backup management command missing"
+mapfile -d '' uninstall_args <"$FAKE_DOCKER_LOG"
+printf '%s\n' "${uninstall_args[@]}" | grep -q '^down$' || fail "successful uninstall did not call Compose down"
+if printf '%s\n' "${uninstall_args[@]}" | grep -q '^-v$'; then
+  fail "uninstall requested Compose volume deletion"
+fi
+assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "successful uninstall source canary"
+assert_equal "ancestor canary" "$(cat -- "$TEST_ROOT/ancestor-canary.txt")" "successful uninstall ancestor canary"
+pass "uninstall backs up generated state and preserves every source ancestor"
 
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "command source canary"
 printf '1..%d\n' "$tests_run"

@@ -320,6 +320,220 @@ command_update() {
   return 3
 }
 
+UNINSTALL_FILES=(
+  '.env'
+  'compose.yaml'
+  'config/sources.json'
+  'state/source-mounts.json'
+  'state/channel'
+  'state/current-image'
+  'state/previous-image'
+  'state/command.lock'
+  'bin/render_config.py'
+  'lib/common.sh'
+)
+
+paths_overlap() {
+  local first
+  local second
+  first="$(readlink -m -- "$1")"
+  second="$(readlink -m -- "$2")"
+  [[
+    "$first" == "$second" ||
+    "$first" == "$second"/* ||
+    "$second" == "$first"/*
+  ]]
+}
+
+validate_uninstall_tree() {
+  local path
+  local relative_path
+  local invalid=0
+  if [[ -L "$RC_INSTALL_ROOT" || -L "$RC_COMMAND_PATH" || -L "$RC_BACKUP_ROOT" ]]; then
+    rc_die 'uninstall paths must not be symlinks'
+    return 1
+  fi
+  while IFS= read -r -d '' path; do
+    if [[ -L "$path" ]]; then
+      invalid=1
+      break
+    fi
+    relative_path="${path#"$RC_INSTALL_ROOT"/}"
+    case "$relative_path" in
+      config|state|bin|lib|backups|\
+      .env|compose.yaml|\
+      config/sources.json|\
+      state/source-mounts.json|\
+      state/channel|\
+      state/current-image|\
+      state/previous-image|\
+      state/failed-image|\
+      state/command.lock|\
+      bin/render_config.py|\
+      lib/common.sh)
+        ;;
+      *)
+        invalid=1
+        break
+        ;;
+    esac
+  done < <(find "$RC_INSTALL_ROOT" -mindepth 1 -print0)
+  if (( invalid != 0 )); then
+    rc_die 'install root contains an unexpected or symlinked entry'
+    return 1
+  fi
+}
+
+load_uninstall_sources() {
+  local source_output
+  local source_path
+  source_output="$(mktemp)"
+  if ! python3 "$RC_INSTALL_ROOT/bin/render_config.py" source-paths \
+    --sources "$RC_INSTALL_ROOT/state/source-mounts.json" \
+    >"$source_output"; then
+    rm -f -- "$source_output"
+    rc_die 'source metadata is invalid; uninstall stopped'
+    return 1
+  fi
+  UNINSTALL_SOURCE_PATHS=()
+  while IFS= read -r -d '' source_path; do
+    UNINSTALL_SOURCE_PATHS+=("$source_path")
+  done <"$source_output"
+  rm -f -- "$source_output"
+  if (( ${#UNINSTALL_SOURCE_PATHS[@]} == 0 )); then
+    rc_die 'source metadata contains no paths; uninstall stopped'
+    return 1
+  fi
+}
+
+validate_uninstall_separation() {
+  local source_path
+  local owned_path
+  for source_path in "${UNINSTALL_SOURCE_PATHS[@]}"; do
+    for owned_path in "$RC_INSTALL_ROOT" "$RC_COMMAND_PATH" "$RC_BACKUP_ROOT"; do
+      if paths_overlap "$source_path" "$owned_path"; then
+        rc_die 'a configured source overlaps an uninstall target'
+        return 1
+      fi
+    done
+  done
+}
+
+backup_uninstall_file() {
+  local relative_path="$1"
+  local backup_destination="$2"
+  local source="$RC_INSTALL_ROOT/$relative_path"
+  local destination="$backup_destination/deployment/$relative_path"
+  [[ -f "$source" && ! -L "$source" ]] || return 0
+  mkdir -p -- "$(dirname -- "$destination")"
+  if ! install -m 0600 -- "$source" "$destination" ||
+    ! sync -f -- "$destination" ||
+    ! cmp -s -- "$source" "$destination"; then
+    rc_die 'external uninstall backup verification failed'
+    return 1
+  fi
+}
+
+create_uninstall_backup() {
+  local backup_destination="$1"
+  local relative_path
+  if [[ -e "$RC_BACKUP_ROOT" && ! -d "$RC_BACKUP_ROOT" ]]; then
+    rc_die 'external backup root is not a directory'
+    return 1
+  fi
+  if [[ -L "$RC_BACKUP_ROOT" ]]; then
+    rc_die 'external backup root must not be a symlink'
+    return 1
+  fi
+  mkdir -p -- "$RC_BACKUP_ROOT"
+  chmod 0700 -- "$RC_BACKUP_ROOT"
+  if [[ -e "$backup_destination" ]]; then
+    rc_die 'timestamped external backup already exists'
+    return 1
+  fi
+  mkdir -p -- "$backup_destination/deployment"
+  for relative_path in "${UNINSTALL_FILES[@]}"; do
+    backup_uninstall_file "$relative_path" "$backup_destination" || return 1
+  done
+  if [[ -f "$RC_INSTALL_ROOT/state/failed-image" ]]; then
+    backup_uninstall_file 'state/failed-image' "$backup_destination" || return 1
+  fi
+  if ! install -m 0700 -- "$RC_COMMAND_PATH" "$backup_destination/reachcommander-command" ||
+    ! sync -f -- "$backup_destination/reachcommander-command" ||
+    ! cmp -s -- "$RC_COMMAND_PATH" "$backup_destination/reachcommander-command"; then
+    rc_die 'management command backup verification failed'
+    return 1
+  fi
+}
+
+remove_generated_deployment() {
+  local relative_path
+  local directory
+  for relative_path in "${UNINSTALL_FILES[@]}" 'state/failed-image'; do
+    rm -f -- "$RC_INSTALL_ROOT/$relative_path" || return 1
+  done
+  for directory in backups config state bin lib; do
+    if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
+      rmdir -- "$RC_INSTALL_ROOT/$directory" || return 1
+    fi
+  done
+  rmdir -- "$RC_INSTALL_ROOT"
+}
+
+command_uninstall() {
+  local timestamp
+  local backup_destination
+  local confirmation
+  local source_path
+  if ! rc_acquire_lock; then
+    return 1
+  fi
+  if [[ -e "$RC_INSTALL_ROOT/state/update-transaction" ]]; then
+    rc_die 'an incomplete update transaction must be resolved before uninstall'
+    return 1
+  fi
+  validate_uninstall_tree || return 1
+  load_uninstall_sources || return 1
+  validate_uninstall_separation || return 1
+
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  if [[ ! "$timestamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+    rc_die 'UTC backup timestamp is invalid'
+    return 1
+  fi
+  backup_destination="$RC_BACKUP_ROOT/$timestamp"
+
+  printf 'ReachCommander uninstall will remove:\n'
+  printf '  container/network: reachcommander\n'
+  printf '  management command: %s\n' "$RC_COMMAND_PATH"
+  printf '  generated deployment: %s\n' "$RC_INSTALL_ROOT"
+  printf '  verified backup destination: %s\n' "$backup_destination"
+  printf 'Configured source directories are excluded and will not be changed:\n'
+  for source_path in "${UNINSTALL_SOURCE_PATHS[@]}"; do
+    printf '  %s\n' "$source_path"
+  done
+  printf "Type 'uninstall ReachCommander' to continue: " >&2
+  if ! IFS= read -r confirmation || [[ "$confirmation" != 'uninstall ReachCommander' ]]; then
+    rc_die 'uninstall cancelled; confirmation did not match'
+    return 1
+  fi
+
+  create_uninstall_backup "$backup_destination" || return 1
+  if ! rc_compose down; then
+    rc_die 'Compose teardown failed; deployment and command were preserved'
+    return 1
+  fi
+  if ! remove_generated_deployment; then
+    rc_die "generated deployment removal was incomplete; verified backup is at $backup_destination"
+    return 1
+  fi
+  if ! rm -f -- "$RC_COMMAND_PATH"; then
+    rc_die "management command removal failed; verified backup is at $backup_destination"
+    return 1
+  fi
+  printf 'ReachCommander was uninstalled. Verified backup: %s\n' "$backup_destination"
+}
+
 DOCTOR_FAILURES=0
 
 doctor_pass() {
@@ -530,7 +744,6 @@ case "$1" in
     command_update "${2:-}"
     ;;
   uninstall)
-    rc_die 'uninstall is not available in this installer version'
-    exit 69
+    command_uninstall
     ;;
 esac

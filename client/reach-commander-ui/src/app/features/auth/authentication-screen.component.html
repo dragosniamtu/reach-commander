@@ -1,0 +1,179 @@
+<main class="auth-shell">
+  <section class="auth-card" [class.setup-card]="auth.state().phase === 'setupRequired'">
+    <header class="auth-brand">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
+      <div>
+        <strong>ReachCommander</strong>
+        <span>CONTROLLED FILE OPERATIONS</span>
+      </div>
+    </header>
+
+    @switch (auth.state().phase) {
+      @case ('checking') {
+        <div class="auth-state" role="status" aria-live="polite">
+          <span class="activity" aria-hidden="true"></span>
+          <p class="eyebrow">SECURE SESSION</p>
+          <h1>Checking access</h1>
+          <p>Connecting to this ReachCommander server…</p>
+        </div>
+      }
+
+      @case ('unavailable') {
+        <div class="auth-state">
+          <span class="connection-icon" aria-hidden="true">!</span>
+          <p class="eyebrow">SERVER UNAVAILABLE</p>
+          <h1>Connection required</h1>
+          <p>ReachCommander could not verify this browser. Check the server and try again.</p>
+          <button
+            type="button"
+            class="primary-action"
+            data-testid="auth-retry"
+            [disabled]="auth.state().pending"
+            (click)="retry()"
+          >
+            {{ auth.state().pending ? 'Checking…' : 'Retry' }}
+          </button>
+        </div>
+      }
+
+      @case ('setupRequired') {
+        <div class="auth-heading">
+          <p class="eyebrow">FIRST-RUN SETUP</p>
+          <h1>Create administrator</h1>
+          <p>Use the one-time setup code printed in the ReachCommander server logs.</p>
+        </div>
+
+        <form
+          class="auth-form"
+          data-testid="setup-form"
+          [formGroup]="setupForm"
+          (ngSubmit)="submitSetup()"
+        >
+          <label for="setup-code">One-time setup code</label>
+          <input
+            id="setup-code"
+            data-testid="setup-code"
+            formControlName="setupCode"
+            type="text"
+            autocomplete="one-time-code"
+            autocapitalize="none"
+            spellcheck="false"
+            maxlength="256"
+          />
+
+          <label for="setup-username">Username</label>
+          <input
+            id="setup-username"
+            data-testid="setup-username"
+            formControlName="username"
+            type="text"
+            autocomplete="username"
+            minlength="3"
+            maxlength="64"
+          />
+
+          <label for="setup-password">Password</label>
+          <div class="password-field">
+            <input
+              id="setup-password"
+              data-testid="setup-password"
+              formControlName="password"
+              [type]="showSetupPassword() ? 'text' : 'password'"
+              autocomplete="new-password"
+              minlength="12"
+              maxlength="128"
+            />
+            <button
+              type="button"
+              data-testid="toggle-setup-password"
+              [attr.aria-label]="showSetupPassword() ? 'Hide password' : 'Show password'"
+              [attr.aria-pressed]="showSetupPassword()"
+              (click)="showSetupPassword.update(show => !show)"
+            >
+              {{ showSetupPassword() ? 'Hide' : 'Show' }}
+            </button>
+          </div>
+          <p class="field-help">12–128 characters; password-manager generated values are welcome.</p>
+
+          <label for="setup-password-confirmation">Confirm password</label>
+          <input
+            id="setup-password-confirmation"
+            data-testid="setup-password-confirmation"
+            formControlName="passwordConfirmation"
+            [type]="showSetupPassword() ? 'text' : 'password'"
+            autocomplete="new-password"
+            minlength="12"
+            maxlength="128"
+          />
+
+          <p class="form-message" role="status" aria-live="polite">
+            {{ localError() ?? auth.state().errorMessage ?? '' }}
+          </p>
+          <button type="submit" class="primary-action" [disabled]="auth.state().pending">
+            {{ auth.state().pending ? 'Creating…' : 'Create administrator' }}
+          </button>
+        </form>
+      }
+
+      @default {
+        <div class="auth-heading">
+          <p class="eyebrow">ADMINISTRATOR ACCESS</p>
+          <h1>Sign in</h1>
+          <p>Enter the administrator credentials configured for this server.</p>
+        </div>
+
+        <form
+          class="auth-form"
+          data-testid="login-form"
+          [formGroup]="loginForm"
+          (ngSubmit)="submitLogin()"
+        >
+          <label for="login-username">Username</label>
+          <input
+            id="login-username"
+            data-testid="login-username"
+            formControlName="username"
+            type="text"
+            autocomplete="username"
+            minlength="3"
+            maxlength="64"
+          />
+
+          <label for="login-password">Password</label>
+          <div class="password-field">
+            <input
+              id="login-password"
+              data-testid="login-password"
+              formControlName="password"
+              [type]="showLoginPassword() ? 'text' : 'password'"
+              autocomplete="current-password"
+              minlength="12"
+              maxlength="128"
+            />
+            <button
+              type="button"
+              data-testid="toggle-login-password"
+              [attr.aria-label]="showLoginPassword() ? 'Hide password' : 'Show password'"
+              [attr.aria-pressed]="showLoginPassword()"
+              (click)="showLoginPassword.update(show => !show)"
+            >
+              {{ showLoginPassword() ? 'Hide' : 'Show' }}
+            </button>
+          </div>
+
+          <p class="form-message" role="status" aria-live="polite">
+            {{ localError() ?? auth.state().errorMessage ?? '' }}
+          </p>
+          <button type="submit" class="primary-action" [disabled]="auth.state().pending">
+            {{ auth.state().pending ? 'Signing in…' : 'Sign in' }}
+          </button>
+        </form>
+      }
+    }
+
+    <footer>
+      <span aria-hidden="true"></span>
+      Credentials are sent only to this server and are never stored in browser storage.
+    </footer>
+  </section>
+</main>

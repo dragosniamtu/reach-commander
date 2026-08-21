@@ -32,7 +32,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { min-width: 680px; min-height: 100%; margin: 0; background: var(--app-bg); }
+html, body { min-height: 100%; margin: 0; background: var(--app-bg); }
 body { color: var(--text-1); font-family: var(--font-ui); overflow: hidden; }
 button, input { font: inherit; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

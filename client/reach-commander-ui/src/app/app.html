@@ -1,1 +1,9 @@
-<app-commander-shell />
+@if (auth.state().phase === 'authenticated') {
+  @defer (on immediate) {
+    <app-commander-shell />
+  } @loading {
+    <div class="workspace-loading" role="status" aria-live="polite">Opening workspace…</div>
+  }
+} @else {
+  <app-authentication-screen />
+}

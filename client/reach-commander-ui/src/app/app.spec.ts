@@ -1,7 +1,10 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideServiceWorker } from '@angular/service-worker';
 import { EMPTY, Observable } from 'rxjs';
 import { App } from './app';
+import { AuthenticationStore } from './core/auth/authentication-store';
+import { AuthenticationViewState } from './core/auth/authentication.models';
 import {
   CommanderApiPort,
   FileEntryDto,
@@ -12,13 +15,19 @@ import {
 } from './core/api/api.models';
 
 describe('App', () => {
+  let api: AppTestApi;
+  let auth: AppTestAuthenticationStore;
+
   beforeEach(async () => {
     localStorage.clear();
+    api = new AppTestApi();
+    auth = new AppTestAuthenticationStore();
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [
         provideServiceWorker('ngsw-worker.js', { enabled: false }),
-        { provide: CommanderApiPort, useClass: AppTestApi },
+        { provide: CommanderApiPort, useValue: api },
+        { provide: AuthenticationStore, useValue: auth },
       ],
     }).compileComponents();
   });
@@ -36,8 +45,48 @@ describe('App', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.textContent).toContain('ReachCommander');
     expect(compiled.querySelectorAll('app-commander-panel')).toHaveLength(2);
+    expect(api.getSources).toHaveBeenCalled();
   });
+
+  it.each(['checking', 'setupRequired', 'anonymous', 'unavailable'] as const)(
+    'does not construct the commander while authentication is %s',
+    async (phase) => {
+      auth.setState(authState({ phase }));
+      const fixture = TestBed.createComponent(App);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      const compiled = fixture.nativeElement as HTMLElement;
+      expect(compiled.querySelector('app-commander-shell')).toBeNull();
+      expect(compiled.querySelector('app-authentication-screen')).not.toBeNull();
+      expect(api.getSources).not.toHaveBeenCalled();
+      expect(auth.initialize).toHaveBeenCalledOnce();
+    },
+  );
 });
+
+class AppTestAuthenticationStore {
+  private readonly mutableState = signal(
+    authState({ phase: 'authenticated', username: 'integration-test' }),
+  );
+  readonly state = this.mutableState.asReadonly();
+  readonly initialize = vi.fn(async (): Promise<void> => undefined);
+
+  setState(value: AuthenticationViewState): void {
+    this.mutableState.set(value);
+  }
+}
+
+function authState(overrides: Partial<AuthenticationViewState>): AuthenticationViewState {
+  return {
+    phase: 'checking',
+    username: null,
+    pending: false,
+    errorCode: null,
+    errorMessage: null,
+    ...overrides,
+  };
+}
 
 class AppTestApi extends CommanderApiPort {
   async listArchive(): Promise<never> {
@@ -58,7 +107,7 @@ class AppTestApi extends CommanderApiPort {
     };
   }
 
-  async getSources(): Promise<readonly SourceDto[]> {
+  readonly getSources = vi.fn(async (): Promise<readonly SourceDto[]> => {
     return [
       {
         id: 'downloads',
@@ -72,7 +121,7 @@ class AppTestApi extends CommanderApiPort {
         defaultRight: true,
       },
     ];
-  }
+  });
 
   async listFiles(): Promise<readonly FileEntryDto[]> {
     return [];

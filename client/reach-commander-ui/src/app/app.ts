@@ -1,11 +1,19 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
+import { AuthenticationStore } from './core/auth/authentication-store';
+import { AuthenticationScreenComponent } from './features/auth/authentication-screen.component';
 import { CommanderShellComponent } from './features/commander/commander-shell/commander-shell.component';
 
 @Component({
   selector: 'app-root',
-  imports: [CommanderShellComponent],
+  imports: [AuthenticationScreenComponent, CommanderShellComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class App {}
+export class App implements OnInit {
+  readonly auth = inject(AuthenticationStore);
+
+  ngOnInit(): void {
+    void this.auth.initialize();
+  }
+}

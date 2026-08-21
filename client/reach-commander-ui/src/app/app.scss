@@ -1,1 +1,14 @@
-:host { display: block; min-height: 100%; }
+:host {
+  display: block;
+  min-width: 0;
+  min-height: 100%;
+}
+
+.workspace-loading {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  color: var(--text-3);
+  background: var(--app-bg);
+  font-size: 12px;
+}

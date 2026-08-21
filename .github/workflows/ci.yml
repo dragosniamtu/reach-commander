@@ -83,7 +83,7 @@ jobs:
           bash tests/installer/test_install.sh
           bash tests/installer/test_command.sh
           bash tests/installer/test_package.sh
-          node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs
+          node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs tests/installer/docs-contract.test.mjs
           shellcheck deploy/install.sh deploy/reachcommander deploy/lib/common.sh deploy/package-installer.sh
 
       - name: Restore .NET dependencies

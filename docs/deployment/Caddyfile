@@ -1,0 +1,21 @@
+# ReachCommander Caddy example.
+# Set REACHCOMMANDER_PASSWORD_HASH to output from `caddy hash-password`.
+# Do not commit the hash or plaintext password.
+
+reachcommander.example.com {
+    request_body {
+        max_size 50GB
+    }
+
+    basic_auth {
+        admin {$REACHCOMMANDER_PASSWORD_HASH}
+    }
+
+    reverse_proxy 127.0.0.1:8092 {
+        transport http {
+            dial_timeout 30s
+            response_header_timeout 6h
+        }
+    }
+}
+

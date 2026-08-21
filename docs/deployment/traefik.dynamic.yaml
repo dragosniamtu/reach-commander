@@ -1,0 +1,43 @@
+# ReachCommander Traefik dynamic configuration example.
+# This assumes host-native Traefik. See ubuntu.md before using containerized Traefik.
+# Generate /etc/traefik/reachcommander.htpasswd outside the repository.
+
+http:
+  routers:
+    reachcommander:
+      rule: Host(`reachcommander.example.com`)
+      entryPoints:
+        - websecure
+      tls: {}
+      middlewares:
+        - reachcommander-auth
+        - reachcommander-upload-limit
+      service: reachcommander
+
+  middlewares:
+    reachcommander-auth:
+      basicAuth:
+        usersFile: /etc/traefik/reachcommander.htpasswd
+        removeHeader: true
+    reachcommander-upload-limit:
+      # Buffering enforces the cap but may spill large requests to Traefik's disk.
+      # See ubuntu.md if request streaming is preferred.
+      buffering:
+        maxRequestBodyBytes: 53687091200
+        memRequestBodyBytes: 2097152
+
+  services:
+    reachcommander:
+      loadBalancer:
+        passHostHeader: true
+        serversTransport: reachcommander-long-transfers
+        servers:
+          - url: http://127.0.0.1:8092
+
+  serversTransports:
+    reachcommander-long-transfers:
+      forwardingTimeouts:
+        dialTimeout: 30s
+        responseHeaderTimeout: 6h
+        idleConnTimeout: 6h
+

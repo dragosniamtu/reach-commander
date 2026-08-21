@@ -94,6 +94,12 @@ tests/e2e                           deterministic Playwright acceptance flow
 - Docker Engine with Docker Compose v2 for container deployment.
 - Chromium installed through Playwright only when running browser tests.
 
+## Install on Ubuntu
+
+For a production Ubuntu server, use the versioned release bundle and follow the [Ubuntu installation guide](docs/deployment/ubuntu.md). It covers checksum verification, the interactive installer, read-only/read-write source policy, digest-pinned updates with rollback, uninstall backups, and authenticated HTTPS examples for Nginx, Caddy, and Traefik.
+
+ReachCommander has no built-in authentication or TLS. Keep the application port on loopback and expose it only through an authenticated HTTPS reverse proxy. The repository clone and source-build workflow below remain the development path.
+
 ## Source configuration
 
 Production reads `/config/sources.json`. Override it with the ASP.NET Core setting `ReachCommander__SourcesPath`.

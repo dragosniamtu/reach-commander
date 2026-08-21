@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master]
+    tags: ['v*']
   pull_request:
     branches: [master]
 
@@ -70,6 +71,21 @@ jobs:
             client/reach-commander-ui/package-lock.json
             tests/e2e/package-lock.json
 
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+
+      - name: Verify Ubuntu installer and release contracts
+        run: |
+          python3 -m unittest tests/installer/test_render_config.py -v
+          bash tests/installer/test_common.sh
+          bash tests/installer/test_install.sh
+          bash tests/installer/test_command.sh
+          bash tests/installer/test_package.sh
+          node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs
+          shellcheck deploy/install.sh deploy/reachcommander deploy/lib/common.sh deploy/package-installer.sh
+
       - name: Restore .NET dependencies
         run: dotnet restore ReachCommander.slnx
 
@@ -126,3 +142,206 @@ jobs:
             artifacts/playwright-report
           if-no-files-found: ignore
           retention-days: 7
+
+  container-smoke:
+    name: Hardened amd64 container smoke
+    if: github.event_name == 'push'
+    needs: [backend, acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build candidate image
+        run: docker build --tag reachcommander:smoke .
+
+      - name: Run hardened health smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          smoke_root="$(mktemp -d)"
+          cleanup() {
+            docker rm --force reachcommander-smoke >/dev/null 2>&1 || true
+            rm -rf -- "$smoke_root"
+          }
+          trap cleanup EXIT
+          mkdir -p "$smoke_root/config" "$smoke_root/source"
+          chmod 0755 "$smoke_root" "$smoke_root/config" "$smoke_root/source"
+          cat >"$smoke_root/config/sources.json" <<'JSON'
+          {
+            "sources": [
+              {
+                "id": "smoke",
+                "name": "Smoke",
+                "path": "/sources/smoke",
+                "enabled": true,
+                "readOnly": true,
+                "defaultLeft": true,
+                "defaultRight": true
+              }
+            ]
+          }
+          JSON
+          chmod 0644 "$smoke_root/config/sources.json"
+          docker run --rm --detach \
+            --name reachcommander-smoke \
+            --user 1000:1000 \
+            --read-only \
+            --tmpfs /tmp:size=32m,mode=1777 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --publish 127.0.0.1::8080 \
+            --mount "type=bind,source=$smoke_root/config,target=/config,readonly" \
+            --mount "type=bind,source=$smoke_root/source,target=/sources/smoke,readonly" \
+            reachcommander:smoke
+          healthy=false
+          for attempt in {1..60}; do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke)"
+            if [[ "$status" == healthy ]]; then
+              healthy=true
+              break
+            fi
+            if [[ "$status" == unhealthy || "$status" == missing ]]; then
+              docker logs --tail 200 reachcommander-smoke
+              exit 1
+            fi
+            sleep 2
+          done
+          [[ "$healthy" == true ]]
+          published="$(docker port reachcommander-smoke 8080/tcp)"
+          port="${published##*:}"
+          curl --fail --show-error --silent "http://127.0.0.1:$port/health"
+
+  container-publish:
+    name: Publish verified multi-architecture image
+    if: github.event_name == 'push'
+    needs: [backend, acceptance, container-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      IMAGE: ghcr.io/dragosniamtu/reach-commander
+
+    steps:
+      - name: Check out complete repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Require version tags to belong to master
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags origin master
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
+
+      - name: Resolve approved publication tags
+        id: release
+        run: node deploy/release-tags.mjs "$GITHUB_REF" "$IMAGE" "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish amd64 and arm64 image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.release.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=ReachCommander
+            org.opencontainers.image.description=Self-hosted dual-pane file manager for Windows development and Ubuntu deployment
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/master/docs/deployment/ubuntu.md
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+
+      - name: Verify tags, runnable platforms, and attestation manifests
+        shell: bash
+        env:
+          PUBLISHED_TAGS: ${{ steps.release.outputs.tags }}
+        run: |
+          set -Eeuo pipefail
+          primary_tag=''
+          while IFS= read -r published_tag; do
+            [[ -n "$published_tag" ]] || continue
+            primary_tag="${primary_tag:-$published_tag}"
+            docker buildx imagetools inspect "$published_tag" >/dev/null
+          done <<<"$PUBLISHED_TAGS"
+          [[ -n "$primary_tag" ]]
+          docker buildx imagetools inspect --raw "$primary_tag" >manifest.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const document = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const manifests = document.manifests ?? [];
+          const runnable = new Set(
+            manifests
+              .filter((item) => item.platform?.os === 'linux')
+              .map((item) => `linux/${item.platform.architecture}`),
+          );
+          for (const required of ['linux/amd64', 'linux/arm64']) {
+            if (!runnable.has(required)) {
+              throw new Error(`Missing runnable platform: ${required}`);
+            }
+          }
+          const attestations = manifests.filter(
+            (item) =>
+              item.platform?.os === 'unknown' &&
+              item.platform?.architecture === 'unknown' &&
+              item.annotations?.['vnd.docker.reference.type'] === 'attestation-manifest',
+          );
+          if (attestations.length < 2) {
+            throw new Error('Expected provenance/SBOM attestation-manifest descriptors.');
+          }
+          NODE
+
+      - name: Build and verify stable installer assets
+        if: steps.release.outputs.stableRelease == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          bash deploy/package-installer.sh "$VERSION" artifacts/installer
+          cd artifacts/installer
+          sha256sum --check SHA256SUMS
+
+      - name: Create or update stable GitHub Release
+        if: steps.release.outputs.stableRelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release create "$VERSION" --verify-tag --generate-notes --title "ReachCommander $VERSION"
+          fi
+          gh release upload "$VERSION" artifacts/installer/reachcommander-installer.tar.gz artifacts/installer/SHA256SUMS --clobber

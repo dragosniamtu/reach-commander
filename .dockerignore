@@ -12,7 +12,9 @@
 **/test-results
 artifacts
 dev-sources
+deploy
 docs
 tests
+.github
 *.user
 *.suo

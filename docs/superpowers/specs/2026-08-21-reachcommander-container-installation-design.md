@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-21
 
-**Status:** Awaiting written-spec review
+**Status:** Approved
 
 **Target:** Public, self-hosted Ubuntu installation using Docker Compose
 
@@ -106,6 +106,11 @@ deploy/
 ├── compose.release.yaml
 ├── install.sh
 ├── reachcommander
+├── render_config.py
+├── release-tags.mjs
+├── package-installer.sh
+├── lib/
+│   └── common.sh
 └── README.md
 tests/
 └── installer/
@@ -123,12 +128,17 @@ Installation defaults to:
 /opt/reachcommander/
 ├── .env
 ├── compose.yaml
+├── bin/
+│   └── render_config.py
 ├── config/
 │   └── sources.json
 ├── state/
 │   ├── channel
 │   ├── current-image
-│   └── previous-image
+│   ├── previous-image
+│   └── command.lock
+├── lib/
+│   └── common.sh
 └── backups/
 ```
 

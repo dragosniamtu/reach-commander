@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ "${1:-}" == -* ]]; then
+  exec python "$@"
+fi
+
 if command -v cygpath >/dev/null 2>&1; then
   script_path="$(cygpath -w -- "$1")"
   shift

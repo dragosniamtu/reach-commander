@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
+  COMMON_LIBRARY="$SCRIPT_DIRECTORY/lib/common.sh"
+else
+  COMMON_LIBRARY='/opt/reachcommander/lib/common.sh'
+fi
+
+if [[ ! -f "$COMMON_LIBRARY" ]]; then
+  printf 'ReachCommander: management library is missing\n' >&2
+  exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "$COMMON_LIBRARY"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  reachcommander status
+  reachcommander logs [--follow]
+  reachcommander start
+  reachcommander stop
+  reachcommander restart
+  reachcommander doctor
+  reachcommander update [stable|edge|vX.Y.Z]
+  reachcommander uninstall
+EOF
+  return 64
+}
+
+validate_invocation() {
+  local command_name="${1:-}"
+  local argument_count="$#"
+  case "$command_name" in
+    status | start | stop | restart | doctor | uninstall)
+      (( argument_count == 1 )) || return 64
+      ;;
+    logs)
+      if (( argument_count == 1 )); then
+        return 0
+      fi
+      (( argument_count == 2 )) && [[ "${2:-}" == '--follow' ]] || return 64
+      ;;
+    update)
+      (( argument_count == 1 || argument_count == 2 )) || return 64
+      ;;
+    *)
+      return 64
+      ;;
+  esac
+}
+
+if ! validate_invocation "$@"; then
+  usage
+  exit 64
+fi
+
+rc_init_paths
+rc_assert_safe_install_root
+if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' || EUID -eq 0 ]]; then
+  rc_require_root
+fi
+
+read_state_line() {
+  local path="$1"
+  local value
+  [[ -f "$path" ]] || {
+    rc_die 'deployment state is incomplete'
+    return 1
+  }
+  IFS= read -r value <"$path" || [[ -n "$value" ]] || {
+    rc_die 'deployment state is empty'
+    return 1
+  }
+  printf '%s\n' "$value"
+}
+
+command_status() {
+  local channel
+  local image
+  channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel")"
+  image="$(read_state_line "$RC_INSTALL_ROOT/state/current-image")"
+  printf 'Channel: %s\n' "$channel"
+  printf 'Image: %s\n' "$image"
+  rc_compose ps
+}
+
+command_logs() {
+  if [[ "${1:-}" == '--follow' ]]; then
+    rc_compose logs --tail 200 --follow reachcommander
+  else
+    rc_compose logs --tail 200 reachcommander
+  fi
+}
+
+command_start() {
+  rc_acquire_lock
+  rc_compose up -d reachcommander
+  rc_wait_healthy reachcommander 60
+}
+
+command_stop() {
+  rc_acquire_lock
+  rc_compose stop reachcommander
+}
+
+command_restart() {
+  rc_acquire_lock
+  rc_compose restart reachcommander
+  rc_wait_healthy reachcommander 60
+}
+
+DOCTOR_FAILURES=0
+
+doctor_pass() {
+  printf '[PASS] %s\n' "$1"
+}
+
+doctor_warn() {
+  printf '[WARN] %s\n' "$1"
+}
+
+doctor_fail() {
+  DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+  printf '[FAIL] %s\n' "$1"
+}
+
+read_env_value() {
+  local key="$1"
+  local line
+  local count
+  line="$(grep -E "^${key}=" "$RC_INSTALL_ROOT/.env" || true)"
+  count="$(printf '%s\n' "$line" | grep -c . || true)"
+  if [[ "$count" != '1' ]]; then
+    return 1
+  fi
+  printf '%s\n' "${line#*=}"
+}
+
+doctor_required_files() {
+  local required
+  local missing=0
+  for required in \
+    '.env' \
+    'compose.yaml' \
+    'config/sources.json' \
+    'state/source-mounts.json' \
+    'state/channel' \
+    'state/current-image' \
+    'state/previous-image' \
+    'bin/render_config.py' \
+    'lib/common.sh'; do
+    if [[ ! -f "$RC_INSTALL_ROOT/$required" || -L "$RC_INSTALL_ROOT/$required" ]]; then
+      missing=1
+      doctor_fail "Required deployment file is missing or symlinked: $required"
+    fi
+  done
+  if (( missing == 0 )); then
+    doctor_pass 'Required deployment files are present'
+  fi
+  if [[ -x "$RC_COMMAND_PATH" && ! -L "$RC_COMMAND_PATH" ]]; then
+    doctor_pass 'Management command is installed at the fixed path'
+  else
+    doctor_fail 'Management command is missing, symlinked, or not executable'
+  fi
+}
+
+doctor_sources() {
+  local source_output
+  local source_path
+  local runtime_uid="$1"
+  local runtime_gid="$2"
+  source_output="$(mktemp)"
+  if ! python3 "$RC_INSTALL_ROOT/bin/render_config.py" source-paths \
+    --sources "$RC_INSTALL_ROOT/state/source-mounts.json" \
+    >"$source_output"; then
+    rm -f -- "$source_output"
+    doctor_fail 'Installer source metadata is invalid'
+    return
+  fi
+  while IFS= read -r -d '' source_path; do
+    if [[ ! -d "$source_path" ]]; then
+      doctor_fail 'Source path is missing'
+      continue
+    fi
+    if command -v setpriv >/dev/null 2>&1 && setpriv \
+      --reuid="$runtime_uid" \
+      --regid="$runtime_gid" \
+      --clear-groups \
+      -- sh -c 'test -r "$1" && test -x "$1"' reachcommander-doctor "$source_path"; then
+      doctor_pass 'Source path is accessible'
+    else
+      doctor_fail 'Source path is not accessible to the runtime identity'
+    fi
+  done <"$source_output"
+  rm -f -- "$source_output"
+}
+
+command_doctor() {
+  local bind_address=''
+  local port=''
+  local runtime_uid=''
+  local runtime_gid=''
+  local environment_image=''
+  local current_image=''
+  local channel=''
+  local health=''
+  DOCTOR_FAILURES=0
+
+  if command -v docker >/dev/null 2>&1; then
+    doctor_pass 'Docker Engine is available'
+  else
+    doctor_fail 'Docker Engine is unavailable'
+  fi
+  if docker compose version >/dev/null 2>&1; then
+    doctor_pass 'Docker Compose v2 is available'
+  else
+    doctor_fail 'Docker Compose v2 is unavailable'
+  fi
+
+  doctor_required_files
+
+  if python3 -m json.tool "$RC_INSTALL_ROOT/config/sources.json" >/dev/null 2>&1; then
+    doctor_pass 'Application source configuration is valid JSON'
+  else
+    doctor_fail 'Application source configuration is invalid JSON'
+  fi
+
+  if rc_compose config --quiet >/dev/null 2>&1; then
+    doctor_pass 'Compose configuration is valid'
+  else
+    doctor_fail 'Compose configuration is invalid'
+  fi
+
+  if bind_address="$(read_env_value REACHCOMMANDER_BIND_ADDRESS)"; then
+    if [[ "$bind_address" == '127.0.0.1' ]]; then
+      doctor_pass 'Bind address is loopback-only'
+    else
+      doctor_warn 'Bind address is not loopback'
+    fi
+  else
+    doctor_fail 'Bind address is missing or duplicated'
+  fi
+
+  if port="$(read_env_value REACHCOMMANDER_PORT)" && rc_validate_port "$port" >/dev/null 2>&1; then
+    doctor_pass 'Host port is valid'
+  else
+    doctor_fail 'Host port is invalid'
+  fi
+
+  if runtime_uid="$(read_env_value REACHCOMMANDER_UID)" &&
+    runtime_gid="$(read_env_value REACHCOMMANDER_GID)" &&
+    [[ "$runtime_uid" =~ ^[1-9][0-9]*$ ]] &&
+    [[ "$runtime_gid" =~ ^[1-9][0-9]*$ ]]; then
+    doctor_pass 'Runtime UID and GID are non-root'
+    doctor_sources "$runtime_uid" "$runtime_gid"
+  else
+    doctor_fail 'Runtime UID or GID is invalid'
+  fi
+
+  if channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel" 2>/dev/null)" &&
+    rc_validate_channel "$channel" >/dev/null 2>&1; then
+    doctor_pass 'Update channel is valid'
+  else
+    doctor_fail 'Update channel is invalid'
+  fi
+
+  if environment_image="$(read_env_value REACHCOMMANDER_IMAGE)" &&
+    current_image="$(read_state_line "$RC_INSTALL_ROOT/state/current-image" 2>/dev/null)"; then
+    if [[ "$environment_image" == "$current_image" ]]; then
+      doctor_pass 'Environment image matches current-image state'
+    else
+      doctor_fail 'Environment image does not match current-image state'
+    fi
+  else
+    doctor_fail 'Immutable image state is missing'
+  fi
+
+  if health="$(
+    docker inspect \
+      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+      reachcommander 2>/dev/null
+  )" && [[ "$health" == 'healthy' ]]; then
+    doctor_pass 'Container is healthy'
+  else
+    doctor_fail 'Container is not healthy'
+  fi
+
+  if (( DOCTOR_FAILURES > 0 )); then
+    return 1
+  fi
+}
+
+case "$1" in
+  status)
+    command_status
+    ;;
+  logs)
+    command_logs "${2:-}"
+    ;;
+  start)
+    command_start
+    ;;
+  stop)
+    command_stop
+    ;;
+  restart)
+    command_restart
+    ;;
+  doctor)
+    command_doctor
+    ;;
+  update)
+    rc_die 'update is not available in this installer version'
+    exit 69
+    ;;
+  uninstall)
+    rc_die 'uninstall is not available in this installer version'
+    exit 69
+    ;;
+esac

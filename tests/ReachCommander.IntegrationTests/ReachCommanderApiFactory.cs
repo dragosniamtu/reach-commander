@@ -1,10 +1,14 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using ReachCommander.Application.Authentication;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Archives;
 using ReachCommander.Domain.Archives;
@@ -16,13 +20,23 @@ namespace ReachCommander.IntegrationTests;
 
 public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 {
+    private readonly bool _useRealSecurity;
+    private readonly TestLogCollector _logs = new();
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
     private readonly TestArchiveWorkerClient _archiveWorker = new();
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
 
     public ReachCommanderApiFactory()
+        : this(useRealSecurity: false, authenticationDataPath: null)
     {
+    }
+
+    internal ReachCommanderApiFactory(
+        bool useRealSecurity,
+        string? authenticationDataPath = null)
+    {
+        _useRealSecurity = useRealSecurity;
         WorkspaceRoot = Path.Combine(
             Path.GetTempPath(),
             $"reachcommander-api-tests-{Guid.NewGuid():N}");
@@ -30,6 +44,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         DownloadsRoot = Path.Combine(WorkspaceRoot, "downloads");
         ArchiveRoot = Path.Combine(WorkspaceRoot, "archive");
         MissingUsbRoot = Path.Combine(WorkspaceRoot, "usb-missing");
+        AuthenticationDataPath = authenticationDataPath ??
+            Path.Combine(WorkspaceRoot, "authentication-data");
 
         Directory.CreateDirectory(Path.Combine(MediaRoot, "Movies"));
         Directory.CreateDirectory(Path.Combine(MediaRoot, "Photos"));
@@ -116,9 +132,28 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public string MissingUsbRoot { get; }
 
+    public string AuthenticationDataPath { get; }
+
     public string ConfigurationPath { get; }
 
     public string WebRoot { get; }
+
+    public IReadOnlyList<string> LogMessages => _logs.Messages;
+
+    public HttpClient CreateCookieClient() => CreateClient(new()
+    {
+        AllowAutoRedirect = false,
+        HandleCookies = true,
+    });
+
+    public async Task<string> GetFreshSetupCodeAsync()
+    {
+        var code = await Services
+            .GetRequiredService<IAdministratorAccountService>()
+            .PrepareSetupAsync(CancellationToken.None);
+        return code ?? throw new InvalidOperationException(
+            "A setup code cannot be issued after the administrator account exists.");
+    }
 
     public void SetHardwareSnapshot(HardwareMetricsSnapshot snapshot) =>
         _hardwareMetrics.Set(snapshot);
@@ -143,12 +178,13 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Testing");
         builder.UseWebRoot(WebRoot);
+        builder.ConfigureLogging(logging => logging.AddProvider(_logs));
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ReachCommander:SourcesPath"] = ConfigurationPath,
-                ["Authentication:DataPath"] = Path.Combine(WorkspaceRoot, "authentication-data"),
+                ["Authentication:DataPath"] = AuthenticationDataPath,
                 ["HardwareMetrics:Enabled"] = "false",
                 ["Uploads:MaxFileBytes"] = "8",
                 ["Uploads:MaxBatchBytes"] = "12",
@@ -164,6 +200,21 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<TimeProvider>(_clock);
             services.RemoveAll<IArchiveWorkerClient>();
             services.AddSingleton<IArchiveWorkerClient>(_archiveWorker);
+            if (!_useRealSecurity)
+            {
+                services
+                    .AddAuthentication(options =>
+                    {
+                        options.DefaultAuthenticateScheme = TestAuthenticationHandler.SchemeName;
+                        options.DefaultChallengeScheme = TestAuthenticationHandler.SchemeName;
+                        options.DefaultForbidScheme = TestAuthenticationHandler.SchemeName;
+                    })
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+                        TestAuthenticationHandler.SchemeName,
+                        _ => { });
+                services.RemoveAll<IAntiforgery>();
+                services.AddSingleton<IAntiforgery, TestAntiforgery>();
+            }
         });
     }
 

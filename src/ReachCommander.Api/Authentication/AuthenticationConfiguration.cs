@@ -2,10 +2,12 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using ReachCommander.Infrastructure.Authentication;
 
 namespace ReachCommander.Api.Authentication;
@@ -21,17 +23,11 @@ public static class AuthenticationConfiguration
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        var paths = AuthenticationDataPaths.Resolve(
-            configuration["Authentication:DataPath"],
-            OperatingSystem.IsWindows(),
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-        paths.EnsureDirectories();
-        services.Replace(ServiceDescriptor.Singleton(paths));
-
         services
             .AddDataProtection()
-            .SetApplicationName("ReachCommander")
-            .PersistKeysToFileSystem(new DirectoryInfo(paths.KeysDirectory));
+            .SetApplicationName("ReachCommander");
+        services.AddSingleton<IConfigureOptions<KeyManagementOptions>,
+            AuthenticationKeyRingOptionsSetup>();
 
         services.AddScoped<AccountCookieEvents>();
         services
@@ -113,4 +109,17 @@ public static class AuthenticationConfiguration
         environment.IsDevelopment() || environment.IsEnvironment("Testing")
             ? Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest
             : Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+}
+
+internal sealed class AuthenticationKeyRingOptionsSetup(
+    AuthenticationDataPaths paths,
+    ILoggerFactory loggerFactory) : IConfigureOptions<KeyManagementOptions>
+{
+    public void Configure(KeyManagementOptions options)
+    {
+        paths.EnsureDirectories();
+        options.XmlRepository = new FileSystemXmlRepository(
+            new DirectoryInfo(paths.KeysDirectory),
+            loggerFactory);
+    }
 }

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+while (($# > 0)) && [[ "$1" != '--' ]]; do
+  shift
+done
+if (($# == 0)); then
+  printf 'fake setpriv: missing command separator\n' >&2
+  exit 97
+fi
+shift
+exec "$@"

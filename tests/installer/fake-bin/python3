@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if command -v cygpath >/dev/null 2>&1; then
+  script_path="$(cygpath -w -- "$1")"
+  shift
+  converted_arguments=()
+  convert_next=0
+  for argument in "$@"; do
+    if (( convert_next == 1 )); then
+      converted_arguments+=("$(cygpath -w -- "$argument")")
+      convert_next=0
+      continue
+    fi
+    converted_arguments+=("$argument")
+    case "$argument" in
+      --output | --request | --template | --env | --sources)
+        convert_next=1
+        ;;
+    esac
+  done
+  MSYS2_ARG_CONV_EXCL='*' exec python "$script_path" "${converted_arguments[@]}"
+fi
+exec python "$@"

@@ -12,6 +12,14 @@ fi
 
 case "${1:-}" in
   compose)
+    if [[ "${2:-}" == 'version' ]]; then
+      exit "${FAKE_DOCKER_VERSION_EXIT:-0}"
+    fi
+    for argument in "$@"; do
+      if [[ "$argument" == 'config' ]]; then
+        exit "${FAKE_DOCKER_CONFIG_EXIT:-${FAKE_DOCKER_COMPOSE_EXIT:-0}}"
+      fi
+    done
     exit "${FAKE_DOCKER_COMPOSE_EXIT:-0}"
     ;;
   pull)

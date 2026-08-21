@@ -1,0 +1,493 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_LIBRARY="$SCRIPT_DIRECTORY/lib/common.sh"
+RENDERER="$SCRIPT_DIRECTORY/render_config.py"
+COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
+MANAGEMENT_COMMAND="$SCRIPT_DIRECTORY/reachcommander"
+WORK_ROOT=''
+INSTALL_COMMITTED=false
+
+if [[ ! -f "$COMMON_LIBRARY" ]]; then
+  printf 'ReachCommander: installer bundle is missing lib/common.sh\n' >&2
+  exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "$COMMON_LIBRARY"
+
+cleanup() {
+  local work_parent
+  local canonical_work
+  local unexpected_entry
+  if [[ -n "$WORK_ROOT" && -d "$WORK_ROOT" ]]; then
+    work_parent="$(readlink -m -- "$(dirname -- "$RC_INSTALL_ROOT")")"
+    canonical_work="$(readlink -m -- "$WORK_ROOT")"
+    case "$canonical_work" in
+      "$work_parent"/.reachcommander-install.*)
+        rm -rf -- "$canonical_work"
+        ;;
+      *)
+        printf 'ReachCommander: refusing to remove unexpected staging path\n' >&2
+        ;;
+    esac
+  fi
+
+  if [[
+    "$INSTALL_COMMITTED" == 'false' &&
+    -n "${RC_INSTALL_ROOT:-}" &&
+    -d "$RC_INSTALL_ROOT/state" &&
+    ! -L "$RC_INSTALL_ROOT" &&
+    ! -L "$RC_INSTALL_ROOT/state"
+  ]]; then
+    unexpected_entry="$(
+      find "$RC_INSTALL_ROOT" \
+        -mindepth 1 \
+        -maxdepth 2 \
+        ! -path "$RC_INSTALL_ROOT/state" \
+        ! -path "$RC_INSTALL_ROOT/state/command.lock" \
+        -print \
+        -quit
+    )"
+    if [[ -z "$unexpected_entry" ]]; then
+      rm -f -- "$RC_INSTALL_ROOT/state/command.lock"
+      rmdir -- "$RC_INSTALL_ROOT/state" "$RC_INSTALL_ROOT" 2>/dev/null || true
+    fi
+  fi
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+prompt_value() {
+  local prompt="$1"
+  local default_value="${2-}"
+  local value
+  if [[ -n "$default_value" ]]; then
+    printf '%s [%s]: ' "$prompt" "$default_value" >&2
+  else
+    printf '%s: ' "$prompt" >&2
+  fi
+  if ! IFS= read -r value; then
+    rc_die 'installer input ended before confirmation'
+    return 1
+  fi
+  REPLY_VALUE="${value:-$default_value}"
+}
+
+require_bundle() {
+  local bundle_file
+  for bundle_file in "$RENDERER" "$COMPOSE_TEMPLATE" "$MANAGEMENT_COMMAND"; do
+    if [[ ! -f "$bundle_file" ]]; then
+      rc_die 'installer bundle is incomplete'
+      return 1
+    fi
+  done
+}
+
+preflight() {
+  rc_require_commands docker python3 readlink flock install mktemp setpriv sync find
+  require_bundle
+  if ! docker compose version >/dev/null 2>&1; then
+    rc_die 'Docker Compose v2 is required'
+    return 1
+  fi
+}
+
+validate_runtime_id() {
+  local value="$1"
+  local field="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]] || (( value > 2147483647 )); then
+    rc_die "$field must identify a non-root account"
+    return 1
+  fi
+}
+
+source_id_exists() {
+  local candidate="$1"
+  local existing
+  for existing in "${SOURCE_IDS[@]:-}"; do
+    [[ "$existing" == "$candidate" ]] && return 0
+  done
+  return 1
+}
+
+reject_installer_path_overlap() {
+  local source_path="$1"
+  local owned_path
+  local canonical_owned
+  for owned_path in "$RC_INSTALL_ROOT" "$RC_BACKUP_ROOT" "$(dirname -- "$RC_COMMAND_PATH")"; do
+    canonical_owned="$(readlink -m -- "$owned_path")"
+    if [[
+      "$source_path" == "$canonical_owned" ||
+      "$source_path" == "$canonical_owned"/* ||
+      "$canonical_owned" == "$source_path"/*
+    ]]; then
+      rc_die 'source path overlaps an installer-owned location'
+      return 1
+    fi
+  done
+}
+
+assert_generated_layout_safe() {
+  local generated_path
+  if [[ -e "$RC_INSTALL_ROOT" && ! -d "$RC_INSTALL_ROOT" ]] || [[ -L "$RC_INSTALL_ROOT" ]]; then
+    rc_die 'install root must be a real directory'
+    return 1
+  fi
+  for generated_path in \
+    "$RC_INSTALL_ROOT/config" \
+    "$RC_INSTALL_ROOT/state" \
+    "$RC_INSTALL_ROOT/bin" \
+    "$RC_INSTALL_ROOT/lib" \
+    "$RC_INSTALL_ROOT/backups" \
+    "$(dirname -- "$RC_COMMAND_PATH")"; do
+    if [[ -L "$generated_path" ]] || [[ -e "$generated_path" && ! -d "$generated_path" ]]; then
+      rc_die 'installer-owned directories must not be symlinks or files'
+      return 1
+    fi
+  done
+}
+
+check_source_access() {
+  local path="$1"
+  local access="$2"
+  local runtime_uid="$3"
+  local runtime_gid="$4"
+  local access_test='test -r "$1" && test -x "$1"'
+  if [[ "$access" == 'rw' ]]; then
+    access_test='test -r "$1" && test -w "$1" && test -x "$1"'
+  fi
+  if ! setpriv \
+    --reuid="$runtime_uid" \
+    --regid="$runtime_gid" \
+    --clear-groups \
+    -- sh -c "$access_test" reachcommander-access "$path"; then
+    rc_die 'selected runtime identity cannot access a source with the requested policy'
+    return 1
+  fi
+}
+
+collect_sources() {
+  SOURCE_IDS=()
+  SOURCE_NAMES=()
+  SOURCE_PATHS=()
+  SOURCE_ACCESS=()
+  local add_another='y'
+  local source_name
+  local source_path
+  local suggested_id
+  local source_id
+  local access
+  local broad_confirmation
+
+  while [[ "$add_another" =~ ^[Yy]$ ]]; do
+    prompt_value 'Source display name' ''
+    source_name="$REPLY_VALUE"
+    [[ -n "$source_name" ]] || {
+      rc_die 'source display name is required'
+      return 1
+    }
+
+    prompt_value 'Absolute source directory' ''
+    source_path="$(rc_canonical_source "$REPLY_VALUE")" || return 1
+    reject_installer_path_overlap "$source_path" || return 1
+    case "$source_path" in
+      /home | /srv | /mnt)
+        prompt_value "Type 'mount broad source' to allow $source_path" ''
+        broad_confirmation="$REPLY_VALUE"
+        [[ "$broad_confirmation" == 'mount broad source' ]] || {
+          rc_die 'broad source confirmation did not match'
+          return 1
+        }
+        ;;
+    esac
+
+    suggested_id="$(rc_normalize_source_id "$source_name")" || return 1
+    while true; do
+      prompt_value 'Source ID' "$suggested_id"
+      source_id="$REPLY_VALUE"
+      if [[ ! "$source_id" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]; then
+        printf 'Source ID is invalid; use lowercase letters, digits, hyphens, or underscores.\n' >&2
+        continue
+      fi
+      if source_id_exists "$source_id"; then
+        printf 'Source ID is already in use; choose a distinct ID.\n' >&2
+        continue
+      fi
+      break
+    done
+    local existing_path
+    for existing_path in "${SOURCE_PATHS[@]:-}"; do
+      if [[ "$existing_path" == "$source_path" ]]; then
+        rc_die 'source directory is already configured'
+        return 1
+      fi
+    done
+
+    prompt_value 'Access policy (RO or RW)' 'RO'
+    access="${REPLY_VALUE,,}"
+    if [[ "$access" != 'ro' && "$access" != 'rw' ]]; then
+      rc_die 'source access policy must be RO or RW'
+      return 1
+    fi
+    check_source_access "$source_path" "$access" "$RUNTIME_UID" "$RUNTIME_GID" || return 1
+
+    SOURCE_IDS+=("$source_id")
+    SOURCE_NAMES+=("$source_name")
+    SOURCE_PATHS+=("$source_path")
+    SOURCE_ACCESS+=("$access")
+
+    prompt_value 'Add another source? (y/N)' 'n'
+    add_another="$REPLY_VALUE"
+  done
+}
+
+validate_default_source() {
+  local candidate="$1"
+  local field="$2"
+  if ! source_id_exists "$candidate"; then
+    rc_die "$field must be one of the configured source IDs"
+    return 1
+  fi
+}
+
+write_request() {
+  local request_path="$1"
+  local image="$2"
+  local index
+  local default_left
+  local default_right
+  python3 "$RENDERER" create-request \
+    --output "$request_path" \
+    --bind-address "$BIND_ADDRESS" \
+    --port "$PORT" \
+    --uid "$RUNTIME_UID" \
+    --gid "$RUNTIME_GID" \
+    --image "$image"
+  for index in "${!SOURCE_IDS[@]}"; do
+    default_left=false
+    default_right=false
+    [[ "${SOURCE_IDS[$index]}" == "$DEFAULT_LEFT" ]] && default_left=true
+    [[ "${SOURCE_IDS[$index]}" == "$DEFAULT_RIGHT" ]] && default_right=true
+    python3 "$RENDERER" add-source \
+      --request "$request_path" \
+      --id "${SOURCE_IDS[$index]}" \
+      --name "${SOURCE_NAMES[$index]}" \
+      --host-path "${SOURCE_PATHS[$index]}" \
+      --access "${SOURCE_ACCESS[$index]}" \
+      --default-left "$default_left" \
+      --default-right "$default_right"
+  done
+}
+
+copy_atomic() {
+  local source="$1"
+  local destination="$2"
+  local mode="$3"
+  local destination_directory
+  local temporary
+  destination_directory="$(dirname -- "$destination")"
+  mkdir -p -- "$destination_directory"
+  temporary="$(mktemp "$destination_directory/.reachcommander-copy.XXXXXX")"
+  if ! install -m "$mode" -- "$source" "$temporary" || ! sync -f -- "$temporary"; then
+    rm -f -- "$temporary"
+    rc_die 'failed to stage an installer-owned file'
+    return 1
+  fi
+  if ! mv -f -- "$temporary" "$destination"; then
+    rm -f -- "$temporary"
+    rc_die 'failed to replace an installer-owned file'
+    return 1
+  fi
+}
+
+DEPLOYMENT_FILES=(
+  '.env'
+  'compose.yaml'
+  'config/sources.json'
+  'state/source-mounts.json'
+  'state/channel'
+  'state/current-image'
+  'state/previous-image'
+  'bin/render_config.py'
+  'lib/common.sh'
+)
+
+file_mode() {
+  case "$1" in
+    bin/*)
+      printf '0755\n'
+      ;;
+    *)
+      printf '0600\n'
+      ;;
+  esac
+}
+
+backup_existing_deployment() {
+  local backup_directory="$1"
+  local relative_path
+  mkdir -p -- "$backup_directory/deployment" "$backup_directory/command"
+  for relative_path in "${DEPLOYMENT_FILES[@]}"; do
+    if [[ -f "$RC_INSTALL_ROOT/$relative_path" ]]; then
+      mkdir -p -- "$backup_directory/deployment/$(dirname -- "$relative_path")"
+      cp -p -- \
+        "$RC_INSTALL_ROOT/$relative_path" \
+        "$backup_directory/deployment/$relative_path"
+    fi
+  done
+  if [[ -f "$RC_COMMAND_PATH" ]]; then
+    cp -p -- "$RC_COMMAND_PATH" "$backup_directory/command/reachcommander"
+  fi
+}
+
+install_staged_deployment() {
+  local stage_root="$1"
+  local relative_path
+  for relative_path in "${DEPLOYMENT_FILES[@]}"; do
+    copy_atomic \
+      "$stage_root/$relative_path" \
+      "$RC_INSTALL_ROOT/$relative_path" \
+      "$(file_mode "$relative_path")"
+  done
+  copy_atomic "$MANAGEMENT_COMMAND" "$RC_COMMAND_PATH" 0755
+}
+
+restore_deployment() {
+  local backup_directory="$1"
+  local relative_path
+  for relative_path in "${DEPLOYMENT_FILES[@]}"; do
+    if [[ -f "$backup_directory/deployment/$relative_path" ]]; then
+      copy_atomic \
+        "$backup_directory/deployment/$relative_path" \
+        "$RC_INSTALL_ROOT/$relative_path" \
+        "$(file_mode "$relative_path")"
+    fi
+  done
+  if [[ -f "$backup_directory/command/reachcommander" ]]; then
+    copy_atomic \
+      "$backup_directory/command/reachcommander" \
+      "$RC_COMMAND_PATH" \
+      0755
+  fi
+}
+
+handle_start_failure() {
+  local had_existing="$1"
+  local backup_directory="$2"
+  rc_compose logs --tail 200 reachcommander >&2 || true
+  if [[ "$had_existing" == 'true' ]]; then
+    restore_deployment "$backup_directory" || {
+      rc_die 'reconfiguration failed and the previous files could not be restored'
+      return 3
+    }
+    if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
+      rc_die 'reconfiguration was unhealthy; the previous deployment was restored'
+      return 2
+    fi
+    rc_die 'reconfiguration and automatic rollback were both unhealthy'
+    return 3
+  fi
+  rc_compose down >/dev/null 2>&1 || true
+  rc_die 'initial startup was unhealthy; validated configuration was retained'
+  return 2
+}
+
+preflight
+rc_init_paths
+rc_assert_safe_install_root
+assert_generated_layout_safe
+if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' || EUID -eq 0 ]]; then
+  rc_require_root
+fi
+rc_acquire_lock
+
+HAD_EXISTING=false
+if [[ -f "$RC_INSTALL_ROOT/.env" || -f "$RC_INSTALL_ROOT/compose.yaml" ]]; then
+  HAD_EXISTING=true
+  prompt_value 'A ReachCommander deployment exists. Reconfigure it? (y/N)' 'n'
+  if [[ ! "$REPLY_VALUE" =~ ^[Yy]$ ]]; then
+    printf 'ReachCommander deployment left unchanged.\n'
+    exit 0
+  fi
+fi
+
+invoking_ids="$(rc_invoking_ids)"
+default_uid="${invoking_ids%%:*}"
+default_gid="${invoking_ids##*:}"
+
+prompt_value 'Bind address' '127.0.0.1'
+BIND_ADDRESS="$REPLY_VALUE"
+prompt_value 'Host port' '8092'
+PORT="$REPLY_VALUE"
+rc_validate_port "$PORT"
+prompt_value 'Container runtime UID' "$default_uid"
+RUNTIME_UID="$REPLY_VALUE"
+validate_runtime_id "$RUNTIME_UID" 'runtime UID'
+prompt_value 'Container runtime GID' "$default_gid"
+RUNTIME_GID="$REPLY_VALUE"
+validate_runtime_id "$RUNTIME_GID" 'runtime GID'
+
+declare -a SOURCE_IDS SOURCE_NAMES SOURCE_PATHS SOURCE_ACCESS
+collect_sources
+
+prompt_value 'Default left source ID' "${SOURCE_IDS[0]}"
+DEFAULT_LEFT="$REPLY_VALUE"
+validate_default_source "$DEFAULT_LEFT" 'default left source'
+prompt_value 'Default right source ID' "${SOURCE_IDS[0]}"
+DEFAULT_RIGHT="$REPLY_VALUE"
+validate_default_source "$DEFAULT_RIGHT" 'default right source'
+
+prompt_value "Type 'I have authenticated HTTPS' to confirm proxy protection" ''
+if [[ "$REPLY_VALUE" != 'I have authenticated HTTPS' ]]; then
+  rc_die 'authenticated HTTPS acknowledgement did not match'
+  exit 1
+fi
+
+install_parent="$(dirname -- "$RC_INSTALL_ROOT")"
+mkdir -p -- "$install_parent"
+WORK_ROOT="$(mktemp -d "$install_parent/.reachcommander-install.XXXXXX")"
+REQUEST_PATH="$WORK_ROOT/request.json"
+STAGE_ROOT="$WORK_ROOT/deployment"
+BACKUP_DIRECTORY="$WORK_ROOT/previous"
+
+write_request "$REQUEST_PATH" "$RC_IMAGE_REPOSITORY:stable"
+python3 "$RENDERER" render \
+  --request "$REQUEST_PATH" \
+  --template "$COMPOSE_TEMPLATE" \
+  --output "$STAGE_ROOT"
+docker compose --project-directory "$STAGE_ROOT" config --quiet
+
+RESOLVED_IMAGE="$(rc_pull_digest stable)"
+python3 "$RENDERER" set-image --env "$STAGE_ROOT/.env" --image "$RESOLVED_IMAGE"
+mkdir -p -- "$STAGE_ROOT/bin" "$STAGE_ROOT/lib"
+install -m 0755 -- "$RENDERER" "$STAGE_ROOT/bin/render_config.py"
+install -m 0600 -- "$COMMON_LIBRARY" "$STAGE_ROOT/lib/common.sh"
+rc_atomic_write "$STAGE_ROOT/state/channel" $'stable\n'
+rc_atomic_write "$STAGE_ROOT/state/current-image" "$RESOLVED_IMAGE"$'\n'
+rc_atomic_write "$STAGE_ROOT/state/previous-image" ''
+touch -- "$STAGE_ROOT/state/command.lock"
+chmod 0600 -- "$STAGE_ROOT/state/command.lock"
+docker compose --project-directory "$STAGE_ROOT" config --quiet
+
+if [[ "$HAD_EXISTING" == 'true' ]]; then
+  backup_existing_deployment "$BACKUP_DIRECTORY"
+fi
+
+install_staged_deployment "$STAGE_ROOT"
+INSTALL_COMMITTED=true
+
+if ! rc_compose up -d reachcommander || ! rc_wait_healthy reachcommander 60; then
+  failure_status=0
+  handle_start_failure "$HAD_EXISTING" "$BACKUP_DIRECTORY" || failure_status=$?
+  exit "$failure_status"
+fi
+
+printf 'ReachCommander is healthy at http://%s:%s\n' "$BIND_ADDRESS" "$PORT"
+printf 'Protect this endpoint with your authenticated HTTPS reverse proxy.\n'
+printf 'Run reachcommander doctor to verify the deployment.\n'

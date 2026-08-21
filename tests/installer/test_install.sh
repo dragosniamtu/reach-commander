@@ -178,7 +178,7 @@ mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
 
 legacy_acknowledgement_input="$(source_prompt_input \
   'Family Media' 'RO' 'Movies' 'RW' 'family-media' 'movies' \
-  'I have authenticated HTTPS')"
+  'I have authenticated ''HTTPS')"
 run_installer "$legacy_acknowledgement_input" "$TEST_ROOT/legacy-acknowledgement.out"
 (( last_status != 0 )) || fail "legacy HTTPS acknowledgement must be rejected"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "legacy acknowledgement installed deployment"

@@ -8,7 +8,13 @@ Include the affected commit, deployment mode, reproduction steps, impact, and wh
 
 ## Deployment boundary
 
-ReachCommander currently has no built-in authentication, authorization, or TLS. Run it only on a trusted network or behind an authenticated HTTPS reverse proxy. The checked-in source configuration and Compose mounts are read-only by default.
+ReachCommander has built-in single-administrator authentication and an authenticated-by-default API, but it does not terminate TLS. Bind the application to `127.0.0.1` and publish it through an HTTPS reverse proxy. Optional proxy authentication is useful defense in depth, but it does not replace ReachCommander's own login or HTTPS.
+
+The administrator password is never stored in the image, Compose model, browser storage, or configuration. The persisted record at `/opt/reachcommander/data/auth/account.json` contains a salted password hash and security stamp; `/opt/reachcommander/data/keys` contains the ASP.NET Core Data Protection key ring used for cookies. Both paths contain security-sensitive state. Back them up together, protect backup files as credentials, and use the Ubuntu guide's verified backup procedure.
+
+First-run setup uses a random one-time code written to the server log. Login and setup are rate limited, mutations require antiforgery validation, and the non-persistent HttpOnly session cookie is `SameSite=Strict`, Secure in production, and renewed within a 12-hour sliding lifetime. A password change or account replacement invalidates older sessions.
+
+For an account reset, stop ReachCommander, preserve and verify a backup, remove only `data/auth/account.json`, restart, and use the new setup code. Deleting only `/opt/reachcommander/data/keys` signs out sessions but does not reset the account. Preserve malformed state for investigation; never delete or modify configured source data as part of authentication recovery.
 
 Enabling writes requires both `readOnly: false` for one explicit source and operating-system/container write permission for that same narrow root. Never mount `/`, a broad home directory, or `/var/run/docker.sock`.
 

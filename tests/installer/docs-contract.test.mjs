@@ -43,8 +43,17 @@ test('Ubuntu guide uses a version-pinned, checksum-verified installation flow', 
 test('Ubuntu guide documents the security and lifecycle contracts', async () => {
   const guide = await readRequired('docs/deployment/ubuntu.md');
   for (const required of [
-    'no built-in authentication',
-    'authenticated HTTPS reverse proxy',
+    'built-in single-administrator authentication',
+    'first-run setup code',
+    '/opt/reachcommander/data/auth/account.json',
+    '/opt/reachcommander/data/keys',
+    '12-hour sliding session',
+    'HTTPS reverse proxy',
+    'optional proxy authentication',
+    'password change',
+    'account reset',
+    'retain',
+    'verified backup',
     '127.0.0.1',
     'read-only',
     'read-write',
@@ -65,7 +74,7 @@ test('Ubuntu guide documents the security and lifecycle contracts', async () => 
   assert.match(guide, /GHCR[\s\S]*package[\s\S]*public/i);
 });
 
-test('reverse-proxy examples enforce HTTPS authentication and large-upload settings', async () => {
+test('reverse-proxy examples enforce HTTPS, label proxy auth optional, and retain large-upload settings', async () => {
   const [nginx, caddy, traefik, traefikStatic] = await Promise.all([
     readRequired('docs/deployment/nginx.conf'),
     readRequired('docs/deployment/Caddyfile'),
@@ -85,10 +94,12 @@ test('reverse-proxy examples enforce HTTPS authentication and large-upload setti
   ]) {
     assert.ok(nginx.includes(directive), `Nginx example is missing: ${directive}`);
   }
+  assert.match(nginx, /optional defense in depth/i);
 
   for (const directive of ['basic_auth', 'request_body', 'max_size 50GB', 'reverse_proxy 127.0.0.1:8092']) {
     assert.ok(caddy.includes(directive), `Caddy example is missing: ${directive}`);
   }
+  assert.match(caddy, /optional defense in depth/i);
 
   for (const directive of [
     'entryPoints:',
@@ -101,6 +112,7 @@ test('reverse-proxy examples enforce HTTPS authentication and large-upload setti
   ]) {
     assert.ok(traefik.includes(directive), `Traefik example is missing: ${directive}`);
   }
+  assert.match(traefik, /optional defense in depth/i);
   assert.match(traefik, /tls:\s*\n\s+certResolver: letsencrypt/);
   for (const directive of [
     'websecure:',
@@ -121,7 +133,23 @@ test('README points operators to the Ubuntu guide without replacing development 
   assert.match(readme, /Install on Ubuntu/i);
   assert.match(readme, /docs\/deployment\/ubuntu\.md/);
   assert.match(readme, /Local development/);
-  assert.match(readme, /no built-in authentication/i);
+  assert.match(readme, /built-in single-administrator authentication/i);
+  assert.doesNotMatch(readme, new RegExp(['no built-in', 'authentication'].join(' '), 'i'));
+});
+
+test('security policy describes account persistence and secure deployment', async () => {
+  const policy = await readRequired('SECURITY.md');
+  for (const required of [
+    'built-in single-administrator authentication',
+    '/opt/reachcommander/data/auth/account.json',
+    '/opt/reachcommander/data/keys',
+    'HTTPS reverse proxy',
+    'optional proxy authentication',
+    'account reset',
+    'verified backup',
+  ]) {
+    assert.ok(policy.toLowerCase().includes(required.toLowerCase()), `Security policy is missing: ${required}`);
+  }
 });
 
 test('published operator material never pipes downloaded code into a shell', async () => {

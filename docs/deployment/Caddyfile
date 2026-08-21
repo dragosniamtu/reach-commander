@@ -1,12 +1,15 @@
 # ReachCommander Caddy example.
-# Set REACHCOMMANDER_PASSWORD_HASH to output from `caddy hash-password`.
-# Do not commit the hash or plaintext password.
+# Optional defense in depth: remove the complete basic_auth block when
+# ReachCommander's built-in login is the only authentication layer.
+# If kept, set REACHCOMMANDER_PASSWORD_HASH to output from `caddy hash-password`.
+# Never commit the hash or plaintext password.
 
 reachcommander.example.com {
     request_body {
         max_size 50GB
     }
 
+    # Optional; this complete block may be removed.
     basic_auth {
         admin {$REACHCOMMANDER_PASSWORD_HASH}
     }
@@ -18,4 +21,3 @@ reachcommander.example.com {
         }
     }
 }
-

@@ -10,7 +10,7 @@ ReachCommander is a production-oriented, self-hosted dual-pane file manager insp
 
 ![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
 
-> **Security boundary:** ReachCommander has no built-in authentication, authorization, or TLS. Keep it on a trusted network or place it behind an authenticated HTTPS reverse proxy. Checked-in sources and Docker mounts remain read-only until an administrator explicitly opts one narrow source into writes.
+> **Security boundary:** ReachCommander includes built-in single-administrator authentication with an HttpOnly cookie session, but it does not terminate TLS. Keep the application port on loopback and publish it through an HTTPS reverse proxy. Optional proxy authentication can add defense in depth; it is no longer the application's only login boundary. Checked-in sources and Docker mounts remain read-only until an administrator explicitly opts one narrow source into writes.
 
 ## Why this project
 
@@ -22,6 +22,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - **Isolated archive handling:** ZIP, RAR, and 7z parsing runs in a bounded child worker; previews are immutable, extraction is conflict-safe, and the worker never receives destination paths.
 - **Cross-platform observability:** Windows and Linux collectors normalize CPU, memory, storage, GPU, temperature, fan, network, and uptime data without shelling out to vendor tools.
 - **Installable without data leakage:** Angular's production service worker caches only the versioned application shell; filesystem listings and every `/api` response remain network-only.
+- **Built-in authentication:** first-run administrator creation, rate-limited login, antiforgery protection, password change, logout, and persisted cookie keys protect the API and Angular shell.
 - **Testable accessibility:** keyboard-first pane control, focus trapping/restoration, live regions, explicit RO/RW semantics, and deterministic browser acceptance at desktop and compact widths.
 
 | Layer | Technology |
@@ -30,7 +31,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, hardened Docker Compose, Windows and Ubuntu support |
-| Quality | 477 cross-platform .NET tests, 198 Angular tests, 2 PWA contract tests, and 19 real-browser scenarios |
+| Quality | 525 cross-platform .NET tests, 243 Angular tests, 2 PWA contract tests, and 21 real-browser scenarios |
 
 ## What ReachCommander includes
 
@@ -48,10 +49,11 @@ ReachCommander demonstrates more than a file-browser UI:
 - F5 extraction of selected archive entries or one focused unopened archive, with immutable review, live progress, cancellation, conflict blocking, and recovery guidance.
 - Live CPU, memory, storage, GPU, thermal, fan, network, and uptime telemetry when the host exposes it.
 - Installable PWA delivery with offline shell startup, explicit updates, and network-only filesystem/API data.
+- Built-in first-run setup and single-administrator login with a 12-hour sliding session and no Remember Me option.
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
-Copy, move, delete, single-item F4 rename, downloads, file previews, authentication, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
+Copy, move, delete, single-item F4 rename, downloads, file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
 
 ## Architecture
 
@@ -96,9 +98,9 @@ tests/e2e                           deterministic Playwright acceptance flow
 
 ## Install on Ubuntu
 
-For a production Ubuntu server, use the versioned release bundle and follow the [Ubuntu installation guide](docs/deployment/ubuntu.md). It covers checksum verification, the interactive installer, read-only/read-write source policy, digest-pinned updates with rollback, uninstall backups, and authenticated HTTPS examples for Nginx, Caddy, and Traefik.
+For a production Ubuntu server, use the versioned release bundle and follow the [Ubuntu installation guide](docs/deployment/ubuntu.md). It covers checksum verification, the interactive installer, first-run setup, read-only/read-write source policy, digest-pinned updates with rollback, authentication-data backups, and HTTPS examples for Nginx, Caddy, and Traefik.
 
-ReachCommander has no built-in authentication or TLS. Keep the application port on loopback and expose it only through an authenticated HTTPS reverse proxy. The repository clone and source-build workflow below remain the development path.
+ReachCommander has built-in single-administrator authentication, but no TLS listener. Keep the application port on loopback and expose it only through an HTTPS reverse proxy; proxy authentication is optional defense in depth. The repository clone and source-build workflow below remain the development path.
 
 ## Source configuration
 
@@ -149,10 +151,10 @@ The checked-in Compose file uses disposable demo roots under `dev-sources/`:
 docker compose up --build -d
 docker compose ps
 curl.exe --fail http://localhost:8092/health
-curl.exe --fail http://localhost:8092/api/sources
+docker compose logs --tail 200 reachcommander
 ```
 
-Open `http://localhost:8092`. Stop it with:
+Read the first-run setup code from the container log and open `http://localhost:8092`; browsers treat localhost as the development secure-context exception. Protected `/api` requests return `401` until setup/login succeeds. Stop it with:
 
 ```powershell
 docker compose down
@@ -162,6 +164,7 @@ For a server, map only the required host directories. The expected mapping is:
 
 ```text
 Host                    Container
+/opt/reachcommander/data -> /data
 /srv/downloads    ->    /sources/downloads
 /srv/media        ->    /sources/media
 ```
@@ -173,11 +176,12 @@ services:
   reachcommander:
     volumes:
       - ./config:/config:ro
+      - ./data:/data:rw
       - /srv/downloads:/sources/downloads:ro
       - /srv/media:/sources/media:ro
 ```
 
-The supplied container runs as UID/GID `1000:1000`, drops all Linux capabilities, enables `no-new-privileges`, uses a read-only root filesystem, and provides only a small `/tmp` tmpfs. Ensure UID 1000 can read the mounted host directories. Any destination enabled for rename, upload, or extraction must be configured with `readOnly: false`, mounted `:rw`, and writable by UID/GID 1000; application policy alone cannot grant host permission. The API listens on container port 8080 and Compose publishes host port 8092.
+The supplied container runs as UID/GID `1000:1000`, drops all Linux capabilities, enables `no-new-privileges`, uses a read-only root filesystem, and provides only a small `/tmp` tmpfs. Authentication state and Data Protection keys live in the dedicated writable `/data` mount, not in the image. Ensure UID 1000 owns that narrowly scoped data directory and can read the mounted source directories. Any destination enabled for rename, upload, or extraction must be configured with `readOnly: false`, mounted `:rw`, and writable by UID/GID 1000; application policy alone cannot grant host permission. The API listens on container port 8080 and Compose publishes host port 8092.
 
 The framework-dependent archive worker and SharpCompress 0.50.4 are published under `/app/archive-worker/` inside the image. No `unrar`, `7zip`, or other operating-system archive package is installed or invoked.
 
@@ -242,7 +246,7 @@ docker compose -f compose.yaml -f compose.hardware.yaml -f compose.hardware.nvid
 
 Omit the NVIDIA override if the toolkit, device, or compatible NVML library is unavailable; the rest of the metrics continue normally. No vendor command-line tools are invoked.
 
-Hardware telemetry reveals capacity, utilization, network-interface names, and device inventory. Keep ReachCommander on a trusted network and protect it with the same authenticated HTTPS reverse proxy or other deployment access controls used for the file browser.
+Hardware telemetry reveals capacity, utilization, network-interface names, and device inventory. The built-in administrator login protects it with the rest of the API; keep ReachCommander on a trusted network behind the same HTTPS reverse proxy, with optional proxy authentication if you want a second boundary.
 
 ## Local development
 
@@ -283,6 +287,14 @@ dotnet publish src/ReachCommander.Api -c Release -o artifacts/publish
 $env:ReachCommander__SourcesPath = (Resolve-Path .\config\sources.local.json).Path
 dotnet artifacts/publish/ReachCommander.Api.dll --urls http://127.0.0.1:8092
 ```
+
+## Authentication
+
+ReachCommander provides built-in single-administrator authentication across the Angular UI and every `/api` route. On an empty data directory, the server prints a random first-run setup code to its log. Open the UI, enter that code, choose the administrator username and password, and complete setup. Later visits use the login screen. Sessions are non-persistent HttpOnly cookies with a 12-hour sliding session lifetime; there is no Remember Me option. The account menu supports password change and logout.
+
+The password is never stored in the Docker image, Compose file, browser storage, or configuration. The server keeps only a versioned salted password hash in `data/auth/account.json`; Docker deployment persists it at `/opt/reachcommander/data/auth/account.json`. Cookie encryption keys persist separately under `/opt/reachcommander/data/keys`. Back up the account record and key ring together so an ordinary restore retains both the administrator and valid sessions. The [Ubuntu guide](docs/deployment/ubuntu.md) provides the complete verified-backup and account reset procedure.
+
+Deleting only the key ring signs out existing sessions but does not reset the administrator password. An intentional account reset requires stopping the service, making a verified backup, removing only `data/auth/account.json`, restarting, reading the newly generated setup code, and creating the replacement administrator. Never delete malformed authentication state before preserving it for diagnosis, and never include configured source directories in an account reset.
 
 ## Progressive Web App
 
@@ -411,6 +423,12 @@ Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source button
 ## API
 
 ```text
+GET /api/auth/session
+GET /api/auth/antiforgery
+POST /api/auth/setup
+POST /api/auth/login
+POST /api/auth/logout
+POST /api/auth/password
 GET /api/sources
 GET /api/files?sourceId=media&path=/Movies
 GET /api/files/info?sourceId=media&path=/Movies/Gladiator%20II.mkv
@@ -432,6 +450,8 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 
 ## Security model
 
+- Every `/api` endpoint requires the authenticated administrator except session discovery, antiforgery-token issuance, first-run setup, and login. Setup and login are rate limited; state-changing requests require the same-origin antiforgery header.
+- The session cookie is HttpOnly, `SameSite=Strict`, Secure outside development/testing, non-persistent, and renewed within a 12-hour sliding window. The persisted security stamp invalidates older cookies after a password change or account replacement.
 - The browser sends a configured source ID and normalized logical path only. Source roots and resolved physical paths are never included in DTOs, client state, or Problem Details.
 - The backend rejects NUL characters, relative traversal, rooted paths, drive-qualified paths, and UNC paths.
 - Every request is resolved beneath its configured source. Existing path components are canonicalized one by one, symbolic links are resolved, and containment is checked after each resolution and on the final path.
@@ -441,7 +461,7 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 - The PWA service worker has no API data groups and explicitly excludes `/api/**` and `/health` from navigation fallback; it cannot provide stale filesystem or operation results offline.
 - Filesystem exceptions are converted to stable, non-leaking Problem Details. Automated tests use temporary fixture trees, never developer data.
 
-This boundary protects the configured filesystem roots; it is not a substitute for authentication, host permissions, network isolation, TLS, backups, malware scanning, or container hardening. ReachCommander still has no built-in authentication, so place it behind an authenticated HTTPS reverse proxy and do not expose it publicly.
+This boundary protects the configured filesystem roots; built-in authentication does not replace host permissions, network isolation, TLS, backups, malware scanning, or container hardening. Place ReachCommander behind an HTTPS reverse proxy and do not publish its upstream port directly. Optional proxy authentication is defense in depth, not a substitute for ReachCommander's login or HTTPS.
 
 ## Tests and release checks
 
@@ -480,7 +500,7 @@ Archive fixture generation, immutable upstream provenance, expected catalogs, an
 - **Milestone 2A — controlled active-panel operations (current):** Total Commander-inspired Multi-Rename, complete authoritative preview, one-level Undo, wildcard search, bounded all-or-nothing uploads, read-only archive browsing, and controlled extraction.
 - **Milestone 2B — remaining safe mutations:** confirmation dialogs and secure F4 single rename, F5 copy, F6 move, F7 create directory, and F8 delete endpoints.
 - **Milestone 3 — resilient transfers:** queued jobs, `BackgroundService`, channels, SignalR progress, throughput/ETA, cancellation, failure recovery, and verified copy-then-delete cross-device moves.
-- **Milestone 4 — access control:** local users, password authentication, secure sessions, per-source permissions, read-only roles, settings, and feature flags.
+- **Milestone 4 — multi-user access control:** additional users, per-source permissions, read-only roles, settings, and feature flags.
 - **Milestone 5 — richer file workflows:** image/video/PDF/text previews, thumbnail mode, recursive search, downloads, optional nested/password archive workflows, bookmarks, history, and favorites.
 
 The recommended next step is Milestone 2B as a separate security-reviewed slice: define each mutation's authorization/read-only invariants first, add temporary-filesystem tests, implement confirmation UX, then expose the function keys one operation at a time.

@@ -4,7 +4,7 @@ This is the production installation path for an Ubuntu host. It installs a small
 
 A root-owned coordination lock remains at `/opt/.reachcommander.lock`. It lives outside the replaceable deployment tree so install, update, and uninstall operations cannot accidentally switch lock inodes while another command is active.
 
-> **Security boundary:** ReachCommander has no built-in authentication, authorization, or TLS. Keep its published port on `127.0.0.1` and put an authenticated HTTPS reverse proxy in front of it. Do not expose the application port directly to the internet.
+> **Security boundary:** ReachCommander provides built-in single-administrator authentication, but it does not terminate TLS. Keep its published port on `127.0.0.1` and put an HTTPS reverse proxy in front of it. Optional proxy authentication adds defense in depth; do not expose the application port directly to the internet.
 
 ## Prerequisites
 
@@ -94,7 +94,7 @@ The interactive installer asks for:
 - a non-root numeric UID and GID for the container process;
 - one or more existing host source directories, their labels and identifiers, and whether each is read-only or read-write;
 - the default source for each pane;
-- an exact acknowledgement before enabling any read-write source.
+- the exact `I have HTTPS` acknowledgement before installation.
 
 The first installation always resolves `stable` and persists its exact image digest. After installation, `reachcommander update` can follow `stable`, switch to `edge`, or select an exact `vX.Y.Z` release.
 
@@ -109,6 +109,9 @@ On success the installer creates:
   .env
   compose.yaml
   config/sources.json
+  data/
+    auth/
+    keys/
   lib/common.sh
   state/channel
   state/current-image
@@ -116,19 +119,79 @@ On success the installer creates:
 /usr/local/bin/reachcommander
 ```
 
-Generated configuration is root-owned. The runtime image is always saved as an immutable `ghcr.io/dragosniamtu/reach-commander@sha256:...` digest, even when `stable` or `edge` was selected for discovery.
+Generated configuration is root-owned. The mode-`0700` `data` tree is owned by the selected runtime UID/GID and mounted read-write at `/data`; every configured source retains its independent read-only/read-write policy. The runtime image is always saved as an immutable `ghcr.io/dragosniamtu/reach-commander@sha256:...` digest, even when `stable` or `edge` was selected for discovery.
 
 Reconfiguration is journaled before any active file changes. If a signal, process crash, or host interruption leaves `state/install-transaction`, `reachcommander doctor` reports it. Rerun the same installer bundle to recover the verified previous configuration and healthy image before starting a new reconfiguration; do not delete the marker or `.reconfigure-transaction` backup manually.
 
-## Put HTTPS and authentication in front
+## Create and operate the administrator account
+
+ReachCommander protects the Angular UI and every file API with its built-in single-administrator authentication. Use this first-run sequence:
+
+1. Complete installation with the upstream bound to `127.0.0.1`, then configure the HTTPS reverse proxy before opening ReachCommander from another machine.
+2. Read the active random first-run setup code with `sudo reachcommander logs`. A restart invalidates the previous code and emits a new one while setup is incomplete.
+3. Open the HTTPS URL and enter the setup code, administrator username, and password. The setup code is consumed when the account is created.
+4. On later visits, use the login screen. The non-persistent HttpOnly cookie has a 12-hour sliding session lifetime and no Remember Me option.
+5. Use the account menu for password change or logout. Changing the password invalidates every older session.
+
+The password is not stored inside the Docker image, Compose file, `.env`, or browser storage. `/opt/reachcommander/data/auth/account.json` contains only the versioned salted password hash and account security metadata. `/opt/reachcommander/data/keys` contains the Data Protection key ring that encrypts session cookies. Both remain in the dedicated host data mount across container replacement and installer reconfiguration.
+
+Treat both paths and their backups as credentials. For a routine account-state backup, stop the service and archive the account record and complete key ring together:
+
+```bash
+(
+set -Eeuo pipefail
+AUTH_BACKUP_DIR="/root/reachcommander-auth-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -m 0700 "$AUTH_BACKUP_DIR"
+sudo reachcommander stop
+sudo tar --create \
+  --file "$AUTH_BACKUP_DIR/authentication-data.tar" \
+  --directory /opt/reachcommander/data \
+  auth/account.json keys
+sudo chmod 0600 "$AUTH_BACKUP_DIR/authentication-data.tar"
+sudo sha256sum "$AUTH_BACKUP_DIR/authentication-data.tar" | \
+  sudo tee "$AUTH_BACKUP_DIR/SHA256SUMS" >/dev/null
+sudo chmod 0600 "$AUTH_BACKUP_DIR/SHA256SUMS"
+(
+  cd "$AUTH_BACKUP_DIR"
+  sudo sha256sum --check --strict SHA256SUMS
+)
+sudo reachcommander start
+)
+```
+
+Deleting only the key files under `/opt/reachcommander/data/keys` signs out current sessions after restart but retains the account and password. Do not use key deletion as an account reset.
+
+For an intentional emergency account reset, preserve the old record, remove only that record while the service is stopped, and then start first-run setup again:
+
+```bash
+(
+set -Eeuo pipefail
+sudo reachcommander stop
+RESET_BACKUP_DIR="/root/reachcommander-account-reset-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -m 0700 "$RESET_BACKUP_DIR"
+sudo install -m 0600 \
+  /opt/reachcommander/data/auth/account.json \
+  "$RESET_BACKUP_DIR/account.json"
+sudo cmp --silent \
+  /opt/reachcommander/data/auth/account.json \
+  "$RESET_BACKUP_DIR/account.json"
+sudo rm -- /opt/reachcommander/data/auth/account.json
+sudo reachcommander start
+sudo reachcommander logs
+)
+```
+
+Use the newly emitted first-run setup code to create the replacement administrator. The existing key ring can remain, but the replacement account's security stamp makes old cookies invalid. If `account.json` or another authentication file is malformed, `sudo reachcommander doctor` fails without printing its contents. Preserve the malformed bytes for recovery instead of deleting them casually. Account reset never requires changing or removing a configured source directory.
+
+## Put HTTPS in front
 
 Use one of the checked-in examples as a starting point:
 
-- [Nginx](nginx.conf) — host-native Nginx, Basic Authentication, TLS, request streaming, and six-hour transfer timeouts;
-- [Caddy](Caddyfile) — automatic HTTPS, a password hash supplied from the environment, and a 50 GB request limit (the `request_body` limit requires Caddy 2.10.0 or newer);
-- Traefik [static](traefik.static.yaml) and [dynamic](traefik.dynamic.yaml) files — six-hour client-facing timeouts, an ACME-backed HTTPS router, external password file, and an explicit 50 GiB buffering limit.
+- [Nginx](nginx.conf) — host-native TLS, request streaming, six-hour transfer timeouts, and an optional Basic Authentication block;
+- [Caddy](Caddyfile) — automatic HTTPS, optional proxy authentication, and a 50 GB request limit (the `request_body` limit requires Caddy 2.10.0 or newer);
+- Traefik [static](traefik.static.yaml) and [dynamic](traefik.dynamic.yaml) files — six-hour client-facing timeouts, an ACME-backed HTTPS router, optional external password file, and an explicit 50 GiB buffering limit.
 
-Replace every example hostname, certificate path, and credential reference. Basic Authentication is suitable only over HTTPS; an identity-aware or SSO proxy may replace it. Keep the upstream at `http://127.0.0.1:8092` when the proxy runs natively on the Ubuntu host.
+Replace every example hostname, certificate path, and credential reference. ReachCommander's login is sufficient as the application authentication layer, so proxy authentication is optional defense in depth. Each example identifies the exact Basic Auth directives or middleware that can be omitted. If enabled, Basic Authentication is suitable only over HTTPS; an identity-aware or SSO proxy may replace it. Keep the upstream at `http://127.0.0.1:8092` when the proxy runs natively on the Ubuntu host.
 
 Large files deserve special attention. ReachCommander streams requests, but every proxy can impose a smaller limit or timeout. The examples allow up to 50 GiB and use long timeouts. Nginx disables request buffering. Traefik's optional size-enforcement middleware buffers the body and may spill it to disk, so its temporary storage must have at least the upload capacity you intend to allow; omit that middleware and enforce the limit at an earlier trusted layer if streaming is more important.
 
@@ -145,7 +208,7 @@ curl --fail http://127.0.0.1:8092/health
 curl --fail https://reachcommander.example.com/health
 ```
 
-The first check is local; the second must traverse your real TLS and authentication policy. Supply credentials as appropriate for the proxy you chose.
+The first check is local; the second must traverse your real TLS policy. Supply credentials only if you enabled optional proxy authentication.
 
 ## Operate the installation
 
@@ -161,7 +224,7 @@ sudo reachcommander stop
 sudo reachcommander restart
 ```
 
-Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, image state, port, and container health without changing the deployment.
+Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, authentication-data allowlist/ownership/modes/JSON, image state, port, and container health without changing the deployment. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
 
 ### Updates, channels, and rollback
 
@@ -187,15 +250,21 @@ Run `sudo reachcommander status` to see the saved channel and exact running imag
 sudo reachcommander uninstall
 ```
 
-The command requires the exact confirmation `uninstall ReachCommander`. It revalidates every recorded source path, writes and verifies a timestamped configuration backup beneath `/var/backups/reachcommander`, stops the Compose project without deleting volumes, and removes only the installer-owned allowlist. Source directories and their contents are never removed. If backup creation or Compose shutdown fails, uninstall stops and preserves the active deployment.
+The command first asks what to do with authentication data:
 
-Keep the external backup until you have verified that you no longer need the generated source mapping or pinned image record.
+- `retain` is the default. It removes the container, command, and generated deployment files but leaves the inactive authentication tree at `/opt/reachcommander/data` and prints that exact path.
+- `backup` stops the service, copies the generated deployment plus every allowlisted authentication file to a timestamped directory under `/var/backups/reachcommander`, sets authentication backup files to mode `0600`, flushes them, compares every copy byte-for-byte, and only then removes the original data tree.
+
+After that selection, the command requires the exact confirmation `uninstall ReachCommander`. It revalidates every recorded source path and the authentication-data tree, stops the application before its final validation or backup, tears down Compose without deleting volumes, and removes only the installer-owned allowlist. Source directories and their contents are never removed. If final validation or verified backup creation fails, uninstall preserves the deployment and attempts to restart the previously healthy service.
+
+Keep a verified backup until you have confirmed that you no longer need the account, cookie keys, generated source mapping, or pinned image record.
 
 ## Troubleshooting
 
 - **Package pull is denied:** confirm the GHCR package exists and its package visibility is Public; repository visibility alone may not be enough.
-- **The service is healthy locally but unavailable remotely:** keep ReachCommander on loopback and check the reverse proxy listener, authentication, certificate, and firewall.
+- **The service is healthy locally but unavailable remotely:** keep ReachCommander on loopback and check the reverse proxy listener, certificate, firewall, and optional proxy-authentication policy.
 - **A source is unavailable:** verify the saved host path still exists, has not become a symlink, and is traversable by the configured UID/GID.
 - **Writes are denied:** the source must be explicitly read-write in application policy, mounted read-write, and writable by the configured UID/GID. Do not weaken unrelated parent directories.
-- **PWA installation is not offered:** use the authenticated HTTPS hostname, not a plain HTTP LAN address, and keep the application and API on the same origin.
+- **PWA installation is not offered:** use the HTTPS hostname, not a plain HTTP LAN address, and keep the application and API on the same origin.
+- **The login screen requests first-run setup unexpectedly:** run `sudo reachcommander doctor`, confirm `/opt/reachcommander/data/auth/account.json` is present and valid, and restore the account plus `/opt/reachcommander/data/keys` together if they were lost. Do not create a replacement account until the missing state is understood.
 - **An update was interrupted:** do not edit the transaction marker. Run `sudo reachcommander doctor`, inspect logs, and use the retained update backup for recovery.

@@ -1,6 +1,9 @@
 # ReachCommander Traefik dynamic configuration example.
 # This assumes host-native Traefik. See ubuntu.md before using containerized Traefik.
-# Generate /etc/traefik/reachcommander.htpasswd outside the repository.
+# Optional defense in depth: remove the reachcommander-auth item from the router's
+# middlewares list and remove the complete reachcommander-auth middleware block when
+# ReachCommander's built-in login is the only authentication layer. If kept, generate
+# /etc/traefik/reachcommander.htpasswd outside the repository.
 
 http:
   routers:
@@ -11,12 +14,12 @@ http:
       tls:
         certResolver: letsencrypt
       middlewares:
-        - reachcommander-auth
+        - reachcommander-auth # Optional; remove with its middleware block below.
         - reachcommander-upload-limit
       service: reachcommander
 
   middlewares:
-    reachcommander-auth:
+    reachcommander-auth: # Optional; remove this complete block with the router item.
       basicAuth:
         usersFile: /etc/traefik/reachcommander.htpasswd
         removeHeader: true

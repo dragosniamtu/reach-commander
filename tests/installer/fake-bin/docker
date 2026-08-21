@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -n "${FAKE_DOCKER_LOG:-}" ]]; then
+  printf '%s\0' "$@" >>"$FAKE_DOCKER_LOG"
+  printf '\0' >>"$FAKE_DOCKER_LOG"
+fi
+
+if [[ "${FAKE_DOCKER_PRINT_ARGS:-0}" == "1" ]]; then
+  printf '[%s]\n' "$@"
+fi
+
+case "${1:-}" in
+  compose)
+    exit "${FAKE_DOCKER_COMPOSE_EXIT:-0}"
+    ;;
+  pull)
+    exit "${FAKE_DOCKER_PULL_EXIT:-0}"
+    ;;
+  image)
+    if [[ "${2:-}" != "inspect" ]]; then
+      printf 'fake docker: unsupported image command\n' >&2
+      exit 97
+    fi
+    printf '%s\n' "${FAKE_DOCKER_DIGESTS:-}"
+    exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
+    ;;
+  inspect)
+    if [[ -n "${FAKE_DOCKER_HEALTH_FILE:-}" && -s "$FAKE_DOCKER_HEALTH_FILE" ]]; then
+      IFS= read -r status <"$FAKE_DOCKER_HEALTH_FILE"
+      tail -n +2 "$FAKE_DOCKER_HEALTH_FILE" >"${FAKE_DOCKER_HEALTH_FILE}.next"
+      mv -f "${FAKE_DOCKER_HEALTH_FILE}.next" "$FAKE_DOCKER_HEALTH_FILE"
+      printf '%s\n' "$status"
+    else
+      printf '%s\n' "${FAKE_DOCKER_HEALTH:-healthy}"
+    fi
+    exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
+    ;;
+  *)
+    printf 'fake docker: unsupported invocation\n' >&2
+    exit 97
+    ;;
+esac

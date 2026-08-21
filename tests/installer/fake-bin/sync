@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -n "${FAKE_SYNC_LOG:-}" ]]; then
+  printf '%s\0' "$@" >>"$FAKE_SYNC_LOG"
+fi
+exit "${FAKE_SYNC_EXIT:-0}"

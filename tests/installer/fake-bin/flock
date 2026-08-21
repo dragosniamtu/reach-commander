@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -n "${FAKE_FLOCK_LOG:-}" ]]; then
+  printf '%s\0' "$@" >>"$FAKE_FLOCK_LOG"
+fi
+exit "${FAKE_FLOCK_EXIT:-0}"

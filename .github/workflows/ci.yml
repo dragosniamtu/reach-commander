@@ -286,7 +286,12 @@ jobs:
           [[ "$healthy" == true ]]
           published="$(docker port reachcommander-smoke 8080/tcp)"
           port="${published##*:}"
-          curl --fail --show-error --silent "http://127.0.0.1:$port/health"
+          curl_output=''
+          if ! curl_output="$(curl --fail --show-error --silent "http://127.0.0.1:$port/health" 2>&1)"; then
+            failure_context="$(printf 'Published mapping:\n%s\nResolved port:\n%s\nCurl output:\n%s' \
+              "$published" "$port" "$curl_output")"
+            diagnose 1 'curl host health endpoint'
+          fi
 
   container-publish:
     name: Publish verified multi-architecture image

@@ -270,7 +270,12 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   assert.match(smoke, /%0D/);
   assert.match(smoke, /%0A/);
   assert.match(smoke, /diagnose\(\)/);
+  assert.match(
+    smoke,
+    /::error title=Hardened container smoke failed::Diagnostic handler reached\./,
+  );
   assert.match(smoke, /::error title=Hardened container smoke failed::/);
+  assert.match(smoke, /annotation_detail="\$\{detail:0:4000\}"/);
   assert.match(smoke, /docker inspect --format 'status=/);
   assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);
   assert.match(smoke, /docker logs --tail 200 reachcommander-smoke/);

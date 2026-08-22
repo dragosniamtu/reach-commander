@@ -206,7 +206,10 @@ jobs:
             local health_history='[]'
             local application_logs='ReachCommander smoke container was not created or was removed before diagnostics.'
             local detail
+            local annotation_detail
             trap - ERR
+            printf '%s\n' \
+              '::error title=Hardened container smoke failed::Diagnostic handler reached.'
             if docker inspect reachcommander-smoke >/dev/null 2>&1; then
               state="$(docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke 2>&1 || true)"
               health_history="$(docker inspect --format '{{json .State.Health.Log}}' reachcommander-smoke 2>&1 || true)"
@@ -215,8 +218,9 @@ jobs:
             fi
             detail="$(printf 'Container state:\n%s\nHealth history:\n%s\nApplication logs:\n%s' \
               "$state" "$health_history" "$application_logs")"
+            annotation_detail="${detail:0:4000}"
             printf '::error title=Hardened container smoke failed::%s\n' \
-              "$(workflow_escape "$detail")"
+              "$(workflow_escape "$annotation_detail")"
             printf '%s\n' "$detail"
             exit "$exit_code"
           }

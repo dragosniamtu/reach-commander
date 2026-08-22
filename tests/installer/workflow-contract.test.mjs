@@ -280,10 +280,12 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   assert.match(smoke, /trap 'diagnose "\$\?" "\$BASH_COMMAND"' ERR/);
   assert.match(smoke, /if ! failure_context="\$\(docker compose[^\n]*2>&1\)"; then/);
   assert.match(smoke, /if ! failure_context="\$\(docker run --detach/);
+  assert.match(smoke, /curl_output_path="\$smoke_root\/curl-output\.txt"/);
   assert.match(
     smoke,
-    /if ! curl_output="\$\(curl --fail --show-error --silent[^\n]*2>&1\)"; then/,
+    /if curl --fail --show-error --silent[^\n]*>"\$curl_output_path" 2>&1; then/,
   );
+  assert.match(smoke, /curl_output="\$\(<"\$curl_output_path"\)"/);
   assert.match(smoke, /Published mapping:\\n%s\\nResolved port:\\n%s\\nCurl output:\\n%s/);
   assert.match(smoke, /docker inspect --format 'status=/);
   assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);

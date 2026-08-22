@@ -86,12 +86,17 @@ jobs:
       - name: Test CI diagnostic reporter
         run: python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v
 
-      - name: Test Ubuntu installer command contracts
-        run: |
-          bash tests/installer/test_common.sh
-          bash tests/installer/test_install.sh
-          bash tests/installer/test_command.sh
-          bash tests/installer/test_package.sh
+      - name: Test installer common contracts
+        run: python3 tools/run_with_annotations.py "Installer common contracts failed" bash tests/installer/test_common.sh
+
+      - name: Test installer installation contracts
+        run: python3 tools/run_with_annotations.py "Installer installation contracts failed" bash tests/installer/test_install.sh
+
+      - name: Test installer command contracts
+        run: python3 tools/run_with_annotations.py "Installer command contracts failed" bash tests/installer/test_command.sh
+
+      - name: Test installer package contracts
+        run: python3 tools/run_with_annotations.py "Installer package contracts failed" bash tests/installer/test_package.sh
 
       - name: Test release workflow and documentation contracts
         run: node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs tests/installer/docs-contract.test.mjs

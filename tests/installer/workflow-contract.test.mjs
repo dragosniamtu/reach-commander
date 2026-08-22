@@ -49,10 +49,25 @@ test('installer verification runs inside acceptance before publication', async (
       'python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v',
     ),
   );
+  for (const [title, script] of [
+    ['Installer common contracts failed', 'test_common.sh'],
+    ['Installer installation contracts failed', 'test_install.sh'],
+    ['Installer command contracts failed', 'test_command.sh'],
+    ['Installer package contracts failed', 'test_package.sh'],
+  ]) {
+    assert.ok(
+      content.includes(
+        `python3 tools/run_with_annotations.py "${title}" bash tests/installer/${script}`,
+      ),
+    );
+  }
   const orderedSteps = [
     'name: Test installer render configuration',
     'name: Test CI diagnostic reporter',
-    'name: Test Ubuntu installer command contracts',
+    'name: Test installer common contracts',
+    'name: Test installer installation contracts',
+    'name: Test installer command contracts',
+    'name: Test installer package contracts',
     'name: Test release workflow and documentation contracts',
     'name: Lint Ubuntu installer scripts',
     'name: Restore .NET dependencies',

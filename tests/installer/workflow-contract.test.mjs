@@ -39,6 +39,16 @@ test('installer verification runs inside acceptance before publication', async (
     /shellcheck -x --source-path=SCRIPTDIR[\s\S]*?deploy\/package-installer\.sh[\s\S]*?tests\/installer\/test_common\.sh[\s\S]*?tests\/installer\/test_install\.sh[\s\S]*?tests\/installer\/test_command\.sh[\s\S]*?tests\/installer\/test_package\.sh/,
   );
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
+  assert.ok(
+    content.includes(
+      'python3 tools/run_with_annotations.py "Installer render configuration failed" python3 -m unittest tests/installer/test_render_config.py -v',
+    ),
+  );
+  assert.ok(
+    content.includes(
+      'python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v',
+    ),
+  );
   const orderedSteps = [
     'name: Test installer render configuration',
     'name: Test CI diagnostic reporter',
@@ -79,7 +89,11 @@ test('failed Ubuntu backend tests are exposed as public TRX annotations', async 
       backend.indexOf('name: Report failing Ubuntu backend tests') <
         backend.indexOf('name: Upload backend diagnostics'),
   );
-  assert.ok(content.includes('python3 -m unittest tests/ci/test_report_trx.py -v'));
+  assert.ok(
+    content.includes(
+      'python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v',
+    ),
+  );
 });
 
 test('smoke and publication jobs depend on all required gates', async () => {

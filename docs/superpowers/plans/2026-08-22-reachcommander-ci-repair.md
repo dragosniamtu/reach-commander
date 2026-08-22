@@ -36,7 +36,9 @@
 
 **Files:**
 - Create: `tools/report_trx.py`
+- Create: `tools/run_with_annotations.py`
 - Create: `tests/ci/test_report_trx.py`
+- Create: `tests/ci/test_run_with_annotations.py`
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
@@ -48,6 +50,7 @@
 - [ ] Implement glob expansion plus `report(paths: Sequence[Path], output: TextIO) -> None` with `xml.etree.ElementTree`, namespace-independent result lookup, bounded failure messages, and safe GitHub escaping.
 - [ ] Run `python -m unittest tests/ci/test_report_trx.py -v` and confirm all tests pass.
 - [ ] Add the reporter unit test as its own named Ubuntu acceptance step so a portability failure is visible without authenticated logs.
+- [ ] Run the Linux-only renderer contract through the tested annotation wrapper while preserving its original exit code.
 - [ ] Use `LogFilePrefix` to retain one TRX per test project, then add an `if: failure() && matrix.os == 'ubuntu-latest'` backend step that runs the reporter against every matching Ubuntu TRX before artifact upload.
 - [ ] Run the reporter unit tests again and inspect the workflow diff.
 

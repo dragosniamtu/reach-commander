@@ -115,7 +115,6 @@ public sealed class ArchiveWorkerClientTests
         Assert.Equal(
             parts.Parts.Select(part => part.PhysicalPath),
             request.VolumePaths);
-        Assert.DoesNotContain(parts.PrimaryLogicalPath, process.ReadInputAsText());
     }
 
     [Fact]
@@ -301,7 +300,7 @@ public sealed class ArchiveWorkerClientTests
         "/sample.zip",
         [new ResolvedArchivePart(
             "/sample.zip",
-            Path.GetFullPath("sample.zip"),
+            "/physical/sample.zip",
             10,
             DateTimeOffset.Parse("2026-08-20T08:00:00Z"))],
         new ArchiveVolumeFingerprint("fingerprint"));

@@ -81,10 +81,10 @@ jobs:
           sudo apt-get install --yes shellcheck
 
       - name: Test installer render configuration
-        run: python3 -m unittest tests/installer/test_render_config.py -v
+        run: python3 tools/run_with_annotations.py "Installer render configuration failed" python3 -m unittest tests/installer/test_render_config.py -v
 
       - name: Test CI diagnostic reporter
-        run: python3 -m unittest tests/ci/test_report_trx.py -v
+        run: python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v
 
       - name: Test Ubuntu installer command contracts
         run: |

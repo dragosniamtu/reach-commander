@@ -53,6 +53,11 @@ assert_fails() {
   fi
 }
 
+for fake_command in docker flock python3 setpriv sync; do
+  [[ -x "$FAKE_BIN/$fake_command" ]] || fail "fake command is not executable: $fake_command"
+done
+pass "fake installer commands are executable"
+
 rc_init_paths
 assert_equal "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$RC_INSTALL_ROOT" "test install root"
 assert_equal "$REACHCOMMANDER_TEST_COMMAND_PATH" "$RC_COMMAND_PATH" "test command path"

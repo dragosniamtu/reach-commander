@@ -18,6 +18,11 @@ test('push triggers include master and semantic-looking version tags', async () 
 
 test('installer verification runs inside acceptance before publication', async () => {
   const content = await workflow();
+  const acceptanceStart = content.indexOf('  acceptance:');
+  const smokeStart = content.indexOf('  container-smoke:');
+  assert.notEqual(acceptanceStart, -1);
+  assert.notEqual(smokeStart, -1);
+  const acceptance = content.slice(acceptanceStart, smokeStart);
   for (const command of [
     'python3 -m unittest tests/installer/test_render_config.py -v',
     'bash tests/installer/test_common.sh',
@@ -34,6 +39,22 @@ test('installer verification runs inside acceptance before publication', async (
     /shellcheck -x --source-path=SCRIPTDIR[\s\S]*?deploy\/package-installer\.sh[\s\S]*?tests\/installer\/test_common\.sh[\s\S]*?tests\/installer\/test_install\.sh[\s\S]*?tests\/installer\/test_command\.sh[\s\S]*?tests\/installer\/test_package\.sh/,
   );
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
+  const orderedSteps = [
+    'name: Test installer render configuration',
+    'name: Test CI diagnostic reporter',
+    'name: Test Ubuntu installer command contracts',
+    'name: Test release workflow and documentation contracts',
+    'name: Lint Ubuntu installer scripts',
+    'name: Restore .NET dependencies',
+  ];
+  for (const step of orderedSteps) {
+    assert.notEqual(acceptance.indexOf(step), -1, `missing acceptance step: ${step}`);
+  }
+  for (let index = 1; index < orderedSteps.length; index += 1) {
+    assert.ok(
+      acceptance.indexOf(orderedSteps[index - 1]) < acceptance.indexOf(orderedSteps[index]),
+    );
+  }
 });
 
 test('failed Ubuntu backend tests are exposed as public TRX annotations', async () => {
@@ -46,9 +67,11 @@ test('failed Ubuntu backend tests are exposed as public TRX annotations', async 
 
   assert.match(backend, /name: Report failing Ubuntu backend tests/);
   assert.match(backend, /if: failure\(\) && matrix\.os == 'ubuntu-latest'/);
+  assert.match(backend, /LogFilePrefix=backend-\$\{\{ matrix\.os \}\}/);
+  assert.doesNotMatch(backend, /LogFileName=/);
   assert.match(
     backend,
-    /run: python tools\/report_trx\.py artifacts\/test-results\/\$\{\{ matrix\.os \}\}\/backend-\$\{\{ matrix\.os \}\}\.trx/,
+    /run: python tools\/report_trx\.py "artifacts\/test-results\/\$\{\{ matrix\.os \}\}\/backend-\*\.trx"/,
   );
   assert.ok(
     backend.indexOf('name: Test .NET') <

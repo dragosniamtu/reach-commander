@@ -37,11 +37,11 @@ jobs:
         run: dotnet restore ReachCommander.slnx
 
       - name: Test .NET
-        run: dotnet test ReachCommander.slnx -c Release --no-restore --logger "trx;LogFileName=backend-${{ matrix.os }}.trx" --results-directory artifacts/test-results/${{ matrix.os }}
+        run: dotnet test ReachCommander.slnx -c Release --no-restore --logger "trx;LogFilePrefix=backend-${{ matrix.os }}" --results-directory artifacts/test-results/${{ matrix.os }}
 
       - name: Report failing Ubuntu backend tests
         if: failure() && matrix.os == 'ubuntu-latest'
-        run: python tools/report_trx.py artifacts/test-results/${{ matrix.os }}/backend-${{ matrix.os }}.trx
+        run: python tools/report_trx.py "artifacts/test-results/${{ matrix.os }}/backend-*.trx"
 
       - name: Upload backend diagnostics
         if: failure()
@@ -80,15 +80,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes shellcheck
 
-      - name: Verify Ubuntu installer and release contracts
+      - name: Test installer render configuration
+        run: python3 -m unittest tests/installer/test_render_config.py -v
+
+      - name: Test CI diagnostic reporter
+        run: python3 -m unittest tests/ci/test_report_trx.py -v
+
+      - name: Test Ubuntu installer command contracts
         run: |
-          python3 -m unittest tests/installer/test_render_config.py -v
-          python3 -m unittest tests/ci/test_report_trx.py -v
           bash tests/installer/test_common.sh
           bash tests/installer/test_install.sh
           bash tests/installer/test_command.sh
           bash tests/installer/test_package.sh
-          node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs tests/installer/docs-contract.test.mjs
+
+      - name: Test release workflow and documentation contracts
+        run: node --test tests/installer/release-tags.test.mjs tests/installer/workflow-contract.test.mjs tests/installer/docs-contract.test.mjs
+
+      - name: Lint Ubuntu installer scripts
+        run: |
           shellcheck -x --source-path=SCRIPTDIR \
             deploy/install.sh \
             deploy/reachcommander \

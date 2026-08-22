@@ -19,8 +19,8 @@ Restore actionable Ubuntu CI without weakening any installer, frontend, backend,
 
 1. The existing ShellCheck command proves the quoting defect by reporting `SC2016`.
 2. The command string changes from a single-quoted script to a double-quoted script with escaped inner quotes and escaped dollar signs. The nested shell still expands `$1`, while the outer shell does not.
-3. `dotnet test` continues writing a TRX file on every operating system.
-4. If the Ubuntu test command fails, a post-step parses that TRX file and emits one escaped `::error` annotation per failed test.
+3. `dotnet test` uses `LogFilePrefix` so every test project writes a distinct TRX file on every operating system.
+4. If the Ubuntu test command fails, a post-step expands the TRX filename pattern, parses every result file, and emits one escaped `::error` annotation per failed test.
 5. The retained diagnostic artifact remains the source for complete stack traces and attachments.
 
 ## Error handling
@@ -28,6 +28,7 @@ Restore actionable Ubuntu CI without weakening any installer, frontend, backend,
 - A missing TRX file produces a warning annotation and does not mask the original test failure.
 - A malformed TRX file produces a warning annotation and does not mask the original test failure.
 - A TRX file with no failed result prints a short informational message.
+- A filename pattern with no matches is reported as a missing diagnostic instead of silently succeeding.
 - Annotation properties and messages escape GitHub workflow-command delimiters and line breaks.
 
 ## Testing

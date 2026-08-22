@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from glob import glob
 from pathlib import Path
 import sys
 from typing import Sequence, TextIO
@@ -7,6 +8,14 @@ import xml.etree.ElementTree as ET
 
 
 MAX_FAILURE_MESSAGE_LENGTH = 3_500
+
+
+def expand_paths(arguments: Sequence[str]) -> list[Path]:
+    paths: list[Path] = []
+    for argument in arguments:
+        matches = [Path(match) for match in sorted(glob(argument))]
+        paths.extend(matches or [Path(argument)])
+    return paths
 
 
 def _escape_message(value: str) -> str:
@@ -72,7 +81,7 @@ def main(arguments: Sequence[str]) -> int:
         )
         return 0
 
-    report([Path(argument) for argument in arguments], sys.stdout)
+    report(expand_paths(arguments), sys.stdout)
     return 0
 
 

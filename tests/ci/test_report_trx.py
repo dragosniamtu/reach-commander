@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from tools.report_trx import report
+from tools.report_trx import expand_paths, report
 
 
 TRX_DOCUMENT = """<?xml version="1.0" encoding="utf-8"?>
@@ -26,6 +26,17 @@ Actual: 50%</Message>
 
 
 class ReportTrxTests(unittest.TestCase):
+    def test_expands_trx_globs_without_losing_multiple_test_projects(self) -> None:
+        with TemporaryDirectory() as directory:
+            first = Path(directory, "backend-net10.0-1.trx")
+            second = Path(directory, "backend-net10.0-2.trx")
+            first.touch()
+            second.touch()
+
+            paths = expand_paths([str(Path(directory, "backend-*.trx"))])
+
+        self.assertEqual([first, second], paths)
+
     def test_reports_only_failed_results_as_escaped_error_annotations(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory, "backend.trx")

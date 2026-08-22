@@ -41,14 +41,14 @@
 
 **Interfaces:**
 - Consumes: one or more paths to Visual Studio TRX files.
-- Produces: escaped GitHub workflow commands on standard output; returns zero so diagnostics never replace the original test result.
+- Produces: escaped GitHub workflow commands on standard output from every matching TRX file; returns zero so diagnostics never replace the original test result.
 
 - [ ] Create a failing `unittest` contract covering a failed test, ignored passed results, workflow-command escaping, missing files, and malformed XML.
 - [ ] Run `python -m unittest tests/ci/test_report_trx.py -v` and confirm import failure because the reporter does not exist.
-- [ ] Implement `report(paths: Sequence[Path], output: TextIO) -> None` with `xml.etree.ElementTree`, namespace-independent result lookup, bounded failure messages, and safe GitHub escaping.
+- [ ] Implement glob expansion plus `report(paths: Sequence[Path], output: TextIO) -> None` with `xml.etree.ElementTree`, namespace-independent result lookup, bounded failure messages, and safe GitHub escaping.
 - [ ] Run `python -m unittest tests/ci/test_report_trx.py -v` and confirm all tests pass.
-- [ ] Add the unit test to the Ubuntu release-contract step.
-- [ ] Add an `if: failure() && matrix.os == 'ubuntu-latest'` backend step that runs the reporter against the Ubuntu TRX before artifact upload.
+- [ ] Add the reporter unit test as its own named Ubuntu acceptance step so a portability failure is visible without authenticated logs.
+- [ ] Use `LogFilePrefix` to retain one TRX per test project, then add an `if: failure() && matrix.os == 'ubuntu-latest'` backend step that runs the reporter against every matching Ubuntu TRX before artifact upload.
 - [ ] Run the reporter unit tests again and inspect the workflow diff.
 
 ### Task 3: Verify, publish the diagnostic repair, and diagnose Linux

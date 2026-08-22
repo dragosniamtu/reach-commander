@@ -826,7 +826,7 @@ doctor_authentication_data() {
       --reuid="$runtime_uid" \
       --regid="$runtime_gid" \
       --clear-groups \
-      -- sh -c 'test -r "$1" && test -w "$1" && test -x "$1"' reachcommander-doctor "$path"; then
+      -- sh -c "test -r \"\$1\" && test -w \"\$1\" && test -x \"\$1\"" reachcommander-doctor "$path"; then
       doctor_pass 'Authentication data directory is accessible to the runtime identity'
     else
       doctor_fail 'Authentication data directory is not accessible to the runtime identity'

@@ -36,6 +36,29 @@ test('installer verification runs inside acceptance before publication', async (
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
 });
 
+test('failed Ubuntu backend tests are exposed as public TRX annotations', async () => {
+  const content = await workflow();
+  const backendStart = content.indexOf('  backend:');
+  const acceptanceStart = content.indexOf('  acceptance:');
+  assert.notEqual(backendStart, -1);
+  assert.notEqual(acceptanceStart, -1);
+  const backend = content.slice(backendStart, acceptanceStart);
+
+  assert.match(backend, /name: Report failing Ubuntu backend tests/);
+  assert.match(backend, /if: failure\(\) && matrix\.os == 'ubuntu-latest'/);
+  assert.match(
+    backend,
+    /run: python tools\/report_trx\.py artifacts\/test-results\/\$\{\{ matrix\.os \}\}\/backend-\$\{\{ matrix\.os \}\}\.trx/,
+  );
+  assert.ok(
+    backend.indexOf('name: Test .NET') <
+      backend.indexOf('name: Report failing Ubuntu backend tests') &&
+      backend.indexOf('name: Report failing Ubuntu backend tests') <
+        backend.indexOf('name: Upload backend diagnostics'),
+  );
+  assert.ok(content.includes('python3 -m unittest tests/ci/test_report_trx.py -v'));
+});
+
 test('smoke and publication jobs depend on all required gates', async () => {
   const content = await workflow();
   assert.match(content, /container-smoke:[\s\S]*?needs:\s*\[backend, acceptance\]/);

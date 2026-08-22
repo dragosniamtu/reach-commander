@@ -39,6 +39,10 @@ jobs:
       - name: Test .NET
         run: dotnet test ReachCommander.slnx -c Release --no-restore --logger "trx;LogFileName=backend-${{ matrix.os }}.trx" --results-directory artifacts/test-results/${{ matrix.os }}
 
+      - name: Report failing Ubuntu backend tests
+        if: failure() && matrix.os == 'ubuntu-latest'
+        run: python tools/report_trx.py artifacts/test-results/${{ matrix.os }}/backend-${{ matrix.os }}.trx
+
       - name: Upload backend diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -79,6 +83,7 @@ jobs:
       - name: Verify Ubuntu installer and release contracts
         run: |
           python3 -m unittest tests/installer/test_render_config.py -v
+          python3 -m unittest tests/ci/test_report_trx.py -v
           bash tests/installer/test_common.sh
           bash tests/installer/test_install.sh
           bash tests/installer/test_command.sh

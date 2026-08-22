@@ -274,8 +274,8 @@ digest_d="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'd%.0s' {1..64})"
 digest_e="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'e%.0s' {1..64})"
 
 reset_update_baseline() {
-  local image="${1:-$digest_a}"
-  local channel="${2:-stable}"
+  local image="$digest_a"
+  local channel='stable'
   python3 "$INSTALL_ROOT/bin/render_config.py" set-image --env "$INSTALL_ROOT/.env" --image "$image"
   printf '%s\n' "$channel" >"$INSTALL_ROOT/state/channel"
   printf '%s\n' "$image" >"$INSTALL_ROOT/state/current-image"

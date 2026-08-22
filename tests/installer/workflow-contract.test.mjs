@@ -287,6 +287,7 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   );
   assert.match(smoke, /curl_output="\$\(<"\$curl_output_path"\)"/);
   assert.match(smoke, /Published mapping:\\n%s\\nResolved port:\\n%s\\nCurl output:\\n%s/);
+  assert.doesNotMatch(smoke, /rm -f -- "\$curl_output_path"/);
   assert.match(smoke, /docker inspect --format 'status=/);
   assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);
   assert.match(smoke, /docker logs --tail 200 reachcommander-smoke/);

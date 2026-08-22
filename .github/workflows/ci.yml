@@ -289,7 +289,7 @@ jobs:
           curl_output=''
           curl_output_path="$smoke_root/curl-output.txt"
           if curl --fail --show-error --silent "http://127.0.0.1:$port/health" >"$curl_output_path" 2>&1; then
-            rm -f -- "$curl_output_path"
+            :
           else
             curl_output="$(<"$curl_output_path")"
             failure_context="$(printf 'Published mapping:\n%s\nResolved port:\n%s\nCurl output:\n%s' \

@@ -103,7 +103,7 @@ jobs:
 
       - name: Lint Ubuntu installer scripts
         run: |
-          shellcheck -x --source-path=SCRIPTDIR \
+          python3 tools/run_with_annotations.py "Installer ShellCheck failed" shellcheck -x --source-path=SCRIPTDIR \
             deploy/install.sh \
             deploy/reachcommander \
             deploy/lib/common.sh \

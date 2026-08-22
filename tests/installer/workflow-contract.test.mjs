@@ -38,6 +38,11 @@ test('installer verification runs inside acceptance before publication', async (
     content,
     /shellcheck -x --source-path=SCRIPTDIR[\s\S]*?deploy\/package-installer\.sh[\s\S]*?tests\/installer\/test_common\.sh[\s\S]*?tests\/installer\/test_install\.sh[\s\S]*?tests\/installer\/test_command\.sh[\s\S]*?tests\/installer\/test_package\.sh/,
   );
+  assert.ok(
+    content.includes(
+      'python3 tools/run_with_annotations.py "Installer ShellCheck failed" shellcheck -x --source-path=SCRIPTDIR',
+    ),
+  );
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
   assert.ok(
     content.includes(

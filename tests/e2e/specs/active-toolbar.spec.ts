@@ -139,20 +139,34 @@ test("keeps the toolbar hierarchy clear at desktop widths", async ({
 }, testInfo) => {
   for (const viewport of [
     { width: 1440, height: 900 },
+    { width: 1200, height: 800 },
     { width: 1024, height: 768 },
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/");
 
     const toolbar = page.getByRole("toolbar", { name: "Active panel tools" });
+    const search = page.getByRole("searchbox", { name: "Search active panel" });
+    await search.fill("*.txt");
+    const clearSearch = page.getByTestId("toolbar-clear-search");
+    const topActions = page.locator(".top-actions");
     const metrics = page.getByTestId("system-metrics-trigger");
     const toolbarBounds = await toolbar.boundingBox();
+    const clearSearchBounds = await clearSearch.boundingBox();
+    const topActionsBounds = await topActions.boundingBox();
     const metricsBounds = await metrics.boundingBox();
     expect(toolbarBounds).not.toBeNull();
+    expect(clearSearchBounds).not.toBeNull();
+    expect(topActionsBounds).not.toBeNull();
     expect(metricsBounds).not.toBeNull();
     expect(toolbarBounds!.x + toolbarBounds!.width).toBeLessThanOrEqual(
       metricsBounds!.x,
     );
+    expect(clearSearchBounds!.x + clearSearchBounds!.width).toBeLessThanOrEqual(
+      topActionsBounds!.x,
+    );
+    await clearSearch.click();
+    await expect(search).toHaveValue("");
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth - window.innerWidth,

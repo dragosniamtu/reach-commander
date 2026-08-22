@@ -219,8 +219,12 @@
     width: 42px;
     height: 1px;
   }
-  .read-mode,
   .shortcut-hint {
+    display: none !important;
+  }
+}
+@media (max-width: 1120px) {
+  .read-mode {
     display: none !important;
   }
 }

@@ -265,6 +265,13 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   const smoke = content.slice(smokeStart, publishStart);
 
   assert.doesNotMatch(smoke, /docker run --rm/);
+  assert.match(
+    smoke,
+    /smoke_root="\$\(mktemp -d "\$\{RUNNER_TEMP:\?\}\/reachcommander-smoke\.XXXXXX"\)"/,
+  );
+  assert.match(smoke, /"\$RUNNER_TEMP"\/reachcommander-smoke\.\*\)/);
+  assert.match(smoke, /sudo rm -rf -- "\$smoke_root"/);
+  assert.doesNotMatch(smoke, /\n\s+rm -rf -- "\$smoke_root"/);
   assert.match(smoke, /workflow_escape\(\)/);
   assert.match(smoke, /%25/);
   assert.match(smoke, /%0D/);

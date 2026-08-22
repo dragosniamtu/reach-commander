@@ -188,11 +188,19 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          smoke_root="$(mktemp -d)"
+          smoke_root="$(mktemp -d "${RUNNER_TEMP:?}/reachcommander-smoke.XXXXXX")"
           failure_context=''
           cleanup() {
             docker rm --force reachcommander-smoke >/dev/null 2>&1 || true
-            rm -rf -- "$smoke_root"
+            case "$smoke_root" in
+              "$RUNNER_TEMP"/reachcommander-smoke.*)
+                sudo rm -rf -- "$smoke_root"
+                ;;
+              *)
+                printf '%s\n' 'Refusing to remove an unexpected container smoke directory.' >&2
+                return 1
+                ;;
+            esac
           }
           workflow_escape() {
             local value="$1"

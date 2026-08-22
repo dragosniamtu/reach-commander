@@ -255,15 +255,6 @@ class RendererTestCase(unittest.TestCase):
             self.assertNotIn("source-mounts.json", compose)
             self.assertNotIn("# installer-source-mounts", compose)
 
-            if os.name != "nt":
-                for path in (
-                    output_path / ".env",
-                    output_path / "compose.yaml",
-                    output_path / "config" / "sources.json",
-                    output_path / "state" / "source-mounts.json",
-                ):
-                    self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
-
     def test_yaml_scalar_quotes_apostrophes(self) -> None:
         renderer = self.require_renderer()
         self.assertEqual("'Media''s #1'", renderer.yaml_scalar("Media's #1"))

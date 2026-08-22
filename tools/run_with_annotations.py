@@ -20,7 +20,7 @@ def _bounded_output(value: str) -> str:
     normalized = value.strip() or "The command failed without diagnostic output."
     if len(normalized) <= MAX_ANNOTATION_LENGTH:
         return normalized
-    return f"{normalized[: MAX_ANNOTATION_LENGTH - 3]}..."
+    return f"...{normalized[-(MAX_ANNOTATION_LENGTH - 3):]}"
 
 
 def run_command(command: Sequence[str], title: str, output: TextIO) -> int:

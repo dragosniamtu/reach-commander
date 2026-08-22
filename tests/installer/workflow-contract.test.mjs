@@ -276,6 +276,10 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   );
   assert.match(smoke, /::error title=Hardened container smoke failed::/);
   assert.match(smoke, /annotation_detail="\$\{detail:0:4000\}"/);
+  assert.match(smoke, /Failed command:\\n%s/);
+  assert.match(smoke, /trap 'diagnose "\$\?" "\$BASH_COMMAND"' ERR/);
+  assert.match(smoke, /if ! failure_context="\$\(docker compose[^\n]*2>&1\)"; then/);
+  assert.match(smoke, /if ! failure_context="\$\(docker run --detach/);
   assert.match(smoke, /docker inspect --format 'status=/);
   assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);
   assert.match(smoke, /docker logs --tail 200 reachcommander-smoke/);
@@ -284,7 +288,8 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
     /if \[\[ "\$status" == unhealthy \|\| "\$status" == missing \]\]; then\s+diagnose 1/,
   );
   assert.ok(
-    smoke.indexOf('trap \'diagnose "$?"\' ERR') < smoke.indexOf('trap cleanup EXIT'),
+    smoke.indexOf('trap \'diagnose "$?" "$BASH_COMMAND"\' ERR') <
+      smoke.indexOf('trap cleanup EXIT'),
     'failure diagnostics must be installed before cleanup',
   );
 });

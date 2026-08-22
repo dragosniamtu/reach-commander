@@ -189,6 +189,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           smoke_root="$(mktemp -d)"
+          failure_context=''
           cleanup() {
             docker rm --force reachcommander-smoke >/dev/null 2>&1 || true
             rm -rf -- "$smoke_root"
@@ -202,6 +203,7 @@ jobs:
           }
           diagnose() {
             local exit_code="$1"
+            local failed_command="${2:-unspecified command}"
             local state='container unavailable'
             local health_history='[]'
             local application_logs='ReachCommander smoke container was not created or was removed before diagnostics.'
@@ -216,15 +218,15 @@ jobs:
               application_logs="$(docker logs --tail 200 reachcommander-smoke 2>&1 || true)"
               application_logs="${application_logs: -12000}"
             fi
-            detail="$(printf 'Container state:\n%s\nHealth history:\n%s\nApplication logs:\n%s' \
-              "$state" "$health_history" "$application_logs")"
+            detail="$(printf 'Failed command:\n%s\nCommand output:\n%s\nContainer state:\n%s\nHealth history:\n%s\nApplication logs:\n%s' \
+              "$failed_command" "$failure_context" "$state" "$health_history" "$application_logs")"
             annotation_detail="${detail:0:4000}"
             printf '::error title=Hardened container smoke failed::%s\n' \
               "$(workflow_escape "$annotation_detail")"
             printf '%s\n' "$detail"
             exit "$exit_code"
           }
-          trap 'diagnose "$?"' ERR
+          trap 'diagnose "$?" "$BASH_COMMAND"' ERR
           trap cleanup EXIT
           mkdir -p "$smoke_root/source"
           mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys"
@@ -250,8 +252,11 @@ jobs:
             --request "$smoke_root/request.json" \
             --template deploy/compose.release.yaml \
             --output "$smoke_root/deployment"
-          docker compose --project-directory "$smoke_root/deployment" config --quiet
-          docker run --detach \
+          if ! failure_context="$(docker compose --project-directory "$smoke_root/deployment" config --quiet 2>&1)"; then
+            diagnose 1 'docker compose config'
+          fi
+          failure_context=''
+          if ! failure_context="$(docker run --detach \
             --name reachcommander-smoke \
             --user 1000:1000 \
             --read-only \
@@ -262,7 +267,10 @@ jobs:
             --mount "type=bind,source=$smoke_root/deployment/config,target=/config,readonly" \
             --mount "type=bind,source=$smoke_root/data,target=/data" \
             --mount "type=bind,source=$smoke_root/source,target=/sources/smoke,readonly" \
-            reachcommander:smoke
+            reachcommander:smoke 2>&1)"; then
+            diagnose 1 'docker run hardened candidate'
+          fi
+          failure_context=''
           healthy=false
           for attempt in {1..60}; do
             status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke)"
@@ -271,7 +279,7 @@ jobs:
               break
             fi
             if [[ "$status" == unhealthy || "$status" == missing ]]; then
-              diagnose 1
+              diagnose 1 'reported unhealthy or missing Docker health status'
             fi
             sleep 2
           done

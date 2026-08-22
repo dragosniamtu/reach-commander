@@ -199,6 +199,7 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
       ASPNETCORE_URLS: 'http://127.0.0.1:8092',
       Authentication__DataPath: authenticationDataRoot,
       HardwareMetrics__Enabled: 'false',
+      Logging__EventLog__LogLevel__Default: 'None',
       ReachCommander__SourcesPath: configurationPath,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

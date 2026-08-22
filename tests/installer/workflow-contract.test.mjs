@@ -43,6 +43,11 @@ test('installer verification runs inside acceptance before publication', async (
       'python3 tools/run_with_annotations.py "Installer ShellCheck failed" shellcheck -x --source-path=SCRIPTDIR',
     ),
   );
+  assert.ok(
+    content.includes(
+      'run: python3 ../../tools/run_with_annotations.py "Browser acceptance failed" npm test',
+    ),
+  );
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
   assert.ok(
     content.includes(

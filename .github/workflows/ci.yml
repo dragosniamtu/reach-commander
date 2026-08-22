@@ -156,7 +156,7 @@ jobs:
         working-directory: tests/e2e
 
       - name: Run browser acceptance
-        run: npm test
+        run: python3 ../../tools/run_with_annotations.py "Browser acceptance failed" npm test
         working-directory: tests/e2e
 
       - name: Upload browser diagnostics

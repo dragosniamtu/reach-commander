@@ -193,18 +193,31 @@ jobs:
             docker rm --force reachcommander-smoke >/dev/null 2>&1 || true
             rm -rf -- "$smoke_root"
           }
+          workflow_escape() {
+            local value="$1"
+            value="${value//%/%25}"
+            value="${value//$'\r'/%0D}"
+            value="${value//$'\n'/%0A}"
+            printf '%s' "$value"
+          }
           diagnose() {
             local exit_code="$1"
+            local state='container unavailable'
+            local health_history='[]'
+            local application_logs='ReachCommander smoke container was not created or was removed before diagnostics.'
+            local detail
             trap - ERR
-            printf '%s\n' \
-              '::error title=Hardened container smoke failed::The candidate did not satisfy the hardened runtime health contract; inspect the state and application logs below.'
             if docker inspect reachcommander-smoke >/dev/null 2>&1; then
-              docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke || true
-              docker inspect --format '{{json .State.Health.Log}}' reachcommander-smoke || true
-              docker logs --tail 200 reachcommander-smoke || true
-            else
-              printf '%s\n' 'ReachCommander smoke container was not created or was removed before diagnostics.'
+              state="$(docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke 2>&1 || true)"
+              health_history="$(docker inspect --format '{{json .State.Health.Log}}' reachcommander-smoke 2>&1 || true)"
+              application_logs="$(docker logs --tail 200 reachcommander-smoke 2>&1 || true)"
+              application_logs="${application_logs: -12000}"
             fi
+            detail="$(printf 'Container state:\n%s\nHealth history:\n%s\nApplication logs:\n%s' \
+              "$state" "$health_history" "$application_logs")"
+            printf '::error title=Hardened container smoke failed::%s\n' \
+              "$(workflow_escape "$detail")"
+            printf '%s\n' "$detail"
             exit "$exit_code"
           }
           trap 'diagnose "$?"' ERR
@@ -254,7 +267,7 @@ jobs:
               break
             fi
             if [[ "$status" == unhealthy || "$status" == missing ]]; then
-              exit 1
+              diagnose 1
             fi
             sleep 2
           done

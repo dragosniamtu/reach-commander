@@ -265,11 +265,19 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   const smoke = content.slice(smokeStart, publishStart);
 
   assert.doesNotMatch(smoke, /docker run --rm/);
+  assert.match(smoke, /workflow_escape\(\)/);
+  assert.match(smoke, /%25/);
+  assert.match(smoke, /%0D/);
+  assert.match(smoke, /%0A/);
   assert.match(smoke, /diagnose\(\)/);
   assert.match(smoke, /::error title=Hardened container smoke failed::/);
   assert.match(smoke, /docker inspect --format 'status=/);
   assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);
   assert.match(smoke, /docker logs --tail 200 reachcommander-smoke/);
+  assert.match(
+    smoke,
+    /if \[\[ "\$status" == unhealthy \|\| "\$status" == missing \]\]; then\s+diagnose 1/,
+  );
   assert.ok(
     smoke.indexOf('trap \'diagnose "$?"\' ERR') < smoke.indexOf('trap cleanup EXIT'),
     'failure diagnostics must be installed before cleanup',

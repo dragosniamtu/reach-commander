@@ -193,6 +193,21 @@ jobs:
             docker rm --force reachcommander-smoke >/dev/null 2>&1 || true
             rm -rf -- "$smoke_root"
           }
+          diagnose() {
+            local exit_code="$1"
+            trap - ERR
+            printf '%s\n' \
+              '::error title=Hardened container smoke failed::The candidate did not satisfy the hardened runtime health contract; inspect the state and application logs below.'
+            if docker inspect reachcommander-smoke >/dev/null 2>&1; then
+              docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke || true
+              docker inspect --format '{{json .State.Health.Log}}' reachcommander-smoke || true
+              docker logs --tail 200 reachcommander-smoke || true
+            else
+              printf '%s\n' 'ReachCommander smoke container was not created or was removed before diagnostics.'
+            fi
+            exit "$exit_code"
+          }
+          trap 'diagnose "$?"' ERR
           trap cleanup EXIT
           mkdir -p "$smoke_root/source"
           mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys"
@@ -219,7 +234,7 @@ jobs:
             --template deploy/compose.release.yaml \
             --output "$smoke_root/deployment"
           docker compose --project-directory "$smoke_root/deployment" config --quiet
-          docker run --rm --detach \
+          docker run --detach \
             --name reachcommander-smoke \
             --user 1000:1000 \
             --read-only \
@@ -239,7 +254,6 @@ jobs:
               break
             fi
             if [[ "$status" == unhealthy || "$status" == missing ]]; then
-              docker logs --tail 200 reachcommander-smoke
               exit 1
             fi
             sleep 2

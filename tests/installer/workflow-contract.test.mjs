@@ -255,3 +255,23 @@ test('container smoke uses the real rendered non-root configuration', async () =
   assert.doesNotMatch(smoke, /cat >[^\n]*sources\.json/);
   assert.doesNotMatch(smoke, /chmod 0644[^\n]*sources\.json/);
 });
+
+test('container smoke preserves and annotates runtime diagnostics before cleanup', async () => {
+  const content = await workflow();
+  const smokeStart = content.indexOf('  container-smoke:');
+  const publishStart = content.indexOf('  container-publish:');
+  assert.notEqual(smokeStart, -1);
+  assert.notEqual(publishStart, -1);
+  const smoke = content.slice(smokeStart, publishStart);
+
+  assert.doesNotMatch(smoke, /docker run --rm/);
+  assert.match(smoke, /diagnose\(\)/);
+  assert.match(smoke, /::error title=Hardened container smoke failed::/);
+  assert.match(smoke, /docker inspect --format 'status=/);
+  assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);
+  assert.match(smoke, /docker logs --tail 200 reachcommander-smoke/);
+  assert.ok(
+    smoke.indexOf('trap \'diagnose "$?"\' ERR') < smoke.indexOf('trap cleanup EXIT'),
+    'failure diagnostics must be installed before cleanup',
+  );
+});

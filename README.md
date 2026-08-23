@@ -31,7 +31,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, hardened Docker Compose, Windows and Ubuntu support |
-| Quality | 525 cross-platform .NET tests, 243 Angular tests, 2 PWA contract tests, and 21 real-browser scenarios |
+| Quality | 525 cross-platform .NET tests, 250 Angular tests, 2 PWA contract tests, and 23 real-browser scenarios |
 
 ## What ReachCommander includes
 
@@ -41,6 +41,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Dense details tables with directories first, sortable columns, capacity, read-only, and unavailable-source states.
 - Centralized Total Commander-style keyboard handling and a permanent function-key bar.
 - A contextual top toolbar for Multi-Rename, Add files, and active-panel search.
+- A persistent Norton Commander-inspired theme, activated from the top toolbar and stored only in the current browser or installed PWA.
 - Explicit `RO`, `RW`, and unavailable source states.
 - Read-only source discovery, directory listing, and file-information APIs.
 - Server-authoritative Multi-Rename previews, all-or-nothing execution, compensation, and one-level Undo.
@@ -210,6 +211,10 @@ services:
 The host directory must be writable by UID/GID `1000:1000`. Never mount `/`, a home directory containing unrelated data, or `/var/run/docker.sock`. Keep backups for any source enabled for writes.
 
 An optional USB source is already shown in `config/sources.json`; because it has no default bind mount, it demonstrates the disabled/unavailable state. The administrator remains responsible for mounting removable media on the host and binding it to `/sources/usb:ro`.
+
+## Norton Commander theme
+
+Use the **Norton** control in the right side of the top toolbar to switch between ReachCommander's default interface and a cobalt-blue, cyan-framed, monospace theme inspired by classic Norton Commander. The preference stays in the current browser or installed PWA; it is not stored in the administrator account or sent to the server.
 
 ## Hardware monitoring
 

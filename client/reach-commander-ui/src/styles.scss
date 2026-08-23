@@ -63,3 +63,182 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
     --shadow: 0 8px 24px rgb(35 55 70 / .15);
   }
 }
+
+:root .top-actions .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+:root .top-actions .theme-toggle:hover,
+:root .top-actions .theme-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-dim);
+}
+
+:root :is(.theme-label, .theme-label-compact) {
+  font: 700 9px/1 var(--font-ui);
+}
+
+:root .theme-label-compact {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  :root .theme-label {
+    display: none;
+  }
+
+  :root .theme-label-compact {
+    display: inline;
+  }
+
+  :root .top-actions .theme-toggle {
+    width: 31px;
+    padding: 0;
+  }
+}
+
+:root[data-theme='norton'] {
+  color-scheme: dark;
+  --font-ui: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  --font-mono: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  --app-bg: #000080;
+  --surface-1: #0000aa;
+  --surface-2: #000080;
+  --surface-3: #0000aa;
+  --surface-4: #0018c8;
+  --line: #00a8c8;
+  --line-strong: #00ffff;
+  --text-1: #ffffff;
+  --text-2: #7fffff;
+  --text-3: #55ffff;
+  --text-4: #00b8d4;
+  --accent: #00ffff;
+  --accent-soft: #ffffff;
+  --accent-text: #ffff55;
+  --accent-dim: rgb(0 255 255 / .18);
+  --focus-ring: rgb(255 255 255 / .42);
+  --success: #55ff55;
+  --warning: #ffff55;
+  --danger: #ff5555;
+  --danger-text: #ffaaaa;
+  --danger-dim: rgb(255 85 85 / .2);
+  --folder: #55ffff;
+  --file: #ffffff;
+  --row-hover: #0018c8;
+  --selection: #55ffff;
+  --selection-text: #000080;
+  --shadow: none;
+}
+
+:root[data-theme='norton'] body {
+  font-family: var(--font-mono);
+}
+
+:root[data-theme='norton'] :is(.app-shell, .auth-shell) {
+  background: var(--app-bg) !important;
+}
+
+:root[data-theme='norton'] :is(
+  button,
+  input,
+  select,
+  progress,
+  .brand-mark,
+  .context-chip,
+  .action-wrapper,
+  .search-box,
+  .source-button,
+  .tab-shell,
+  .path-display,
+  .path-input,
+  .mode,
+  .panel,
+  .loading,
+  .command-menu,
+  .metrics-trigger,
+  .metrics-panel,
+  .auth-card,
+  .password-dialog,
+  .rename-workspace,
+  .upload-panel,
+  .extraction-dialog
+) {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='norton'] :is(
+  .topbar,
+  .panel-heading,
+  .global-status,
+  .command-bar,
+  .auth-brand,
+  .workspace-header,
+  .dialog-header,
+  .dialog-footer
+) {
+  background: var(--surface-2) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='norton'] :is(
+  .dialog-backdrop,
+  .rename-backdrop,
+  .upload-backdrop,
+  .extraction-backdrop,
+  .metrics-backdrop
+) {
+  background: rgb(0 0 64 / .92) !important;
+  backdrop-filter: none !important;
+}
+
+:root[data-theme='norton'] .panes {
+  padding: 3px 3px 2px;
+}
+
+:root[data-theme='norton'] .panel {
+  outline: 1px solid var(--line-strong) !important;
+}
+
+:root[data-theme='norton'] .panel.active {
+  outline: 2px solid #ffffff !important;
+}
+
+:root[data-theme='norton'] app-file-table :is(th, td) {
+  border-right: 1px solid var(--line);
+}
+
+:root[data-theme='norton'] app-file-table tbody tr {
+  border-bottom-color: transparent;
+}
+
+:root[data-theme='norton'] app-file-table tbody tr.cursor {
+  color: var(--selection-text);
+  background: var(--selection);
+  outline-color: #ffffff;
+}
+
+:root[data-theme='norton'] app-file-table tbody tr.cursor :is(.muted, .type-icon, .link-mark) {
+  color: inherit;
+}
+
+:root[data-theme='norton'] app-file-table tbody tr.cursor td:first-child {
+  box-shadow: none;
+}
+
+:root[data-theme='norton'] .command-bar button {
+  color: var(--text-1);
+  background: #000000;
+}
+
+:root[data-theme='norton'] .command-bar kbd {
+  border: 0;
+  border-radius: 0;
+  color: #000080;
+  background: #00ffff;
+}

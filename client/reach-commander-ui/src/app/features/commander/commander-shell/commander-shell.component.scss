@@ -91,26 +91,6 @@
   cursor: wait;
   opacity: 0.65;
 }
-.top-actions .theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-2);
-  cursor: pointer;
-}
-.top-actions .theme-toggle:hover,
-.top-actions .theme-toggle.active {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--accent-dim);
-}
-.theme-label,
-.theme-label-compact {
-  font: 700 9px/1 var(--font-ui);
-}
-.theme-label-compact {
-  display: none;
-}
 .read-mode {
   display: flex;
   align-items: center;
@@ -254,15 +234,5 @@
   }
   .top-actions > button:not(.install-app):not(.theme-toggle) {
     display: none;
-  }
-  .theme-label {
-    display: none;
-  }
-  .theme-label-compact {
-    display: inline;
-  }
-  .top-actions .theme-toggle {
-    width: 31px;
-    padding: 0;
   }
 }

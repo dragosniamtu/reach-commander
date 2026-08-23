@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Prevent the Norton theme toggle from forcing the active-panel search controls underneath the right-side toolbar actions at the supported 1024 px desktop width on Linux.
+**Goal:** Prevent the active-panel search controls from extending underneath the right-side toolbar actions at the supported 1024 px desktop width on Linux.
 
-**Architecture:** Keep the existing three-column topbar and its current control order. Reuse the toggle's existing compact `N` presentation at medium desktop widths so the right action column has deterministic headroom across operating-system font metrics, while retaining the full `Norton` label on wider screens.
+**Architecture:** Keep the existing three-column topbar, control order, and Norton-label breakpoint. Allow the middle toolbar's search container to shrink by another 2rem when operating-system font metrics make the right action column wider, while preserving the search icon, clear button, keyboard behavior, and accessible label.
+
+**Revision:** CI run 23 disproved the initial compact-Norton-label hypothesis: the 12.4 px overlap was unchanged. The right column width changes the grid track, but the actual overflow floor comes from `.search-box { min-width: 8rem; }` in the middle toolbar.
 
 **Tech Stack:** Angular 20 templates and SCSS, Playwright 1.55, Chromium, GitHub Actions Ubuntu runner.
 
@@ -17,7 +19,9 @@
 
 ---
 
-### Task 1: Give the Norton toggle medium-width headroom
+### Task 1: Test the initial compact-label hypothesis (disproved by CI run 23)
+
+**Outcome:** Local checks passed, but Ubuntu CI reproduced the exact original geometry. Task 2 replaces this symptom-level change with the root fix and restores the original 760 px theme-label breakpoint.
 
 **Files:**
 - Modify: `tests/e2e/specs/active-toolbar.spec.ts`
@@ -102,7 +106,7 @@ git status --short
 
 Expected: only the plan, Playwright spec, and global theme stylesheet are tracked changes; `NC-theme.png` remains untracked.
 
-- [ ] **Step 5: Commit and push after verification**
+- [x] **Step 5: Commit and push after verification**
 
 ```powershell
 git add docs/superpowers/plans/2026-08-23-linux-toolbar-ci-fix.md tests/e2e/specs/active-toolbar.spec.ts client/reach-commander-ui/src/styles.scss
@@ -111,3 +115,67 @@ git push origin master
 ```
 
 Expected: the push starts a new CI run for `master`; monitor the Ubuntu browser-acceptance job to completion.
+
+### Task 2: Remove the middle toolbar's cross-platform overflow floor
+
+**Files:**
+- Modify: `tests/e2e/specs/active-toolbar.spec.ts`
+- Modify: `client/reach-commander-ui/src/app/features/commander/active-panel-toolbar/active-panel-toolbar.component.scss`
+- Modify: `client/reach-commander-ui/src/styles.scss`
+
+**Interfaces:**
+- Consumes: the existing 1024 px toolbar hierarchy scenario and `.search-box` flex container.
+- Produces: a 6rem minimum search width that keeps the clear button out of the right action column under a deterministic 510 px right-column stress case.
+
+- [x] **Step 1: Replace the platform-dependent assertion with a deterministic failing stress case**
+
+At the 1024 px iteration, reserve 510 px for `.top-actions` before measuring the existing non-overlap contract:
+
+```ts
+if (viewport.width === 1024) {
+  await topActions.evaluate((element) => {
+    (element as HTMLElement).style.minWidth = "510px";
+  });
+}
+```
+
+- [x] **Step 2: Run the focused test and verify the stress case fails**
+
+```powershell
+npx playwright test specs/active-toolbar.spec.ts --project=chromium --grep "toolbar hierarchy"
+```
+
+Expected: FAIL with the search clear button extending beyond the stressed action column boundary. Observed before implementation: boundary `501`, clear-button edge `519.1875`.
+
+- [x] **Step 3: Implement the root fix and restore the original theme behavior**
+
+Change the search flex item's minimum width without changing its preferred width:
+
+```scss
+.search-box {
+  flex: 1 1 210px;
+  min-width: 6rem;
+}
+```
+
+Restore the global compact Norton-label query to `@media (max-width: 760px)`.
+
+- [x] **Step 4: Run focused and full verification**
+
+```powershell
+npx playwright test specs/active-toolbar.spec.ts --project=chromium --grep "toolbar hierarchy"
+npx playwright test specs/active-toolbar.spec.ts --project=chromium
+npm test
+```
+
+Run the Angular unit suite and production build with a Node.js version supported by Angular 20, then run `git diff --check`.
+
+- [ ] **Step 5: Commit, push, and monitor the replacement run**
+
+```powershell
+git add client/reach-commander-ui/src/app/features/commander/active-panel-toolbar/active-panel-toolbar.component.scss client/reach-commander-ui/src/styles.scss tests/e2e/specs/active-toolbar.spec.ts docs/superpowers/plans/2026-08-23-linux-toolbar-ci-fix.md
+git commit -m "fix: let active toolbar search shrink"
+git push origin master
+```
+
+Expected: Ubuntu browser acceptance, both backend jobs, hardened container smoke, and multi-architecture image publication complete successfully.

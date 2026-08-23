@@ -38,6 +38,7 @@ import { PwaService } from '../../../core/pwa/pwa.service';
 import { PwaStatusComponent } from '../../pwa/pwa-status.component';
 import { AccountMenuComponent } from '../../auth/account-menu.component';
 import { ProtectedStateResetService } from '../../../core/auth/protected-state-reset.service';
+import { ThemeService } from '../../../core/theme/theme.service';
 
 @Component({
   selector: 'app-commander-shell',
@@ -64,6 +65,7 @@ export class CommanderShellComponent implements OnInit {
   readonly multiRename = inject(MultiRenameStore);
   readonly archiveExtraction = inject(ArchiveExtractionStore);
   readonly pwa = inject(PwaService);
+  readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
   readonly initializationError = signal<string | null>(null);
   readonly menuOpen = signal(false);

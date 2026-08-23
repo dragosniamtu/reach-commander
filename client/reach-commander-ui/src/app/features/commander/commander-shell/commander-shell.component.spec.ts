@@ -106,6 +106,8 @@ describe('CommanderShellComponent system metrics integration', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
     store.sources.set([]);
     store.leftPanel.set(panel());
     store.rightPanel.set(panel());
@@ -135,6 +137,8 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.detectChanges();
   });
 
+  afterEach(() => document.documentElement.removeAttribute('data-theme'));
+
   it('places the widget last, opens details, and starts only one polling lifecycle', () => {
     const actions = fixture.nativeElement.querySelector('.top-actions');
     expect(actions.lastElementChild?.tagName).toBe('APP-SYSTEM-METRICS-WIDGET');
@@ -150,6 +154,25 @@ describe('CommanderShellComponent system metrics integration', () => {
 
     expect(fixture.nativeElement.querySelector('[role="dialog"]')).not.toBeNull();
     expect(metrics.start).toHaveBeenCalledOnce();
+  });
+
+  it('places an accessible persistent-theme toggle before account and metrics controls', () => {
+    const actions = fixture.nativeElement.querySelector('.top-actions') as HTMLElement;
+    const button = actions.querySelector(
+      '[data-testid="norton-theme-toggle"]',
+    ) as HTMLButtonElement;
+
+    expect(button).not.toBeNull();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.getAttribute('aria-label')).toBe('Activate Norton theme');
+    expect(button.nextElementSibling?.tagName).toBe('APP-ACCOUNT-MENU');
+
+    button.click();
+    fixture.detectChanges();
+
+    expect(document.documentElement.dataset['theme']).toBe('norton');
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.getAttribute('aria-label')).toBe('Deactivate Norton theme');
   });
 
   it('stops polling when the shell is destroyed', () => {

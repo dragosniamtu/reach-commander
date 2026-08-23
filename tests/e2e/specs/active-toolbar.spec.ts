@@ -151,6 +151,12 @@ test("keeps the toolbar hierarchy clear at desktop widths", async ({
     const clearSearch = page.getByTestId("toolbar-clear-search");
     const topActions = page.locator(".top-actions");
     const metrics = page.getByTestId("system-metrics-trigger");
+    const themeToggle = page.getByTestId("norton-theme-toggle");
+    if (viewport.width <= 1120) {
+      await expect(themeToggle.locator(".theme-label")).toBeHidden();
+      await expect(themeToggle.locator(".theme-label-compact")).toBeVisible();
+      await expect(themeToggle).toHaveAccessibleName("Activate Norton theme");
+    }
     const toolbarBounds = await toolbar.boundingBox();
     const clearSearchBounds = await clearSearch.boundingBox();
     const topActionsBounds = await topActions.boundingBox();

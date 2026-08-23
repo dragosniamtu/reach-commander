@@ -20,6 +20,7 @@ describe('App', () => {
 
   beforeEach(async () => {
     localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
     api = new AppTestApi();
     auth = new AppTestAuthenticationStore();
     await TestBed.configureTestingModule({
@@ -31,6 +32,8 @@ describe('App', () => {
       ],
     }).compileComponents();
   });
+
+  afterEach(() => document.documentElement.removeAttribute('data-theme'));
 
   it('should create the app', () => {
     const fixture = TestBed.createComponent(App);
@@ -46,6 +49,18 @@ describe('App', () => {
     expect(compiled.textContent).toContain('ReachCommander');
     expect(compiled.querySelectorAll('app-commander-panel')).toHaveLength(2);
     expect(api.getSources).toHaveBeenCalled();
+  });
+
+  it('initializes a saved theme before rendering an unauthenticated screen', async () => {
+    localStorage.setItem('reachcommander.theme.v1', 'norton');
+    auth.setState(authState({ phase: 'anonymous' }));
+
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(document.documentElement.dataset['theme']).toBe('norton');
+    expect(fixture.nativeElement.querySelector('app-authentication-screen')).not.toBeNull();
   });
 
   it.each(['checking', 'setupRequired', 'anonymous', 'unavailable'] as const)(

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { AuthenticationStore } from './core/auth/authentication-store';
+import { ThemeService } from './core/theme/theme.service';
 import { AuthenticationScreenComponent } from './features/auth/authentication-screen.component';
 import { CommanderShellComponent } from './features/commander/commander-shell/commander-shell.component';
 
@@ -12,6 +13,7 @@ import { CommanderShellComponent } from './features/commander/commander-shell/co
 })
 export class App implements OnInit {
   readonly auth = inject(AuthenticationStore);
+  readonly theme = inject(ThemeService);
 
   ngOnInit(): void {
     void this.auth.initialize();

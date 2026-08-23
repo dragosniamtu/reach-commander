@@ -13,6 +13,12 @@ test("activates, persists, and deactivates the Norton theme", async ({
 }, testInfo) => {
   const root = page.locator("html");
   const toggle = page.getByTestId("norton-theme-toggle");
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
 
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await toggle.click();
@@ -72,6 +78,7 @@ test("activates, persists, and deactivates the Norton theme", async ({
 
   await page.reload();
   await expect(root).not.toHaveAttribute("data-theme", "norton");
+  expect(consoleErrors).toEqual([]);
 });
 
 test("keeps the Norton toggle and dual-pane shell usable at compact width", async ({

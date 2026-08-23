@@ -4,7 +4,7 @@
 
 **Goal:** Prevent the active-panel search controls from extending underneath the right-side toolbar actions at the supported 1024 px desktop width on Linux.
 
-**Architecture:** Keep the existing three-column topbar, control order, and Norton-label breakpoint. Allow the middle toolbar's search container to shrink by another 2rem when operating-system font metrics make the right action column wider, while preserving the search icon, clear button, keyboard behavior, and accessible label.
+**Architecture:** Keep the existing three-column topbar, control order, and Norton-label breakpoint. Allow the middle toolbar's search container to shrink by another 3rem when operating-system font metrics make the right action column wider, while preserving the search icon, clear button, keyboard behavior, and accessible label.
 
 **Revision:** CI run 23 disproved the initial compact-Norton-label hypothesis: the 12.4 px overlap was unchanged. The right column width changes the grid track, but the actual overflow floor comes from `.search-box { min-width: 8rem; }` in the middle toolbar.
 
@@ -125,7 +125,7 @@ Expected: the push starts a new CI run for `master`; monitor the Ubuntu browser-
 
 **Interfaces:**
 - Consumes: the existing 1024 px toolbar hierarchy scenario and `.search-box` flex container.
-- Produces: a 6rem minimum search width that keeps the clear button out of the right action column under a deterministic 510 px right-column stress case.
+- Produces: a 5rem minimum search width that keeps the clear button out of the right action column under a deterministic 510 px right-column stress case.
 
 - [x] **Step 1: Replace the platform-dependent assertion with a deterministic failing stress case**
 
@@ -154,11 +154,13 @@ Change the search flex item's minimum width without changing its preferred width
 ```scss
 .search-box {
   flex: 1 1 210px;
-  min-width: 6rem;
+  min-width: 5rem;
 }
 ```
 
 Restore the global compact Norton-label query to `@media (max-width: 760px)`.
+
+CI run 24 confirmed the constraint: `6rem` reduced the stressed overlap from 18.1875 px to 5.109375 px. The final `5rem` floor supplies another 16 px without changing the preferred 210 px width.
 
 - [x] **Step 4: Run focused and full verification**
 

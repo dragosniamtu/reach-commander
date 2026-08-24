@@ -5,11 +5,12 @@ TEST_DIRECTORY="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPOSITORY_ROOT="$(cd -P -- "$TEST_DIRECTORY/../../.." && pwd -P)"
 INSTALLER="$REPOSITORY_ROOT/deploy/macos/install.sh"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/reachcommander-macos-test.XXXXXX")"
+TEST_PARENT="$(cd -P -- "${REACHCOMMANDER_TEST_TMPDIR:-${HOME:?}}" && pwd -P)"
+TEST_ROOT="$(mktemp -d "$TEST_PARENT/reachcommander-macos-test.XXXXXX")"
 
 cleanup() {
   case "$TEST_ROOT" in
-    "${TMPDIR:-/tmp}"/reachcommander-macos-test.*)
+    "$TEST_PARENT"/reachcommander-macos-test.*)
       chmod -R u+rwX -- "$TEST_ROOT" 2>/dev/null || true
       rm -rf -- "$TEST_ROOT"
       ;;

@@ -4,11 +4,12 @@ set -Eeuo pipefail
 TEST_DIRECTORY="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPOSITORY_ROOT="$(cd -P -- "$TEST_DIRECTORY/../../.." && pwd -P)"
 INSTALLER="$REPOSITORY_ROOT/deploy/macos/install.sh"
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/reachcommander-macos-helpers.XXXXXX")"
+TEST_PARENT="$(cd -P -- "${REACHCOMMANDER_TEST_TMPDIR:-${HOME:?}}" && pwd -P)"
+TEST_ROOT="$(mktemp -d "$TEST_PARENT/reachcommander-macos-helpers.XXXXXX")"
 
 cleanup() {
   case "$TEST_ROOT" in
-    "${TMPDIR:-/tmp}"/reachcommander-macos-helpers.*)
+    "$TEST_PARENT"/reachcommander-macos-helpers.*)
       chmod -R u+rwX -- "$TEST_ROOT" 2>/dev/null || true
       rm -rf -- "$TEST_ROOT"
       ;;

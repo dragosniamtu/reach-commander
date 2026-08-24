@@ -1179,6 +1179,8 @@ rc_print_completion() {
   printf 'Start:  %s up -d reachcommander\n' "$base"
   printf 'Stop:   %s down\n' "$base"
   printf '\nFor updates, rerun:\n'
+  # The command substitution is printed verbatim for the operator.
+  # shellcheck disable=SC2016
   printf '%s\n' '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/dragosniamtu/reach-commander/master/deploy/macos/install.sh)"'
   printf 'Choose option 1 for digest discovery with health-checked rollback.\n'
 }

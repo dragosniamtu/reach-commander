@@ -121,9 +121,29 @@ test('failed Ubuntu backend tests are exposed as public TRX annotations', async 
   );
 });
 
+test('macOS installer contracts run before container publication', async () => {
+  const content = await workflow();
+  for (const required of [
+    'macos-installer:',
+    'runs-on: macos-latest',
+    'bash tests/installer/macos/test_helpers.sh',
+    'bash tests/installer/macos/test_install.sh',
+    'deploy/macos/install.sh',
+    'tests/installer/macos/test_helpers.sh',
+    'tests/installer/macos/test_install.sh',
+    'tests/installer/macos/fake-bin/plutil',
+    'needs: [backend, acceptance, macos-installer]',
+  ]) {
+    assert.ok(content.includes(required), `CI is missing macOS contract: ${required}`);
+  }
+});
+
 test('smoke and publication jobs depend on all required gates', async () => {
   const content = await workflow();
-  assert.match(content, /container-smoke:[\s\S]*?needs:\s*\[backend, acceptance\]/);
+  assert.match(
+    content,
+    /container-smoke:[\s\S]*?needs:\s*\[backend, acceptance, macos-installer\]/,
+  );
   assert.match(
     content,
     /container-publish:[\s\S]*?needs:\s*\[backend, acceptance, container-smoke\]/,

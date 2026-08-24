@@ -108,10 +108,19 @@ jobs:
             deploy/reachcommander \
             deploy/lib/common.sh \
             deploy/package-installer.sh \
+            deploy/macos/install.sh \
             tests/installer/test_common.sh \
             tests/installer/test_install.sh \
             tests/installer/test_command.sh \
-            tests/installer/test_package.sh
+            tests/installer/test_package.sh \
+            tests/installer/macos/test_helpers.sh \
+            tests/installer/macos/test_install.sh \
+            tests/installer/macos/fake-bin/docker \
+            tests/installer/macos/fake-bin/curl \
+            tests/installer/macos/fake-bin/lsof \
+            tests/installer/macos/fake-bin/route \
+            tests/installer/macos/fake-bin/ipconfig \
+            tests/installer/macos/fake-bin/plutil
 
       - name: Restore .NET dependencies
         run: dotnet restore ReachCommander.slnx
@@ -170,10 +179,41 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  macos-installer:
+    name: macOS installer contracts
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate macOS installer syntax
+        shell: bash
+        run: |
+          bash -n \
+            deploy/macos/install.sh \
+            tests/installer/macos/test_helpers.sh \
+            tests/installer/macos/test_install.sh \
+            tests/installer/macos/fake-bin/docker \
+            tests/installer/macos/fake-bin/curl \
+            tests/installer/macos/fake-bin/lsof \
+            tests/installer/macos/fake-bin/route \
+            tests/installer/macos/fake-bin/ipconfig \
+            tests/installer/macos/fake-bin/plutil
+
+      - name: Test macOS installer helpers and rendering
+        shell: bash
+        run: bash tests/installer/macos/test_helpers.sh
+
+      - name: Test macOS installer lifecycle
+        shell: bash
+        run: bash tests/installer/macos/test_install.sh
+
   container-smoke:
     name: Hardened amd64 container smoke
     if: github.event_name == 'push'
-    needs: [backend, acceptance]
+    needs: [backend, acceptance, macos-installer]
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

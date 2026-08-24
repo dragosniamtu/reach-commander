@@ -49,9 +49,14 @@ rc_init_paths() {
 
 rc_validate_port() {
   local value="${1:-}"
-  [[ "$value" =~ ^[0-9]+$ ]] &&
-    (( 10#$value >= 1 && 10#$value <= 65535 )) ||
-    { rc_die 'port must be an integer from 1 through 65535'; return 1; }
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    rc_die 'port must be an integer from 1 through 65535'
+    return 1
+  fi
+  if (( 10#$value < 1 || 10#$value > 65535 )); then
+    rc_die 'port must be an integer from 1 through 65535'
+    return 1
+  fi
 }
 
 rc_validate_architecture() {
@@ -84,7 +89,7 @@ rc_canonical_directory() (
       return 1
       ;;
   esac
-  CDPATH= cd -P -- "$value" >/dev/null 2>&1 ||
+  CDPATH='' cd -P -- "$value" >/dev/null 2>&1 ||
     { rc_die 'source path cannot be resolved'; return 1; }
   pwd -P
 )
@@ -104,8 +109,11 @@ rc_path_relation() {
 }
 
 rc_validate_source_path() {
-  local canonical="$1"
+  local canonical
+  local canonical_install_root
   local relation
+  canonical="$(rc_canonical_directory "$1")" || return 1
+  canonical_install_root="$(rc_canonical_directory "$RC_INSTALL_ROOT")" || return 1
   case "$canonical" in
     / | /System | /System/* | /Library | /Library/* | /private | /private/* | \
       /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | /dev | /dev/*)
@@ -113,7 +121,7 @@ rc_validate_source_path() {
       return 1
       ;;
   esac
-  relation="$(rc_path_relation "$canonical" "$RC_INSTALL_ROOT")"
+  relation="$(rc_path_relation "$canonical" "$canonical_install_root")"
   [[ "$relation" != 'same' && "$relation" != 'inside' ]] ||
     { rc_die 'source path cannot be the installer directory or one of its children'; return 1; }
 }
@@ -375,7 +383,7 @@ rc_expand_user_path() {
   local value="$1"
   case "$value" in
     '~') printf '%s\n' "$RC_USER_HOME" ;;
-    '~/'*) printf '%s/%s\n' "$RC_USER_HOME" "${value#\~/}" ;;
+    \~/*) printf '%s/%s\n' "$RC_USER_HOME" "${value#\~/}" ;;
     *) printf '%s\n' "$value" ;;
   esac
 }
@@ -465,8 +473,10 @@ rc_collect_whole_drives() {
   done
   choice="$(rc_prompt_value 'Choose one or more drive numbers (space-separated)' '')" || return 1
   for selected in $choice; do
-    [[ "$selected" =~ ^[1-9][0-9]*$ ]] && (( selected <= ${#available[@]} )) ||
-      { rc_die 'drive selections must be valid menu numbers'; return 1; }
+    if [[ ! "$selected" =~ ^[1-9][0-9]*$ ]] || (( selected > ${#available[@]} )); then
+      rc_die 'drive selections must be valid menu numbers'
+      return 1
+    fi
     rc_selection_contains "$selected" "${selections[@]:-}" ||
       selections[${#selections[@]}]="$selected"
   done
@@ -738,11 +748,15 @@ rc_preflight_sources() {
     target="/sources/${RC_SOURCE_IDS[$index]}"
     mode="${RC_SOURCE_ACCESS[$index]}"
     if [[ "$mode" == 'rw' ]]; then
+      # $1 is expanded by the container shell.
+      # shellcheck disable=SC2016
       rc_compose "$root" run --rm --no-deps --entrypoint /bin/sh reachcommander \
         -c 'test -r "$1" && test -x "$1" && test -w "$1"' \
         reachcommander-probe "$target" ||
         { rc_die "Docker Desktop cannot use the selected read/write source: ${RC_SOURCE_PATHS[$index]}"; return 1; }
     else
+      # $1 is expanded by the container shell.
+      # shellcheck disable=SC2016
       rc_compose "$root" run --rm --no-deps --entrypoint /bin/sh reachcommander \
         -c 'test -r "$1" && test -x "$1"' \
         reachcommander-probe "$target" ||
@@ -1083,7 +1097,9 @@ rc_reconfigure_existing() {
     return 1
   fi
   if ! rc_commit_generated "$stage"; then
-    [[ -e "$RC_INSTALL_ROOT/state/transaction-active" ]] && rc_rollback_generated || true
+    if [[ -e "$RC_INSTALL_ROOT/state/transaction-active" ]]; then
+      rc_rollback_generated || true
+    fi
     rc_cleanup_work_root "$RC_WORK_ROOT" || true
     RC_WORK_ROOT=''
     return 1
@@ -1163,7 +1179,7 @@ rc_print_completion() {
   printf 'Start:  %s up -d reachcommander\n' "$base"
   printf 'Stop:   %s down\n' "$base"
   printf '\nFor updates, rerun:\n'
-  printf '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/dragosniamtu/reach-commander/master/deploy/macos/install.sh)"\n'
+  printf '%s\n' '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/dragosniamtu/reach-commander/master/deploy/macos/install.sh)"'
   printf 'Choose option 1 for digest discovery with health-checked rollback.\n'
 }
 
@@ -1243,7 +1259,9 @@ main() {
   rc_compose "$stage" config --quiet || return 1
   rc_preflight_sources "$stage" || return 1
   if ! rc_commit_generated "$stage"; then
-    [[ -f "$RC_INSTALL_ROOT/state/transaction-active" ]] && rc_rollback_generated || true
+    if [[ -f "$RC_INSTALL_ROOT/state/transaction-active" ]]; then
+      rc_rollback_generated || true
+    fi
     return 1
   fi
   rc_validate_authentication_data_tree ||

@@ -63,13 +63,17 @@ pass "Intel and Apple Silicon architectures are accepted"
 
 mkdir -p -- "$RC_USER_HOME/Pictures" "$RC_INSTALL_ROOT"
 canonical="$(rc_canonical_directory "$RC_USER_HOME/Pictures")"
-assert_equal "$RC_USER_HOME/Pictures" "$canonical" "canonical directory"
+expected_canonical="$(cd -P -- "$RC_USER_HOME/Pictures" && pwd -P)"
+assert_equal "$expected_canonical" "$canonical" "canonical directory"
+canonical_install_root="$(rc_canonical_directory "$RC_INSTALL_ROOT")"
 assert_equal "ancestor" "$(rc_path_relation "$RC_USER_HOME" "$RC_INSTALL_ROOT")" "home relation"
 assert_equal "inside" "$(rc_path_relation "$RC_INSTALL_ROOT/data" "$RC_INSTALL_ROOT")" "inside relation"
 assert_equal "same" "$(rc_path_relation "$RC_INSTALL_ROOT" "$RC_INSTALL_ROOT")" "same relation"
 assert_equal "disjoint" "$(rc_path_relation "$RC_USER_HOME/Pictures" "$RC_INSTALL_ROOT")" "disjoint relation"
 rc_validate_source_path "$RC_USER_HOME"
 assert_fails "installer root source must fail" rc_validate_source_path "$RC_INSTALL_ROOT"
+assert_fails "physically resolved installer root source must fail" \
+  rc_validate_source_path "$canonical_install_root"
 assert_fails "installer child source must fail" rc_validate_source_path "$RC_INSTALL_ROOT/data"
 for path in / /System /Library /private /usr /bin /sbin /dev; do
   assert_fails "protected path '$path' must fail" rc_validate_source_path "$path"
@@ -146,9 +150,14 @@ assert_equal 'true' \
   "right default"
 pass "typed JSON preserves source policy and pane defaults"
 
+# Sourced installer functions consume these arrays.
+# shellcheck disable=SC2034
 RC_SOURCE_IDS=()
+# shellcheck disable=SC2034
 RC_SOURCE_NAMES=()
+# shellcheck disable=SC2034
 RC_SOURCE_PATHS=()
+# shellcheck disable=SC2034
 RC_SOURCE_ACCESS=()
 rc_add_source home Home "$RC_USER_HOME" ro
 MASKED_STAGE="$TEST_ROOT/masked"

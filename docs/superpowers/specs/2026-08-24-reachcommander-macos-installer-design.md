@@ -86,6 +86,8 @@ The directory contains operational configuration and application-owned state onl
 
 The host `data/` directory is bind-mounted read/write at `/data`. It retains the salted account record at `data/auth/account.json` and the ASP.NET Core Data Protection key ring under `data/keys`. The generated `config/sources.json` is mounted read-only through `/config`. Recreating or updating the container therefore preserves the account and valid sessions. A fresh deployment with no account state continues to show ReachCommander's existing first-run account-creation flow. The installer never asks for, generates, logs, or embeds a username, password, password hash, or JWT secret in the container image.
 
+The installer-owned application-support directory is never reachable through a configured ReachCommander source. A source equal to or inside that directory is rejected. When an approved broad source, such as the current user's home, is an ancestor of the application-support directory, Compose adds a nested read-only bind mount from an installer-owned empty exclusion directory over that descendant path inside the source mount. This masking mount prevents the UI and file APIs from listing, downloading, renaming, overwriting, or deleting generated configuration, the account record, or Data Protection keys through the broad source. The installer validates the masking target in the rendered Compose model before startup.
+
 Files are created with per-user permissions. The installer does not create a system-wide command, modify `.zshrc`, or add directories to `PATH`. At completion it prints copyable, correctly quoted Docker Compose commands for status, logs, start, stop, and update.
 
 ## Source-selection flow
@@ -113,6 +115,8 @@ The installer enumerates only presently available, user-accessible choices:
 It does not mount `/`, `/System`, `/Library`, `/private`, `/usr`, `/bin`, `/sbin`, `/dev`, Docker Desktop internals, or the Docker socket. It mounts each selected external volume independently rather than mounting `/Volumes`, so connecting a new drive later does not grant it access implicitly.
 
 The internal whole-drive choice explicitly warns that the current user's home can contain hidden credentials and private application data. Whole-drive read/write access requires a second confirmation naming the exact canonical path. Specific folders remain the recommended option.
+
+Because the per-user ReachCommander deployment also lives below the home directory, the whole-home source receives the mandatory nested exclusion mount described above. The exclusion is not optional and does not grant the container any additional host path. Other hidden credential directories remain covered by the broad-access warning; users who do not intend to expose them must select specific folders instead.
 
 ### Specific folders
 
@@ -254,4 +258,5 @@ The README describes macOS support accurately as **Docker Desktop deployment**, 
 9. A failed update returns to the previous healthy image without changing source contents.
 10. CI validates the installer logic on a macOS runner, while existing container CI validates the real image platforms and health.
 11. No installation, error, update, or cleanup path deletes or recursively changes a user-selected source.
-12. Documentation clearly distinguishes Docker-based macOS support from a future native commercial application.
+12. A broad source cannot expose the installer-owned configuration, account record, or Data Protection keys through the file APIs.
+13. Documentation clearly distinguishes Docker-based macOS support from a future native commercial application.

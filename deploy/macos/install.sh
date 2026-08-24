@@ -127,7 +127,8 @@ rc_validate_source_path() {
 }
 
 rc_yaml_quote() {
-  local escaped="${1//\'/\'\'}"
+  local escaped
+  escaped="$(printf '%s' "$1" | sed "s/'/''/g")"
   printf "'%s'" "$escaped"
 }
 

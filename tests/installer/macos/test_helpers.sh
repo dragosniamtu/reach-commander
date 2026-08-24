@@ -32,6 +32,7 @@ rc_init_paths
 tests_run=0
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { tests_run=$((tests_run + 1)); printf 'ok %d - %s\n' "$tests_run" "$1"; }
+skip() { tests_run=$((tests_run + 1)); printf 'ok %d - %s # SKIP %s\n' "$tests_run" "$1" "$2"; }
 assert_equal() { [[ "$1" == "$2" ]] || fail "$3 (expected '$1', got '$2')"; }
 assert_fails() {
   local message="$1"
@@ -78,5 +79,91 @@ pass "path boundary permits a maskable ancestor only"
 assert_equal "'Media'" "$(rc_yaml_quote 'Media')" "plain YAML scalar"
 assert_equal "'Bob''s Media'" "$(rc_yaml_quote "Bob's Media")" "quoted YAML scalar"
 pass "YAML scalars are single-quoted safely"
+
+SOURCE_ONE="$TEST_ROOT/Family Media"
+SOURCE_TWO="$TEST_ROOT/Café Bob's"
+mkdir -p -- "$SOURCE_ONE" "$SOURCE_TWO"
+RC_SOURCE_IDS=()
+RC_SOURCE_NAMES=()
+RC_SOURCE_PATHS=()
+RC_SOURCE_ACCESS=()
+rc_add_source family-media 'Family Media' "$SOURCE_ONE" ro
+rc_add_source cafe-bob "Café Bob's" "$SOURCE_TWO" rw
+
+COMPOSE_ONLY="$TEST_ROOT/compose-only.yaml"
+MOUNTS_ONLY="$TEST_ROOT/compose-mounts.yaml"
+rc_render_compose \
+  "$REPOSITORY_ROOT/deploy/compose.release.yaml" \
+  "$COMPOSE_ONLY" \
+  "$MOUNTS_ONLY"
+grep -A3 -F "target: '/sources/family-media'" "$COMPOSE_ONLY" |
+  grep -Fq 'read_only: true' || fail "RO Compose policy missing"
+grep -A3 -F "target: '/sources/cafe-bob'" "$COMPOSE_ONLY" |
+  grep -Fq 'read_only: false' || fail "RW Compose policy missing"
+! grep -Fq '# installer-source-mounts' "$COMPOSE_ONLY" ||
+  fail "Compose source marker was not replaced"
+pass "Compose binds preserve source access policy"
+
+mkdir -p -- "$SOURCE_ONE/Nested"
+assert_fails "duplicate source IDs must fail" \
+  rc_add_source family-media Duplicate "$TEST_ROOT" ro
+assert_fails "nested sources must fail" \
+  rc_add_source nested Nested "$SOURCE_ONE/Nested" ro
+pass "duplicate and nested sources are rejected"
+
+if ! command -v plutil >/dev/null 2>&1; then
+  skip "typed JSON preserves source policy and pane defaults" "macOS plutil is unavailable"
+  skip "broad source masks installer-owned state" "macOS plutil is unavailable"
+  printf '1..%d\n' "$tests_run"
+  exit 0
+fi
+
+STAGE="$TEST_ROOT/rendered"
+rc_render_deployment \
+  "$STAGE" \
+  "$REPOSITORY_ROOT/deploy/compose.release.yaml" \
+  "ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})" \
+  127.0.0.1 8080 "$(id -u)" "$(id -g)"
+
+assert_equal 'Family Media' \
+  "$(plutil -extract sources.0.name raw -o - "$STAGE/config/sources.json")" \
+  "first source name"
+assert_equal 'true' \
+  "$(plutil -extract sources.0.readOnly raw -o - "$STAGE/config/sources.json")" \
+  "first source policy"
+assert_equal 'false' \
+  "$(plutil -extract sources.1.readOnly raw -o - "$STAGE/config/sources.json")" \
+  "second source policy"
+grep -A3 -F "target: '/sources/family-media'" "$STAGE/compose.yaml" |
+  grep -Fq 'read_only: true' || fail "RO Compose policy missing"
+grep -A3 -F "target: '/sources/cafe-bob'" "$STAGE/compose.yaml" |
+  grep -Fq 'read_only: false' || fail "RW Compose policy missing"
+assert_equal 'true' \
+  "$(plutil -extract sources.0.defaultLeft raw -o - "$STAGE/config/sources.json")" \
+  "left default"
+assert_equal 'true' \
+  "$(plutil -extract sources.1.defaultRight raw -o - "$STAGE/config/sources.json")" \
+  "right default"
+pass "typed JSON preserves source policy and pane defaults"
+
+RC_SOURCE_IDS=()
+RC_SOURCE_NAMES=()
+RC_SOURCE_PATHS=()
+RC_SOURCE_ACCESS=()
+rc_add_source home Home "$RC_USER_HOME" ro
+MASKED_STAGE="$TEST_ROOT/masked"
+rc_render_deployment \
+  "$MASKED_STAGE" \
+  "$REPOSITORY_ROOT/deploy/compose.release.yaml" \
+  "ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'b%.0s' {1..64})" \
+  127.0.0.1 8080 "$(id -u)" "$(id -g)"
+mask_target="/sources/home/${RC_INSTALL_ROOT#"$RC_USER_HOME"/}"
+grep -A3 -F "source: './excluded'" "$MASKED_STAGE/compose.yaml" |
+  grep -Fq "target: $(rc_yaml_quote "$mask_target")" ||
+  fail "installer state exclusion mount missing"
+[[ -d "$MASKED_STAGE/excluded" ]] || fail "empty exclusion directory missing"
+[[ -z "$(find "$MASKED_STAGE/excluded" -mindepth 1 -print -quit)" ]] ||
+  fail "exclusion directory is not empty"
+pass "broad source masks installer-owned state"
 
 printf '1..%d\n' "$tests_run"

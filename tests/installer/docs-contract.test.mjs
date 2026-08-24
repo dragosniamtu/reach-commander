@@ -137,6 +137,53 @@ test('README points operators to the Ubuntu guide without replacing development 
   assert.doesNotMatch(readme, new RegExp(['no built-in', 'authentication'].join(' '), 'i'));
 });
 
+test('macOS guide documents the one-command Docker Desktop boundary', async () => {
+  const guide = await readRequired('docs/deployment/macos.md');
+  for (const required of [
+    'Docker Desktop',
+    'Intel',
+    'Apple Silicon',
+    '/bin/bash -c "$(curl -fsSL',
+    '~/Library/Application Support/ReachCommander',
+    'Whole drives',
+    'Specific folders',
+    'Read-only',
+    'Read/write',
+    'This Mac only',
+    'local network',
+    '127.0.0.1:8080',
+    'first-run setup code',
+    'data/auth/account.json',
+    'data/keys',
+    'stable',
+    'digest',
+    'rollback',
+    'Docker Desktop file sharing',
+    'does not configure public internet access',
+    'Linux container/VM',
+    'not a native macOS application',
+  ]) {
+    assert.ok(
+      guide.toLowerCase().includes(required.toLowerCase()),
+      `macOS guide is missing: ${required}`,
+    );
+  }
+  assert.match(guide, /installer-owned[\s\S]*masked/i);
+  assert.doesNotMatch(guide, /(?:curl|wget)[^\r\n|]*\|[^\r\n]*(?:sh|bash)/i);
+});
+
+test('README and security policy advertise macOS without weakening boundaries', async () => {
+  const [readme, policy] = await Promise.all([
+    readRequired('README.md'),
+    readRequired('SECURITY.md'),
+  ]);
+  assert.match(readme, /Install on macOS/i);
+  assert.match(readme, /docs\/deployment\/macos\.md/);
+  assert.match(readme, /Docker Desktop/i);
+  assert.match(policy, /installer-owned[\s\S]*mask/i);
+  assert.match(policy, /local network[\s\S]*authentication/i);
+});
+
 test('security policy describes account persistence and secure deployment', async () => {
   const policy = await readRequired('SECURITY.md');
   for (const required of [
@@ -156,6 +203,7 @@ test('published operator material never pipes downloaded code into a shell', asy
   const paths = [
     'README.md',
     'docs/deployment/ubuntu.md',
+    'docs/deployment/macos.md',
     'docs/deployment/nginx.conf',
     'docs/deployment/Caddyfile',
     'docs/deployment/traefik.dynamic.yaml',

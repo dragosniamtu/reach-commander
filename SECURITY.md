@@ -18,6 +18,12 @@ For an account reset, stop ReachCommander, preserve and verify a backup, remove 
 
 Enabling writes requires both `readOnly: false` for one explicit source and operating-system/container write permission for that same narrow root. Never mount `/`, a broad home directory, or `/var/run/docker.sock`.
 
+The macOS Docker Desktop installer defaults to `127.0.0.1` and specific folders. Its explicit local network mode still requires ReachCommander's built-in authentication, but it publishes plain HTTP without TLS; use it only on a trusted LAN or add an HTTPS reverse proxy. The installer does not configure public internet exposure, firewall rules, router forwarding, DNS, or certificates.
+
+Specific source folders remain recommended. The advanced whole-home option requires an extra warning and exact-path confirmation for read/write access. Whenever a selected source contains the ReachCommander application-support directory, installer-owned authentication, key, configuration, backup, and transaction state is masked by an empty nested read-only bind. A source equal to or inside installer-owned state is rejected. This mask is mandatory defense in depth and must not be removed from generated Compose files.
+
+On macOS, the corresponding security state is `~/Library/Application Support/ReachCommander/data/auth/account.json` and `~/Library/Application Support/ReachCommander/data/keys`. Preserve and protect both together during backup or migration. Docker Desktop telemetry reflects its Linux container/VM and should not be treated as complete native Mac hardware monitoring.
+
 ## Supported version
 
 Security fixes target the current `master` branch. Older commits and local modifications are not maintained as separate supported releases.

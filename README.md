@@ -6,7 +6,7 @@
 [![Angular 22](https://img.shields.io/badge/Angular-22-DD0031)](https://angular.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](Dockerfile)
 
-ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on Windows and Linux.
+ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on native Windows and containerized Linux hosts.
 
 ![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
 
@@ -30,7 +30,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Frontend | Angular 22 standalone components, Signals, RxJS, Angular CDK A11y, installable PWA shell |
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
-| Deployment | Single-origin PWA publish, hardened Docker Compose, Windows and Ubuntu support |
+| Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
 | Quality | 525 cross-platform .NET tests, 250 Angular tests, 2 PWA contract tests, and 23 real-browser scenarios |
 
 ## What ReachCommander includes
@@ -94,7 +94,7 @@ tests/e2e                           deterministic Playwright acceptance flow
 
 - .NET SDK 10.0.400 or a compatible .NET 10 feature band (`global.json` permits `latestFeature`).
 - Node.js 24.15 or newer (or Node 22.22.3+) and npm 10 for Angular 22.
-- Docker Engine with Docker Compose v2 for container deployment.
+- Docker Engine with Docker Compose v2 for Ubuntu container deployment, or Docker Desktop for macOS.
 - Chromium installed through Playwright only when running browser tests.
 
 ## Install on Ubuntu
@@ -102,6 +102,16 @@ tests/e2e                           deterministic Playwright acceptance flow
 For a production Ubuntu server, use the versioned release bundle and follow the [Ubuntu installation guide](docs/deployment/ubuntu.md). It covers checksum verification, the interactive installer, first-run setup, read-only/read-write source policy, digest-pinned updates with rollback, authentication-data backups, and HTTPS examples for Nginx, Caddy, and Traefik.
 
 ReachCommander has built-in single-administrator authentication, but no TLS listener. Keep the application port on loopback and expose it only through an HTTPS reverse proxy; proxy authentication is optional defense in depth. The repository clone and source-build workflow below remain the development path.
+
+## Install on macOS
+
+On an Intel or Apple Silicon Mac with Docker Desktop running, use the unprivileged one-command installer:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/dragosniamtu/reach-commander/master/deploy/macos/install.sh)"
+```
+
+Read the [macOS installation guide](docs/deployment/macos.md) before selecting source folders or local-network access. The default is local-only at `http://127.0.0.1:8080`; the installer offers specific folders (recommended) or an advanced whole-drive mode, preserves authentication state across digest-pinned updates, and rolls back an unhealthy update. This is a Docker Desktop deployment, not a native macOS application, and its hardware metrics describe the Linux container/VM rather than the complete Mac sensor inventory.
 
 ## Source configuration
 
@@ -142,7 +152,7 @@ Rules:
 - `RW` is not proof of filesystem access. The API process/container user must also have write permission, and a Docker bind mount must be writable.
 - Capacity is reported when the platform supports it; an unavailable capacity value does not make a source unavailable.
 
-To add a source, add its JSON record and an explicit bind mount to the same container path, then restart the service. Never mount `/` or `/var/run/docker.sock` for convenience.
+To add a source, add its JSON record and an explicit bind mount to the same container path, then restart the service. Never mount `/` or `/var/run/docker.sock` for convenience. Narrow sources remain recommended. The macOS installer's advanced whole-home choice is the only documented broad-source exception and always masks its installer-owned application-support subtree.
 
 ## Docker deployment
 

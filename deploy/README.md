@@ -1,8 +1,10 @@
-# ReachCommander deployment bundle
+# ReachCommander deployment tools
 
-This directory contains the release-only Ubuntu installer and its deterministic packaging tools. It is separate from the repository-root `compose.yaml`, which remains intended for local source builds.
+This directory contains the release-only Ubuntu bundle, its deterministic packaging tools, and the unprivileged Docker Desktop bootstrap at `macos/install.sh`. It is separate from the repository-root `compose.yaml`, which remains intended for local source builds.
 
-The published installer archive contains:
+The Ubuntu bundle is versioned, packaged, and checksum verified. The macOS bootstrap is intentionally a single self-contained Bash 3.2 script that downloads the shared hardened Compose template, resolves the published `stable` image to an immutable digest, and stores deployment state under `~/Library/Application Support/ReachCommander`. See the [macOS installation guide](../docs/deployment/macos.md) for the inspect-first flow and the security implications of executing the mutable `master` installer command.
+
+The published Ubuntu installer archive contains:
 
 - `install.sh`, the interactive root entry point;
 - `reachcommander`, the fixed-path lifecycle command;

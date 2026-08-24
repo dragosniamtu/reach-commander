@@ -1,0 +1,3 @@
+#!/bin/bash
+set -Eeuo pipefail
+printf '%s\n' "${REACHCOMMANDER_TEST_LOCAL_IP:-192.168.50.25}"

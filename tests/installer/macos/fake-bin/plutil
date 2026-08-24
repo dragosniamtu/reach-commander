@@ -1,0 +1,51 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+if [[ "$(uname -s)" == 'Darwin' ]]; then
+  exec /usr/bin/plutil "$@"
+fi
+
+case "${1:-}" in
+  -create)
+    [[ "${2:-}" == 'xml1' && -n "${3:-}" ]] || exit 64
+    printf '{}\n' >"$3"
+    ;;
+  -insert)
+    node -e '
+      const fs = require("fs");
+      const args = process.argv.slice(1);
+      const path = args.shift();
+      const type = args.shift();
+      const file = args.pop();
+      const document = JSON.parse(fs.readFileSync(file, "utf8"));
+      let value;
+      if (type === "-array") value = [];
+      else if (type === "-dictionary") value = {};
+      else if (type === "-string") value = args.shift();
+      else if (type === "-bool") value = args.shift() === "true";
+      else process.exit(64);
+      const parts = path.split(".");
+      const final = parts.pop();
+      let cursor = document;
+      for (const part of parts) cursor = /^\d+$/.test(part) ? cursor[Number(part)] : cursor[part];
+      if (/^\d+$/.test(final)) cursor[Number(final)] = value;
+      else cursor[final] = value;
+      fs.writeFileSync(file, JSON.stringify(document), "utf8");
+    ' "$2" "$3" "${@:4}"
+    ;;
+  -convert)
+    [[ "${2:-}" == 'json' && "${3:-}" == '-o' && -n "${4:-}" && -n "${5:-}" ]] || exit 64
+    cp -- "$5" "$4"
+    ;;
+  -extract)
+    [[ "${3:-}" == 'raw' && "${4:-}" == '-o' && "${5:-}" == '-' && -n "${6:-}" ]] || exit 64
+    node -e '
+      const fs = require("fs");
+      const path = process.argv[1].split(".");
+      let value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+      for (const part of path) value = /^\d+$/.test(part) ? value[Number(part)] : value[part];
+      process.stdout.write(typeof value === "boolean" ? String(value) : String(value));
+    ' "$2" "$6"
+    ;;
+  *) exit 64 ;;
+esac

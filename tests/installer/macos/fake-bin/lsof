@@ -1,0 +1,14 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+for argument in "$@"; do
+  case "$argument" in
+    -iTCP:*)
+      port="${argument#-iTCP:}"
+      case ",${FAKE_LSOF_OCCUPIED_PORTS:-}," in
+        *",$port,"*) exit 0 ;;
+      esac
+      ;;
+  esac
+done
+exit "${FAKE_LSOF_EXIT:-1}"

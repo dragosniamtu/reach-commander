@@ -1,0 +1,48 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+: "${FAKE_DOCKER_LOG:?}"
+for argument in "$@"; do
+  printf '%s\0' "$argument" >>"$FAKE_DOCKER_LOG"
+done
+printf '\0' >>"$FAKE_DOCKER_LOG"
+
+case "${1:-}" in
+  info)
+    exit "${FAKE_DOCKER_INFO_EXIT:-0}"
+    ;;
+  pull)
+    exit "${FAKE_DOCKER_PULL_EXIT:-0}"
+    ;;
+  image)
+    printf '%s\n' "${FAKE_DOCKER_DIGESTS:-}"
+    exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
+    ;;
+  inspect)
+    if [[ -n "${FAKE_DOCKER_HEALTH_SEQUENCE_FILE:-}" && -s "$FAKE_DOCKER_HEALTH_SEQUENCE_FILE" ]]; then
+      IFS= read -r health <"$FAKE_DOCKER_HEALTH_SEQUENCE_FILE"
+      tail -n +2 "$FAKE_DOCKER_HEALTH_SEQUENCE_FILE" >"$FAKE_DOCKER_HEALTH_SEQUENCE_FILE.next"
+      mv -f -- "$FAKE_DOCKER_HEALTH_SEQUENCE_FILE.next" "$FAKE_DOCKER_HEALTH_SEQUENCE_FILE"
+      printf '%s\n' "$health"
+    else
+      printf '%s\n' "${FAKE_DOCKER_HEALTH:-healthy}"
+    fi
+    exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
+    ;;
+  compose)
+    for argument in "$@"; do
+      case "$argument" in
+        version) exit "${FAKE_DOCKER_COMPOSE_VERSION_EXIT:-0}" ;;
+        config) exit "${FAKE_DOCKER_CONFIG_EXIT:-0}" ;;
+        run) exit "${FAKE_DOCKER_SOURCE_PREFLIGHT_EXIT:-0}" ;;
+        up) exit "${FAKE_DOCKER_UP_EXIT:-0}" ;;
+        down) exit "${FAKE_DOCKER_DOWN_EXIT:-0}" ;;
+        ps) printf '%s\n' reachcommander-test-id; exit 0 ;;
+        logs) printf '%s\n' 'ReachCommander setup code: TEST-SETUP-CODE'; exit 0 ;;
+      esac
+    done
+    ;;
+esac
+
+printf 'fake docker: unsupported invocation\n' >&2
+exit 97

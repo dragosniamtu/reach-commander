@@ -293,10 +293,10 @@ rc_render_deployment() {
     "$output/state" \
     "$output/backups" \
     "$output/excluded" || return 1
-  chmod 0700 -- "$output" "$output/data" "$output/data/auth" \
+  chmod 0700 "$output" "$output/data" "$output/data/auth" \
     "$output/data/keys" "$output/state" "$output/backups" || return 1
-  chmod 0755 -- "$output/config" || return 1
-  chmod 0555 -- "$output/excluded" || return 1
+  chmod 0755 "$output/config" || return 1
+  chmod 0555 "$output/excluded" || return 1
 
   printf '%s\n' \
     "REACHCOMMANDER_BIND_ADDRESS=$bind_address" \
@@ -304,7 +304,7 @@ rc_render_deployment() {
     "REACHCOMMANDER_UID=$uid" \
     "REACHCOMMANDER_GID=$gid" \
     "REACHCOMMANDER_IMAGE=$image" >"$output/.env" || return 1
-  chmod 0600 -- "$output/.env" || return 1
+  chmod 0600 "$output/.env" || return 1
 
   temporary_plist="$output/state/sources.plist"
   temporary_mounts_plist="$output/state/source-mounts.plist"
@@ -320,8 +320,8 @@ rc_render_deployment() {
   printf 'stable\n' >"$output/state/channel"
   printf '%s\n' "$image" >"$output/state/current-image"
   : >"$output/state/previous-image"
-  chmod 0644 -- "$output/config/sources.json" || return 1
-  chmod 0600 -- \
+  chmod 0644 "$output/config/sources.json" || return 1
+  chmod 0600 \
     "$output/compose.yaml" \
     "$output/state/source-mounts.json" \
     "$output/state/channel" \
@@ -599,7 +599,7 @@ rc_require_real_directory() {
   else
     mkdir -- "$path" || return 1
   fi
-  chmod "$mode" -- "$path" || return 1
+  chmod "$mode" "$path" || return 1
 }
 
 rc_prepare_installer_root() {
@@ -609,7 +609,7 @@ rc_prepare_installer_root() {
   else
     mkdir -p -- "$RC_INSTALL_ROOT" || return 1
   fi
-  chmod 0700 -- "$RC_INSTALL_ROOT" || return 1
+  chmod 0700 "$RC_INSTALL_ROOT" || return 1
   rc_require_real_directory "$RC_INSTALL_ROOT/config" 0755 || return 1
   rc_require_real_directory "$RC_INSTALL_ROOT/data" 0700 || return 1
   rc_require_real_directory "$RC_INSTALL_ROOT/data/auth" 0700 || return 1
@@ -780,7 +780,7 @@ rc_begin_generated_transaction() {
   done
   mkdir -p -- "$RC_TRANSACTION_ROOT/files/config" "$RC_TRANSACTION_ROOT/files/state"
   mkdir -p -- "$RC_TRANSACTION_ROOT/absent/config" "$RC_TRANSACTION_ROOT/absent/state"
-  chmod 0700 -- "$RC_TRANSACTION_ROOT" "$RC_TRANSACTION_ROOT/files" \
+  chmod 0700 "$RC_TRANSACTION_ROOT" "$RC_TRANSACTION_ROOT/files" \
     "$RC_TRANSACTION_ROOT/files/config" "$RC_TRANSACTION_ROOT/files/state" \
     "$RC_TRANSACTION_ROOT/absent" "$RC_TRANSACTION_ROOT/absent/config" \
     "$RC_TRANSACTION_ROOT/absent/state"
@@ -789,11 +789,11 @@ rc_begin_generated_transaction() {
       cp -p -- "$RC_INSTALL_ROOT/$relative" "$RC_TRANSACTION_ROOT/files/$relative" || return 1
     else
       : >"$RC_TRANSACTION_ROOT/absent/$relative" || return 1
-      chmod 0600 -- "$RC_TRANSACTION_ROOT/absent/$relative" || return 1
+      chmod 0600 "$RC_TRANSACTION_ROOT/absent/$relative" || return 1
     fi
   done
   printf 'active\n' >"$RC_INSTALL_ROOT/state/transaction-active"
-  chmod 0600 -- "$RC_INSTALL_ROOT/state/transaction-active"
+  chmod 0600 "$RC_INSTALL_ROOT/state/transaction-active"
 }
 
 rc_replace_generated_file() {
@@ -937,7 +937,7 @@ rc_set_env_image() {
   done <"$destination"
   [[ "$seen" == '1' ]] ||
     { rm -f -- "$temporary"; rc_die 'installed image setting is invalid'; return 1; }
-  chmod 0600 -- "$temporary"
+  chmod 0600 "$temporary"
   mv -f -- "$temporary" "$destination"
 }
 
@@ -1038,7 +1038,7 @@ rc_update_existing() {
     { rc_rollback_generated || true; return 1; }
   printf '%s\n' "$old_digest" >"$RC_INSTALL_ROOT/state/previous-image"
   printf '%s\n' "$new_digest" >"$RC_INSTALL_ROOT/state/current-image"
-  chmod 0600 -- "$RC_INSTALL_ROOT/state/previous-image" "$RC_INSTALL_ROOT/state/current-image"
+  chmod 0600 "$RC_INSTALL_ROOT/state/previous-image" "$RC_INSTALL_ROOT/state/current-image"
   rc_validate_authentication_data_tree ||
     { rc_rollback_generated || true; return 1; }
   if rc_compose "$RC_INSTALL_ROOT" up -d reachcommander &&
@@ -1208,7 +1208,7 @@ rc_acquire_lock() {
   local state_directory="$RC_INSTALL_ROOT/state"
   local stale_pid=''
   mkdir -p -- "$state_directory"
-  chmod 0700 -- "$RC_INSTALL_ROOT" "$state_directory"
+  chmod 0700 "$RC_INSTALL_ROOT" "$state_directory"
   if ! mkdir -- "$RC_LOCK_DIRECTORY" 2>/dev/null; then
     [[ -f "$RC_LOCK_DIRECTORY/pid" && ! -L "$RC_LOCK_DIRECTORY/pid" ]] &&
       IFS= read -r stale_pid <"$RC_LOCK_DIRECTORY/pid"
@@ -1221,9 +1221,9 @@ rc_acquire_lock() {
       { rc_die 'installer lock is unsafe or cannot be recovered'; return 1; }
     mkdir -- "$RC_LOCK_DIRECTORY"
   fi
-  chmod 0700 -- "$RC_LOCK_DIRECTORY"
+  chmod 0700 "$RC_LOCK_DIRECTORY"
   printf '%s\n' "$$" >"$RC_LOCK_DIRECTORY/pid"
-  chmod 0600 -- "$RC_LOCK_DIRECTORY/pid"
+  chmod 0600 "$RC_LOCK_DIRECTORY/pid"
   RC_LOCK_OWNED=true
 }
 

@@ -10,7 +10,7 @@ TEST_ROOT="$(mktemp -d "$TEST_PARENT/reachcommander-macos-helpers.XXXXXX")"
 cleanup() {
   case "$TEST_ROOT" in
     "$TEST_PARENT"/reachcommander-macos-helpers.*)
-      chmod -R u+rwX -- "$TEST_ROOT" 2>/dev/null || true
+      chmod -R u+rwX "$TEST_ROOT" 2>/dev/null || true
       rm -rf -- "$TEST_ROOT"
       ;;
     *)

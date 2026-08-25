@@ -11,12 +11,12 @@ public sealed class FileOperationPlannerTests
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-08-25T10:00:00Z");
     private readonly ManualTimeProvider _clock = new(Now);
     private readonly FakeInspector _inspector = new();
-    private readonly InMemoryFileOperationPlanStore _store;
+    private readonly FakePlanStore _store;
     private readonly FileOperationPlanner _planner;
 
     public FileOperationPlannerTests()
     {
-        _store = new InMemoryFileOperationPlanStore(_clock);
+        _store = new FakePlanStore();
         _planner = new FileOperationPlanner(
             new FakeSourceCatalog(
                 Source("media", readOnly: true),
@@ -233,5 +233,25 @@ public sealed class FileOperationPlannerTests
         public override DateTimeOffset GetUtcNow() => _current;
 
         public void Advance(TimeSpan duration) => _current = _current.Add(duration);
+    }
+
+    private sealed class FakePlanStore : IFileOperationPlanStore
+    {
+        private readonly Dictionary<Guid, FileOperationPlan> _plans = new();
+
+        public ValueTask SaveAsync(FileOperationPlan plan, CancellationToken cancellationToken)
+        {
+            _plans[plan.PlanId] = plan;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<FileOperationPlan?> GetAsync(Guid planId, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(_plans.GetValueOrDefault(planId));
+
+        public ValueTask DeleteAsync(Guid planId, CancellationToken cancellationToken)
+        {
+            _plans.Remove(planId);
+            return ValueTask.CompletedTask;
+        }
     }
 }

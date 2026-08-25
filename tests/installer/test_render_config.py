@@ -252,6 +252,7 @@ class RendererTestCase(unittest.TestCase):
             self.assertIn("source: ./data", compose)
             self.assertIn("target: /data", compose)
             self.assertRegex(compose, r"target: /data\s+read_only: false")
+            self.assertIn('ReverseProxy__TrustNetworkGateways: "true"', compose)
             self.assertNotIn("source-mounts.json", compose)
             self.assertNotIn("# installer-source-mounts", compose)
 

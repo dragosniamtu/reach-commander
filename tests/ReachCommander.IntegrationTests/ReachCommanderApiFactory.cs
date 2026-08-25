@@ -22,6 +22,8 @@ namespace ReachCommander.IntegrationTests;
 public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 {
     private readonly bool _useRealSecurity;
+    private readonly string _environmentName;
+    private readonly IReadOnlyDictionary<string, string?> _configurationOverrides;
     private readonly TestLogCollector _logs = new();
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
     private readonly TestArchiveWorkerClient _archiveWorker = new();
@@ -36,9 +38,14 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     internal ReachCommanderApiFactory(
         bool useRealSecurity,
-        string? authenticationDataPath = null)
+        string? authenticationDataPath = null,
+        string environmentName = "Testing",
+        IReadOnlyDictionary<string, string?>? configurationOverrides = null)
     {
         _useRealSecurity = useRealSecurity;
+        _environmentName = environmentName;
+        _configurationOverrides = configurationOverrides ??
+            new Dictionary<string, string?>();
         WorkspaceRoot = Path.Combine(
             Path.GetTempPath(),
             $"reachcommander-api-tests-{Guid.NewGuid():N}");
@@ -187,12 +194,12 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(_environmentName);
         builder.UseWebRoot(WebRoot);
         builder.ConfigureLogging(logging => logging.AddProvider(_logs));
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
-            configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            var values = new Dictionary<string, string?>
             {
                 ["ReachCommander:SourcesPath"] = ConfigurationPath,
                 ["Authentication:DataPath"] = AuthenticationDataPath,
@@ -201,7 +208,13 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 ["Uploads:MaxBatchBytes"] = "12",
                 ["Uploads:MaxFilesPerBatch"] = "2",
                 ["Uploads:MaxConcurrentBatches"] = "2",
-            });
+            };
+            foreach (var (key, value) in _configurationOverrides)
+            {
+                values[key] = value;
+            }
+
+            configuration.AddInMemoryCollection(values);
         });
         builder.ConfigureTestServices(services =>
         {

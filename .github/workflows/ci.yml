@@ -342,6 +342,7 @@ jobs:
             --tmpfs /tmp:size=32m,mode=1777 \
             --cap-drop ALL \
             --security-opt no-new-privileges \
+            --env ReverseProxy__TrustNetworkGateways=true \
             --publish 127.0.0.1::8080 \
             --mount "type=bind,source=$smoke_root/deployment/config,target=/config,readonly" \
             --mount "type=bind,source=$smoke_root/data,target=/data" \

@@ -510,6 +510,7 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 
 - Every `/api` endpoint requires the authenticated administrator except session discovery, antiforgery-token issuance, first-run setup, and login. Setup and login are rate limited; state-changing requests require the same-origin antiforgery header.
 - The session cookie is HttpOnly, `SameSite=Strict`, Secure outside development/testing, non-persistent, and renewed within a 12-hour sliding window. The persisted security stamp invalidates older cookies after a password change or account replacement.
+- HTTPS scheme forwarding accepts only one hop from loopback or an explicitly configured proxy address. Container deployments trust only their exact network gateway; arbitrary clients cannot promote an HTTP request by spoofing `X-Forwarded-Proto`.
 - The browser sends a configured source ID and normalized logical path only. Source roots and resolved physical paths are never included in DTOs, client state, or Problem Details.
 - The backend rejects NUL characters, relative traversal, rooted paths, drive-qualified paths, and UNC paths.
 - Every request is resolved beneath its configured source. Existing path components are canonicalized one by one, symbolic links are resolved, and containment is checked after each resolution and on the final path.

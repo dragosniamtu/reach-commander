@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
+using ReachCommander.Api;
 using ReachCommander.Api.Authentication;
 using ReachCommander.Api.Errors;
 using ReachCommander.Api.Uploads;
@@ -23,11 +24,13 @@ builder.Services.AddExceptionHandler<FileAccessExceptionHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
 builder.Services.AddTransient<MultipartUploadReader>();
+builder.Services.AddReachCommanderReverseProxy(builder.Configuration);
 builder.Services.AddReachCommanderInfrastructure(builder.Configuration);
 builder.Services.AddReachCommanderAuthentication(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {

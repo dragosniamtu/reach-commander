@@ -7,7 +7,7 @@ import argparse
 import json
 import os
 import time
-from http.cookiejar import CookieJar
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -27,7 +27,12 @@ TERMINAL_PHASES = {
 class SmokeClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
-        self.opener = build_opener(HTTPCookieProcessor(CookieJar()))
+        proxy_tls_policy = DefaultCookiePolicy(
+            secure_protocols=("https", "http", "wss")
+        )
+        self.opener = build_opener(
+            HTTPCookieProcessor(CookieJar(policy=proxy_tls_policy))
+        )
         self.csrf_token: str | None = None
         self.response_bodies: list[str] = []
 
@@ -45,7 +50,10 @@ class SmokeClient:
         antiforgery: bool = False,
     ) -> Any:
         data = None
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "X-Forwarded-Proto": "https",
+        }
         if payload is not None:
             data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             headers["Content-Type"] = "application/json"

@@ -8,6 +8,8 @@ services:
     user: "1000:1000"
     ports:
       - "8092:8080"
+    environment:
+      ReverseProxy__TrustNetworkGateways: "true"
     volumes:
       - ./config:/config:ro
       - reachcommander-data:/data

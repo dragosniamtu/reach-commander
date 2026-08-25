@@ -75,6 +75,70 @@ public sealed class AuthenticationApiTests
     }
 
     [Fact]
+    public async Task Production_antiforgery_accepts_https_from_a_trusted_proxy()
+    {
+        await using var factory = new ReachCommanderApiFactory(
+            useRealSecurity: true,
+            environmentName: "Production");
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
+
+        var response = await client.GetAsync("/api/auth/antiforgery");
+        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Production_antiforgery_accepts_https_from_an_explicit_proxy()
+    {
+        const string proxyAddress = "10.20.30.40";
+        await using var factory = new ReachCommanderApiFactory(
+            useRealSecurity: true,
+            environmentName: "Production",
+            configurationOverrides: new Dictionary<string, string?>
+            {
+                ["ReverseProxy:KnownProxies:0"] = proxyAddress,
+            });
+
+        var context = await factory.Server.SendAsync(request =>
+        {
+            request.Connection.RemoteIpAddress = IPAddress.Parse(proxyAddress);
+            request.Request.Method = HttpMethods.Get;
+            request.Request.Path = "/api/auth/antiforgery";
+            request.Request.Scheme = "http";
+            request.Request.Headers["X-Forwarded-Proto"] = "https";
+        });
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.True(context.Response.Headers.TryGetValue("Set-Cookie", out var cookies));
+        Assert.Contains(
+            cookies,
+            value => value?.Contains("secure", StringComparison.OrdinalIgnoreCase) is true);
+    }
+
+    [Fact]
+    public async Task Production_ignores_https_from_an_unknown_proxy()
+    {
+        await using var factory = new ReachCommanderApiFactory(
+            useRealSecurity: true,
+            environmentName: "Production");
+
+        var context = await factory.Server.SendAsync(request =>
+        {
+            request.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.10");
+            request.Request.Method = HttpMethods.Get;
+            request.Request.Path = "/health";
+            request.Request.Scheme = "http";
+            request.Request.Headers["X-Forwarded-Proto"] = "https";
+        });
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("http", context.Request.Scheme);
+    }
+
+    [Fact]
     public async Task Setup_attempts_are_rate_limited_by_remote_address()
     {
         await using var factory = new ReachCommanderApiFactory(useRealSecurity: true);

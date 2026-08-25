@@ -297,6 +297,7 @@ test('container smoke uses the real rendered non-root configuration', async () =
   for (const hardening of ['--read-only', '--cap-drop ALL', '--security-opt no-new-privileges']) {
     assert.ok(smoke.includes(hardening), `missing hardened smoke option: ${hardening}`);
   }
+  assert.match(smoke, /--env ReverseProxy__TrustNetworkGateways=true/);
   assert.doesNotMatch(smoke, /cat >[^\n]*sources\.json/);
   assert.doesNotMatch(smoke, /chmod 0644[^\n]*sources\.json/);
 });
@@ -334,6 +335,9 @@ test('container smoke proves Copy, Trash, Restore, and host-path redaction', asy
   assert.match(lifecycle, /assert_no_host_paths/);
   assert.match(lifecycle, /copy-canary\.txt/);
   assert.match(lifecycle, /trash-canary\.txt/);
+  assert.match(lifecycle, /"X-Forwarded-Proto": "https"/);
+  assert.match(lifecycle, /DefaultCookiePolicy/);
+  assert.match(lifecycle, /secure_protocols=\("https", "http", "wss"\)/);
 });
 
 test('container smoke preserves and annotates runtime diagnostics before cleanup', async () => {

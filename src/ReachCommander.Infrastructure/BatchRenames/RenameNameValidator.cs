@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using ReachCommander.Infrastructure.FileOperations;
 
 namespace ReachCommander.Infrastructure.BatchRenames;
 
@@ -32,6 +33,11 @@ internal sealed partial class RenameNameValidator
         if (ReservedDeviceName().IsMatch(completeName))
         {
             return Invalid("The filename is reserved by Windows.");
+        }
+
+        if (ReservedFileOperationPathPolicy.IsReservedName(completeName))
+        {
+            return Invalid("The filename is reserved by ReachCommander.");
         }
 
         if (Encoding.UTF8.GetByteCount(completeName) > MaximumUtf8Bytes)

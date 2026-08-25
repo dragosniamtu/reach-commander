@@ -39,6 +39,8 @@ public sealed class UploadFilenameValidatorTests
     [InlineData("bad?name")]
     [InlineData("bad*name")]
     [InlineData("control\u001fname")]
+    [InlineData(".reachcommander-trash")]
+    [InlineData(".reachcommander-operation-123-stage")]
     public void Validate_rejects_nonportable_or_path_bearing_names(string name) =>
         Assert.Throws<UploadNameInvalidException>(() => _validator.Validate(name));
 

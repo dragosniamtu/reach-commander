@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using ReachCommander.Application.Archives;
+using ReachCommander.Infrastructure.FileOperations;
 
 namespace ReachCommander.Infrastructure.Archives.Catalog;
 
@@ -88,6 +89,7 @@ internal sealed partial class ArchivePathPolicy(IOptions<ArchiveOptions> options
 
     private static bool IsStagingControlName(string component) =>
         component.Equals(".reachcommander-owner", StringComparison.OrdinalIgnoreCase) ||
+        ReservedFileOperationPathPolicy.IsReservedName(component) ||
         (component.StartsWith(".reachcommander-extract-", StringComparison.OrdinalIgnoreCase) &&
          component.EndsWith(".partial", StringComparison.OrdinalIgnoreCase));
 

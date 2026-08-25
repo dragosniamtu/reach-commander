@@ -1,6 +1,7 @@
 using ReachCommander.Application.Files;
 using ReachCommander.Domain.Files;
 using ReachCommander.Infrastructure.Archives.Classification;
+using ReachCommander.Infrastructure.FileOperations;
 
 namespace ReachCommander.Infrastructure.FileSystem;
 
@@ -22,7 +23,10 @@ public sealed class LocalFileBrowser(IPathSecurityService pathSecurity) : IFileB
         try
         {
             var directory = new DirectoryInfo(resolved.PhysicalPath);
-            var fileSystemEntries = directory.EnumerateFileSystemInfos().ToArray();
+            var fileSystemEntries = directory
+                .EnumerateFileSystemInfos()
+                .Where(entry => !ReservedFileOperationPathPolicy.IsReservedName(entry.Name))
+                .ToArray();
             var siblingNames = fileSystemEntries
                 .Select(entry => entry.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);

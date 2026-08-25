@@ -27,6 +27,8 @@ public sealed class RenameNameValidatorTests
     [InlineData("trailing.")]
     [InlineData("trailing ")]
     [InlineData("control\u001fname")]
+    [InlineData(".reachcommander-trash")]
+    [InlineData(".reachcommander-operation-123-quarantine")]
     public void Validate_rejects_non_portable_or_reserved_names(string name)
     {
         var validation = _validator.Validate(name);

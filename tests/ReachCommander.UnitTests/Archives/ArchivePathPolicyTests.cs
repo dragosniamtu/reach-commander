@@ -24,6 +24,8 @@ public sealed class ArchivePathPolicyTests
     [InlineData("CON")]
     [InlineData("aux.txt")]
     [InlineData(".reachcommander-extract-forged.partial/file.txt")]
+    [InlineData(".reachcommander-trash/items/file.txt")]
+    [InlineData("folder/.reachcommander-operation-123-stage/file.txt")]
     public void Rejects_unsafe_entry_paths(string value)
     {
         var policy = CreatePolicy();

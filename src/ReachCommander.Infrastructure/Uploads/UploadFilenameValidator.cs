@@ -1,5 +1,6 @@
 using System.Text;
 using ReachCommander.Application.Uploads;
+using ReachCommander.Infrastructure.FileOperations;
 
 namespace ReachCommander.Infrastructure.Uploads;
 
@@ -24,7 +25,8 @@ internal sealed class UploadFilenameValidator
             fileName.EndsWith(' ') ||
             Encoding.UTF8.GetByteCount(fileName) > MaximumUtf8Bytes ||
             fileName.Any(IsInvalidCharacter) ||
-            IsReservedDeviceName(fileName))
+            IsReservedDeviceName(fileName) ||
+            ReservedFileOperationPathPolicy.IsReservedName(fileName))
         {
             throw new UploadNameInvalidException(fileName);
         }

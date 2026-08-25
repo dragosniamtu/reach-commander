@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.Sources;
+using ReachCommander.Infrastructure.FileOperations;
 
 namespace ReachCommander.Infrastructure.Security;
 
@@ -139,6 +140,13 @@ public sealed partial class PathSecurityService(ISourceCatalog sourceCatalog) : 
                 throw new InvalidLogicalPathException(logicalPath, "parent traversal is not allowed");
             }
 
+            if (ReservedFileOperationPathPolicy.IsReservedName(segment))
+            {
+                throw new InvalidLogicalPathException(
+                    logicalPath,
+                    "it uses a reserved ReachCommander name");
+            }
+
             normalized.Add(segment);
         }
 
@@ -161,6 +169,13 @@ public sealed partial class PathSecurityService(ISourceCatalog sourceCatalog) : 
             throw new InvalidLogicalPathException(
                 parentLogicalPath,
                 "the child name must be one non-rooted path component");
+        }
+
+        if (ReservedFileOperationPathPolicy.IsReservedName(childName))
+        {
+            throw new InvalidLogicalPathException(
+                parentLogicalPath,
+                "the child name uses a reserved ReachCommander name");
         }
     }
 

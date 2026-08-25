@@ -78,6 +78,21 @@ public sealed class LocalFileBrowserTests : IDisposable
     }
 
     [Fact]
+    public async Task ListAsync_hides_operation_owned_entries()
+    {
+        Directory.CreateDirectory(System.IO.Path.Combine(_sourceRoot, ".reachcommander-trash"));
+        Directory.CreateDirectory(System.IO.Path.Combine(
+            _sourceRoot,
+            ".reachcommander-operation-123-stage"));
+        await File.WriteAllTextAsync(System.IO.Path.Combine(_sourceRoot, "visible.txt"), "visible");
+
+        var entries = await _browser.ListAsync("downloads", "/", CancellationToken.None);
+
+        Assert.Single(entries);
+        Assert.Equal("visible.txt", entries[0].Name);
+    }
+
+    [Fact]
     public async Task ListAsync_classifies_archive_candidates_with_directory_context()
     {
         foreach (var name in new[]

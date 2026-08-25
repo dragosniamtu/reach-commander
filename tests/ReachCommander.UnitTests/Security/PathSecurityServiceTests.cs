@@ -56,6 +56,15 @@ public sealed class PathSecurityServiceTests : IDisposable
             () => _service.ResolveAsync("media", "/Movies\0secret", CancellationToken.None).AsTask());
     }
 
+    [Theory]
+    [InlineData("/.reachcommander-trash")]
+    [InlineData("/Movies/.reachcommander-operation-123-stage")]
+    public async Task ResolveAsync_rejects_operation_owned_names(string logicalPath)
+    {
+        await Assert.ThrowsAsync<InvalidLogicalPathException>(
+            () => _service.ResolveAsync("media", logicalPath, CancellationToken.None).AsTask());
+    }
+
     [Fact]
     public async Task ResolveAsync_reports_a_missing_entry()
     {
@@ -167,6 +176,19 @@ public sealed class PathSecurityServiceTests : IDisposable
         Assert.Equal(System.IO.Path.GetFullPath(link), resolved.PhysicalPath);
     }
 
+    [Theory]
+    [InlineData(".reachcommander-trash")]
+    [InlineData(".reachcommander-operation-123-quarantine")]
+    public async Task ResolveChildAsync_rejects_operation_owned_names(string childName)
+    {
+        await Assert.ThrowsAsync<InvalidLogicalPathException>(() =>
+            _service.ResolveChildAsync(
+                "media",
+                "/Movies",
+                childName,
+                CancellationToken.None).AsTask());
+    }
+
     [Fact]
     public async Task ResolveChildAsync_rejects_a_parent_that_is_not_a_directory()
     {
@@ -203,6 +225,19 @@ public sealed class PathSecurityServiceTests : IDisposable
     [InlineData("C:/escape")]
     [InlineData("safe//escape")]
     public async Task ResolveDescendantAsync_rejects_non_relative_or_ambiguous_paths(string relativePath)
+    {
+        await Assert.ThrowsAsync<InvalidLogicalPathException>(() =>
+            _service.ResolveDescendantAsync(
+                "media",
+                "/Movies",
+                relativePath,
+                CancellationToken.None).AsTask());
+    }
+
+    [Theory]
+    [InlineData(".reachcommander-trash/items/file.bin")]
+    [InlineData("Season/.reachcommander-operation-123-stage/file.bin")]
+    public async Task ResolveDescendantAsync_rejects_operation_owned_names(string relativePath)
     {
         await Assert.ThrowsAsync<InvalidLogicalPathException>(() =>
             _service.ResolveDescendantAsync(

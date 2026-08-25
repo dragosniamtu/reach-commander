@@ -11,10 +11,14 @@ describe('PwaService', () => {
   let service: PwaService;
   let versionEvents: Subject<VersionEvent>;
   let reload: ReturnType<typeof vi.fn>;
+  let checkForUpdate: ReturnType<typeof vi.fn>;
+  let activateUpdate: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     versionEvents = new Subject<VersionEvent>();
     reload = vi.fn();
+    checkForUpdate = vi.fn(() => Promise.resolve(true));
+    activateUpdate = vi.fn(() => Promise.resolve(true));
     TestBed.configureTestingModule({
       providers: [
         PwaService,
@@ -24,6 +28,8 @@ describe('PwaService', () => {
             isEnabled: true,
             versionUpdates: versionEvents.asObservable(),
             unrecoverable: EMPTY,
+            checkForUpdate,
+            activateUpdate,
           },
         },
         { provide: PWA_RELOAD, useValue: reload },
@@ -92,6 +98,17 @@ describe('PwaService', () => {
 
     expect(service.updateReady()).toBe(false);
     expect(service.error()).toContain('update');
+  });
+
+  it('activates the matching shell and reloads exactly once after a system update', async () => {
+    await Promise.all([
+      service.refreshAfterSystemUpdate(),
+      service.refreshAfterSystemUpdate(),
+    ]);
+
+    expect(checkForUpdate).toHaveBeenCalledOnce();
+    expect(activateUpdate).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
   });
 });
 

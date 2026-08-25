@@ -1,0 +1,23 @@
+:host { position: fixed; z-index: 126; inset: 0; display: block; }
+.update-backdrop { width: 100%; height: 100%; background: rgb(3 7 11 / .84); backdrop-filter: blur(3px); }
+.update-dialog { position: fixed; inset: 50% auto auto 50%; display: flex; flex-direction: column; width: min(520px, calc(100vw - 28px)); margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--text-2); background: var(--surface-2); box-shadow: 0 24px 80px rgb(0 0 0 / .62); transform: translate(-50%, -50%); }
+header, footer, .version-flow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+header { min-height: 66px; padding: 12px 15px; border-bottom: 1px solid var(--line-strong); background: var(--surface-3); }
+h2, p { margin: 0; }
+h2 { margin-top: 4px; color: var(--text-1); font: 700 17px/1.2 var(--font-ui); }
+.eyebrow, .channel, .version-flow span { color: var(--text-4); font: 700 8px/1 var(--font-ui); letter-spacing: .09em; text-transform: uppercase; }
+.channel { padding: 5px 7px; border: 1px solid var(--line); color: var(--accent-text); background: var(--accent-dim); }
+.dialog-body { display: grid; gap: 13px; padding: 16px; }
+.version-flow { justify-content: stretch; }
+.version-flow section { display: grid; flex: 1; gap: 7px; padding: 12px; border: 1px solid var(--line); background: var(--surface-1); }
+.version-flow strong { color: var(--text-1); font: 700 14px/1 var(--font-mono); }
+.version-flow i { color: var(--accent); font-style: normal; }
+.dialog-body p { color: var(--text-3); font-size: 11px; line-height: 1.55; }
+.dialog-body .rollback { padding: 10px; border-left: 2px solid var(--warning); color: var(--text-4); background: var(--surface-1); }
+footer { justify-content: flex-end; min-height: 51px; padding: 9px 13px; border-top: 1px solid var(--line-strong); background: var(--surface-3); }
+button { min-height: 32px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-2); background: var(--surface-2); font: 600 10px/1 var(--font-ui); cursor: pointer; }
+button.primary { border-color: var(--accent); color: #061216; background: var(--accent); }
+button:disabled { cursor: not-allowed; opacity: .46; }
+:host-context([data-theme='norton']) :is(.update-dialog, button, .channel) { border-radius: 0; box-shadow: none; }
+:host-context([data-theme='norton']) .update-backdrop { background: rgb(0 0 64 / .92); backdrop-filter: none; }
+@media (max-width: 520px) { .version-flow { align-items: stretch; flex-direction: column; } .version-flow i { transform: rotate(90deg); align-self: center; } }

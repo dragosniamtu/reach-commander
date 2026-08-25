@@ -48,8 +48,12 @@ import { DeleteDialogComponent } from '../trash/delete-dialog.component';
 import { TrashDialogComponent } from '../trash/trash-dialog.component';
 import { CreateDirectoryDialogComponent } from '../create-directory/create-directory-dialog.component';
 import { FileCommandAvailability } from '../command-bar/command-bar.component';
-import { FileOperationStatusDto } from '../../../core/api/api.models';
+import { FileOperationStatusDto, SystemUpdateStatusDto } from '../../../core/api/api.models';
 import { CapturedFileOperationContext, TransferOperationKind } from '../../../core/state/file-operation.models';
+import { SystemUpdateStore } from '../../../core/state/system-update.store';
+import { SystemUpdateButtonComponent } from '../../system-update/system-update-button.component';
+import { SystemUpdateDialogComponent } from '../../system-update/system-update-dialog.component';
+import { SystemUpdateOverlayComponent } from '../../system-update/system-update-overlay.component';
 
 export interface CreateDirectoryDialogContext {
   readonly sourceId: string;
@@ -77,6 +81,9 @@ export interface CreateDirectoryDialogContext {
     DeleteDialogComponent,
     TrashDialogComponent,
     CreateDirectoryDialogComponent,
+    SystemUpdateButtonComponent,
+    SystemUpdateDialogComponent,
+    SystemUpdateOverlayComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -90,6 +97,7 @@ export class CommanderShellComponent implements OnInit {
   readonly archiveExtraction = inject(ArchiveExtractionStore);
   readonly fileOperations = inject(FileOperationStore);
   readonly trash = inject(TrashStore);
+  readonly systemUpdate = inject(SystemUpdateStore);
   readonly pwa = inject(PwaService);
   readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
@@ -101,6 +109,17 @@ export class CommanderShellComponent implements OnInit {
   readonly fileOperationOpener = signal<HTMLElement | null>(null);
   readonly trashOpen = signal(false);
   readonly createDirectoryContext = signal<CreateDirectoryDialogContext | null>(null);
+  readonly systemUpdateDialogStatus = signal<SystemUpdateStatusDto | null>(null);
+  readonly systemUpdateOverlayStatus = computed(() => {
+    const status = this.systemUpdate.status();
+    return this.systemUpdate.overlayVisible() && status &&
+      (status.phase === 'applying' ||
+       status.phase === 'completed' ||
+       status.phase === 'rolledBack' ||
+       status.phase === 'failed')
+      ? status
+      : null;
+  });
   readonly activeState = computed(() =>
     this.store.activePanel() === 'left' ? this.store.leftPanel() : this.store.rightPanel(),
   );
@@ -176,6 +195,8 @@ export class CommanderShellComponent implements OnInit {
   private activeToolbar?: ActivePanelToolbarComponent;
   @ViewChild(TransferTaskIndicatorComponent)
   private transferIndicator?: TransferTaskIndicatorComponent;
+  @ViewChild(SystemUpdateButtonComponent)
+  systemUpdateButton?: SystemUpdateButtonComponent;
 
   private readonly keyboard = inject(CommanderKeyboardService);
   private readonly destroyRef = inject(DestroyRef);
@@ -186,6 +207,7 @@ export class CommanderShellComponent implements OnInit {
     this.destroyRef.onDestroy(() => {
       this.keyboard.stop();
       this.metricsStore.stop();
+      this.systemUpdate.reset();
     });
     const unregisterProtectedState = this.protectedState.register(() => {
       this.store.reset();
@@ -201,6 +223,7 @@ export class CommanderShellComponent implements OnInit {
       this.metricsOpen.set(false);
       this.trashOpen.set(false);
       this.createDirectoryContext.set(null);
+      this.systemUpdateDialogStatus.set(null);
     });
     this.destroyRef.onDestroy(unregisterProtectedState);
     this.archiveExtraction.setCompletionHandler((source, destination) => {
@@ -214,6 +237,7 @@ export class CommanderShellComponent implements OnInit {
   ngOnInit(): void {
     this.keyboard.start();
     this.metricsStore.start();
+    void this.systemUpdate.start();
     void this.retryInitialization();
   }
 
@@ -319,6 +343,33 @@ export class CommanderShellComponent implements OnInit {
 
   openMetrics(): void {
     this.metricsOpen.set(true);
+  }
+
+  openSystemUpdate(): void {
+    const status = this.systemUpdate.status();
+    if (!status?.canApply) {
+      return;
+    }
+
+    this.systemUpdateDialogStatus.set(Object.freeze({ ...status }));
+  }
+
+  closeSystemUpdate(): void {
+    if (!this.systemUpdateDialogStatus()) {
+      return;
+    }
+
+    this.systemUpdateDialogStatus.set(null);
+    queueMicrotask(() => this.systemUpdateButton?.focusTrigger());
+  }
+
+  confirmSystemUpdate(): void {
+    if (!this.systemUpdateDialogStatus()) {
+      return;
+    }
+
+    this.systemUpdateDialogStatus.set(null);
+    void this.systemUpdate.apply();
   }
 
   closeMetrics(): void {
@@ -596,7 +647,8 @@ export class CommanderShellComponent implements OnInit {
     const operationDialogBlocks = this.fileOperations.dialog() !== 'closed' &&
       this.fileOperations.presentation() === 'modal';
     return operationDialogBlocks || this.trash.deleteRequest() !== null || this.trashOpen() ||
-      this.createDirectoryContext() !== null;
+      this.createDirectoryContext() !== null || this.systemUpdateDialogStatus() !== null ||
+      this.systemUpdateOverlayStatus() !== null;
   }
 
   private transferDisabledReason(kind: TransferOperationKind): string {

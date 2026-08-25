@@ -1,0 +1,28 @@
+<span
+  class="update-control"
+  [class.available]="status()?.canApply"
+  [class.busy]="status()?.phase === 'checking' || status()?.phase === 'applying'"
+  [attr.data-phase]="status()?.phase ?? 'checking'"
+  [attr.tabindex]="status()?.canApply ? null : 0"
+  [attr.title]="tooltip()"
+  [attr.aria-label]="status()?.canApply ? null : accessibleSummary()"
+>
+  <button
+    #trigger
+    type="button"
+    data-testid="system-update-trigger"
+    [disabled]="!status()?.canApply"
+    [attr.aria-label]="accessibleSummary()"
+    (click)="requestOpen()"
+  >
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true">
+      <path
+        d="M15.5 7A6 6 0 1 0 16 12M15.5 7V3m0 4h-4"
+        vector-effect="non-scaling-stroke"
+      />
+    </svg>
+    @if (status()?.updateAvailable) {
+      <i class="availability-dot" aria-hidden="true"></i>
+    }
+  </button>
+</span>

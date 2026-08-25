@@ -129,10 +129,14 @@ export class PwaService {
   }
 
   private async activateLatestShellAndReload(): Promise<void> {
+    this.updateReady.set(false);
+    this.error.set(null);
     try {
       if (this.updates.isEnabled) {
-        await this.updates.checkForUpdate();
-        await this.updates.activateUpdate();
+        const updateAvailable = await this.updates.checkForUpdate();
+        if (updateAvailable) {
+          await this.updates.activateUpdate();
+        }
       }
     } catch {
       this.error.set('The new application shell could not be activated before reload.');

@@ -54,6 +54,7 @@ export interface SystemUpdateStoreState {
   readonly pending: boolean;
   readonly reconnecting: boolean;
   readonly error: SystemUpdateClientError | null;
+  readonly terminalDismissed: boolean;
   readonly requestToken: number;
 }
 
@@ -77,6 +78,12 @@ export class SystemUpdateStore {
   readonly error = computed(() => this.state().error);
   readonly applying = computed(() => this.status()?.phase === 'applying');
   readonly canApply = computed(() => this.status()?.canApply === true && !this.pending());
+  readonly overlayVisible = computed(() => {
+    const phase = this.status()?.phase;
+    return phase === 'applying' ||
+      ((phase === 'completed' || phase === 'rolledBack' || phase === 'failed') &&
+       !this.state().terminalDismissed);
+  });
 
   constructor(
     private readonly api: CommanderApiPort,
@@ -187,6 +194,7 @@ export class SystemUpdateStore {
       pending: true,
       reconnecting: false,
       error: null,
+      terminalDismissed: false,
       requestToken: token,
     });
 
@@ -214,6 +222,7 @@ export class SystemUpdateStore {
           pending: false,
           reconnecting: false,
           error: safeError(error),
+          terminalDismissed: false,
           requestToken: token,
         });
       }
@@ -228,13 +237,20 @@ export class SystemUpdateStore {
     }
 
     this.clearPoll();
-    this.mutableState.update((state) => ({
-      ...state,
-      status: Object.freeze({ ...status }),
-      pending: false,
-      reconnecting: false,
-      error: null,
-    }));
+    this.mutableState.update((state) => {
+      const terminalDismissed = terminalResultId(status) !== null &&
+        ((status.phase === 'completed' && this.readStoredResult() === terminalResultId(status)) ||
+         (state.terminalDismissed &&
+          terminalResultId(state.status) === terminalResultId(status)));
+      return {
+        ...state,
+        status: Object.freeze({ ...status }),
+        pending: false,
+        reconnecting: false,
+        error: null,
+        terminalDismissed,
+      };
+    });
 
     if (status.phase === 'applying') {
       this.schedulePoll(this.generation);
@@ -249,7 +265,11 @@ export class SystemUpdateStore {
       return;
     }
 
-    this.mutableState.update((state) => ({ ...state, status: null, error: null }));
+    this.mutableState.update((state) => ({
+      ...state,
+      terminalDismissed: true,
+      error: null,
+    }));
   }
 
   reset(): void {
@@ -298,6 +318,7 @@ export class SystemUpdateStore {
           }),
           reconnecting: false,
           error: safeError(error),
+          terminalDismissed: false,
         }));
         return;
       }
@@ -380,8 +401,20 @@ function emptyState(requestToken = 0): SystemUpdateStoreState {
     pending: false,
     reconnecting: false,
     error: null,
+    terminalDismissed: false,
     requestToken,
   };
+}
+
+function terminalResultId(status: SystemUpdateStatusDto | null): string | null {
+  if (!status ||
+      (status.phase !== 'completed' &&
+       status.phase !== 'rolledBack' &&
+       status.phase !== 'failed')) {
+    return null;
+  }
+
+  return status.operationId ?? status.updatedAt;
 }
 
 function isConnectionLoss(error: unknown): boolean {

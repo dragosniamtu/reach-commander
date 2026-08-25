@@ -70,6 +70,9 @@
   gap: 6px;
   min-width: 0;
 }
+.top-actions > app-system-update-button {
+  flex: 0 0 auto;
+}
 .top-actions button {
   height: 28px;
   padding: 0 9px;

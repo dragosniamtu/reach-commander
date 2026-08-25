@@ -135,7 +135,8 @@ describe('SystemUpdateStore', () => {
 
       expect(store.status()?.phase).toBe(phase);
       store.dismissTerminal();
-      expect(store.status()).toBeNull();
+      expect(store.status()?.phase).toBe(phase);
+      expect(store.overlayVisible()).toBe(false);
     },
   );
 
@@ -170,6 +171,20 @@ describe('SystemUpdateStore', () => {
     TestBed.resetTestingModule();
 
     expect(scheduler.cancelCount).toBeGreaterThan(0);
+  });
+
+  it('does not block or reload again for a completion already refreshed in this tab', () => {
+    resultStorage.setItem('reachcommander.systemUpdateRefreshed', 'operation-1');
+
+    store.capture(status({
+      phase: 'completed',
+      operationId: 'operation-1',
+      targetVersion: 'v1.4.0',
+    }));
+
+    expect(store.overlayVisible()).toBe(false);
+    expect(store.status()?.phase).toBe('completed');
+    expect(pwa.refreshAfterSystemUpdate).not.toHaveBeenCalled();
   });
 });
 

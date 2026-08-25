@@ -49,6 +49,10 @@
         <span class="theme-label-compact" aria-hidden="true">N</span>
       </button>
       <app-account-menu />
+      <app-system-update-button
+        [status]="systemUpdate.status()"
+        (open)="openSystemUpdate()"
+      />
       <app-system-metrics-widget
         [snapshot]="metricsStore.effectiveSnapshot()"
         [effectiveState]="metricsStore.effectiveState() ?? 'loading'"
@@ -70,6 +74,24 @@
       [nowEpochMilliseconds]="metricsStore.state().nowEpochMilliseconds"
       [opener]="metricsWidget?.triggerElement ?? null"
       (closed)="closeMetrics()"
+    />
+  }
+
+  @if (systemUpdateDialogStatus(); as updateStatus) {
+    <app-system-update-dialog
+      [status]="updateStatus"
+      [opener]="systemUpdateButton?.triggerElement ?? null"
+      (apply)="confirmSystemUpdate()"
+      (closed)="closeSystemUpdate()"
+    />
+  }
+
+  @if (systemUpdateOverlayStatus(); as updateStatus) {
+    <app-system-update-overlay
+      [status]="updateStatus"
+      [reconnecting]="systemUpdate.reconnecting()"
+      [error]="systemUpdate.error()"
+      (dismissed)="systemUpdate.dismissTerminal()"
     />
   }
 

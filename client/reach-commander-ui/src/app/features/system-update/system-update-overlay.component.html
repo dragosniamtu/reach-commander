@@ -1,0 +1,38 @@
+<section
+  class="system-update-overlay"
+  role="alertdialog"
+  aria-modal="true"
+  aria-labelledby="system-update-progress-title"
+  [attr.data-phase]="status().phase"
+>
+  <div class="update-state">
+    @if (!terminal()) {
+      <span class="spinner" aria-hidden="true"><i></i><i></i></span>
+    } @else {
+      <span class="terminal-icon" aria-hidden="true">{{ status().phase === 'rolledBack' ? '↶' : '!' }}</span>
+    }
+    <div>
+      <span class="eyebrow">ReachCommander system update</span>
+      <h2 id="system-update-progress-title">{{ title() }}</h2>
+    </div>
+    @if (status().phase === 'applying') {
+      <p>
+        {{ reconnecting()
+          ? 'The backend is restarting. Reconnecting automatically—keep this tab open.'
+          : 'The trusted update is being applied and health checked. File changes are temporarily paused.' }}
+      </p>
+    } @else if (status().phase === 'completed') {
+      <p>The backend is healthy. Activating the matching offline shell and reloading once.</p>
+    } @else if (status().phase === 'rolledBack') {
+      <p>The candidate did not pass its health check, so the previous version was restored.</p>
+    } @else {
+      <p>The update could not be recovered automatically. Run <code>reachcommander doctor</code> on the Ubuntu host.</p>
+    }
+    @if (error(); as safeError) {
+      <p class="error">{{ safeError.detail }}</p>
+    }
+    @if (terminal()) {
+      <button type="button" autofocus (click)="dismissed.emit()">Return to ReachCommander</button>
+    }
+  </div>
+</section>

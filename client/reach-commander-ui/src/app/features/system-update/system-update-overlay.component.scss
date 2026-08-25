@@ -1,0 +1,20 @@
+:host { position: fixed; z-index: 150; inset: 0; display: block; }
+.system-update-overlay { display: grid; place-items: center; width: 100%; height: 100%; padding: 24px; color: var(--text-2); background: color-mix(in srgb, var(--app-bg) 94%, #000); }
+.update-state { display: grid; justify-items: center; width: min(560px, 100%); gap: 17px; text-align: center; }
+.update-state > div { display: grid; gap: 7px; }
+.eyebrow { color: var(--accent-text); font: 700 9px/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; }
+h2, p { margin: 0; }
+h2 { color: var(--text-1); font: 700 clamp(22px, 4vw, 34px)/1.15 var(--font-ui); }
+p { max-width: 500px; color: var(--text-3); font-size: 12px; line-height: 1.65; }
+code { color: var(--warning); font-family: var(--font-mono); }
+.spinner { position: relative; display: block; width: 66px; height: 66px; }
+.spinner i { position: absolute; inset: 0; border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: update-spin 1.2s linear infinite; }
+.spinner i:last-child { inset: 10px; border-top-color: var(--warning); animation-direction: reverse; animation-duration: .9s; }
+.terminal-icon { display: grid; place-items: center; width: 60px; height: 60px; border: 2px solid var(--warning); border-radius: 50%; color: var(--warning); font: 700 30px/1 var(--font-mono); }
+[data-phase='failed'] .terminal-icon { border-color: var(--danger); color: var(--danger-text); }
+.error { padding: 9px 12px; border: 1px solid var(--danger); color: var(--danger-text); background: var(--danger-dim); }
+button { min-height: 36px; padding: 0 16px; border: 1px solid var(--accent); border-radius: 3px; color: #061216; background: var(--accent); font: 700 10px/1 var(--font-ui); cursor: pointer; }
+@keyframes update-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner i { animation: none; } }
+:host-context([data-theme='norton']) .system-update-overlay { background: #000080; }
+:host-context([data-theme='norton']) :is(.terminal-icon, button) { border-radius: 0; box-shadow: none; }

@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { CommanderKeyboardService } from '../../../core/keyboard/commander-keyboard.service';
-import { SourceDto } from '../../../core/api/api.models';
+import { SourceDto, SystemUpdateStatusDto } from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
 import { PanelState } from '../../../core/state/commander.models';
 import { SystemMetricsStore } from '../../../core/state/system-metrics-store';
@@ -19,6 +19,7 @@ import { AuthenticationStore } from '../../../core/auth/authentication-store';
 import { ProtectedStateResetService } from '../../../core/auth/protected-state-reset.service';
 import { FileOperationStore } from '../file-operations/file-operation.store';
 import { TrashStore } from '../trash/trash.store';
+import { SystemUpdateStore } from '../../../core/state/system-update.store';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -130,6 +131,17 @@ describe('CommanderShellComponent system metrics integration', () => {
     logout: vi.fn(() => Promise.resolve()),
     changePassword: vi.fn(() => Promise.resolve()),
   };
+  const systemUpdate = {
+    status: signal<SystemUpdateStatusDto | null>(null),
+    reconnecting: signal(false),
+    error: signal(null),
+    start: vi.fn(() => Promise.resolve()),
+    check: vi.fn(() => Promise.resolve()),
+    apply: vi.fn(() => Promise.resolve()),
+    dismissTerminal: vi.fn(),
+    reset: vi.fn(),
+    overlayVisible: signal(false),
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -153,6 +165,9 @@ describe('CommanderShellComponent system metrics integration', () => {
     pwa.updateReady.set(false);
     pwa.installing.set(false);
     pwa.error.set(null);
+    systemUpdate.status.set(null);
+    systemUpdate.reconnecting.set(false);
+    systemUpdate.overlayVisible.set(false);
     await TestBed.configureTestingModule({
       imports: [CommanderShellComponent],
       providers: [
@@ -166,6 +181,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: TrashStore, useValue: trash },
         { provide: PwaService, useValue: pwa },
         { provide: AuthenticationStore, useValue: authentication },
+        { provide: SystemUpdateStore, useValue: systemUpdate },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -177,7 +193,9 @@ describe('CommanderShellComponent system metrics integration', () => {
   it('places the widget last, opens details, and starts only one polling lifecycle', () => {
     const actions = fixture.nativeElement.querySelector('.top-actions');
     expect(actions.lastElementChild?.tagName).toBe('APP-SYSTEM-METRICS-WIDGET');
-    expect(actions.lastElementChild?.previousElementSibling?.tagName).toBe('APP-ACCOUNT-MENU');
+    expect(actions.lastElementChild?.previousElementSibling?.tagName).toBe(
+      'APP-SYSTEM-UPDATE-BUTTON',
+    );
     expect(metrics.start).toHaveBeenCalledOnce();
 
     (
@@ -189,6 +207,45 @@ describe('CommanderShellComponent system metrics integration', () => {
 
     expect(fixture.nativeElement.querySelector('[role="dialog"]')).not.toBeNull();
     expect(metrics.start).toHaveBeenCalledOnce();
+  });
+
+  it('places an enabled available-update control immediately before telemetry', () => {
+    systemUpdate.status.set(systemUpdateStatus({
+      phase: 'available',
+      canApply: true,
+      updateAvailable: true,
+      targetVersion: 'v1.4.0',
+    }));
+    fixture.detectChanges();
+    const actions = fixture.nativeElement.querySelector('.top-actions') as HTMLElement;
+    const update = actions.querySelector('app-system-update-button') as HTMLElement;
+    const metricsWidget = actions.querySelector('app-system-metrics-widget') as HTMLElement;
+
+    expect(update.nextElementSibling).toBe(metricsWidget);
+    expect(update.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'Update available: v1.4.0',
+    );
+    expect(systemUpdate.start).toHaveBeenCalledOnce();
+  });
+
+  it('opens immutable confirmation and delegates one confirmed Apply', () => {
+    systemUpdate.status.set(systemUpdateStatus({
+      phase: 'available',
+      canApply: true,
+      updateAvailable: true,
+      targetVersion: 'v1.4.0',
+    }));
+    fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector(
+      '[data-testid="system-update-trigger"]',
+    ) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const confirm = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Update ReachCommander'))!;
+    confirm.click();
+
+    expect(systemUpdate.apply).toHaveBeenCalledOnce();
   });
 
   it('places an accessible persistent-theme toggle before account and metrics controls', () => {
@@ -818,5 +875,26 @@ function closedMultiRenameState(): MultiRenameState {
 function closedArchiveExtractionState(): ArchiveExtractionState {
   return {
     phase: 'closed', context: null, preview: null, operation: null, error: null, requestToken: 0,
+  };
+}
+
+function systemUpdateStatus(
+  overrides: Partial<SystemUpdateStatusDto> = {},
+): SystemUpdateStatusDto {
+  return {
+    protocolVersion: 1,
+    supported: true,
+    channel: 'stable',
+    currentVersion: 'v1.3.0',
+    targetVersion: null,
+    phase: 'current',
+    updateAvailable: false,
+    canApply: false,
+    reasonCode: 'up_to_date',
+    detail: 'ReachCommander is up to date.',
+    operationId: null,
+    lastCheckedAt: '2026-08-25T10:00:00Z',
+    updatedAt: '2026-08-25T10:00:00Z',
+    ...overrides,
   };
 }

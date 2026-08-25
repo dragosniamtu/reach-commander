@@ -1,0 +1,38 @@
+<div class="update-backdrop">
+  <dialog
+    open
+    class="update-dialog"
+    aria-modal="true"
+    aria-labelledby="system-update-title"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+  >
+    <header>
+      <div>
+        <span class="eyebrow">Trusted system update</span>
+        <h2 id="system-update-title">Update ReachCommander?</h2>
+      </div>
+      <span class="channel">{{ status().channel }}</span>
+    </header>
+    <div class="dialog-body">
+      <div class="version-flow" aria-label="Version change">
+        <section><span>Installed</span><strong>{{ status().currentVersion }}</strong></section>
+        <i aria-hidden="true">→</i>
+        <section><span>Available</span><strong>{{ status().targetVersion }}</strong></section>
+      </div>
+      <p>
+        ReachCommander will restart its backend and web app. File operations must be idle, and this
+        screen will reconnect automatically after the health-checked update.
+      </p>
+      <p class="rollback">
+        If the candidate is unhealthy, the host updater restores the previous version automatically.
+      </p>
+    </div>
+    <footer>
+      <button type="button" (click)="close()">Cancel</button>
+      <button type="button" class="primary" [disabled]="!status().canApply" (click)="confirm()">
+        Update ReachCommander
+      </button>
+    </footer>
+  </dialog>
+</div>

@@ -1,0 +1,106 @@
+<div class="transfer-backdrop" data-testid="copy-move-dialog">
+  <dialog
+    open
+    class="copy-move-dialog"
+    aria-modal="true"
+    aria-labelledby="copy-move-title"
+    aria-describedby="copy-move-description"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+  >
+    @if (store.context(); as context) {
+      <header>
+        <div>
+          <span class="eyebrow">Controlled file operation</span>
+          <h2 id="copy-move-title">{{ operationLabel() }} selected items</h2>
+          <p id="copy-move-description">
+            {{ context.selectedNames.length }} {{ context.selectedNames.length === 1 ? 'item' : 'items' }}
+            · {{ context.knownTotalBytes === null ? 'size unknown' : (context.knownTotalBytes | fileSize) }}
+          </p>
+        </div>
+        <button type="button" aria-label="Close copy or move confirmation" [disabled]="store.busy()" (click)="cancel()">×</button>
+      </header>
+
+      <section class="route-summary" aria-label="Operation route">
+        <div><span>From</span><code>{{ context.sourceId }}</code></div>
+        <div><span>To</span><code>{{ context.destinationSourceId }}:{{ store.destination() }}</code></div>
+      </section>
+
+      <div class="dialog-body">
+        <section class="selection-summary" aria-label="Captured selection">
+          <h3>Captured selection</h3>
+          <ul>
+            @for (name of context.selectedNames; track $index) { <li><code>{{ name }}</code></li> }
+          </ul>
+        </section>
+
+        <label class="destination-field" for="operation-destination">
+          <span>Destination path</span>
+          <input
+            #destinationInput
+            id="operation-destination"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            [value]="store.destination()"
+            [disabled]="store.busy()"
+            (input)="destinationChanged($event)"
+          />
+        </label>
+
+        @if (store.busy()) {
+          <div class="preview-pending" role="status" aria-live="polite">Checking destination…</div>
+        }
+
+        @if (store.preview(); as preview) {
+          @if (preview.warnings.length > 0) {
+            <ul class="warnings" aria-label="Operation warnings">
+              @for (warning of preview.warnings; track warning) { <li>{{ warning }}</li> }
+            </ul>
+          }
+          @if (preview.conflicts.length > 0) {
+            <section class="conflicts" aria-labelledby="conflicts-title">
+              <div class="conflict-heading">
+                <div><h3 id="conflicts-title">Resolve name conflicts</h3><p>Choose an action for every existing destination.</p></div>
+                <label class="apply-remaining" for="apply-remaining">
+                  <input id="apply-remaining" type="checkbox" [disabled]="lastDecision() === null" (change)="applyRemainingChanged($event)" />
+                  Apply to remaining conflicts
+                </label>
+              </div>
+              <div class="conflict-list">
+                @for (conflict of preview.conflicts; track conflict.conflictId) {
+                  <label>
+                    <span>Conflict action for {{ basename(conflict.destinationLogicalPath) }}</span>
+                    <code>{{ conflict.destinationLogicalPath }}</code>
+                    <select
+                      [value]="store.conflictDecisions().get(conflict.conflictId) ?? ''"
+                      [disabled]="store.busy()"
+                      (change)="decisionChanged(conflict.conflictId, $event)"
+                    >
+                      <option value="">Choose an action</option>
+                      @if (conflict.allowedDecisions.includes('overwrite')) { <option value="overwrite">Overwrite</option> }
+                      @if (conflict.allowedDecisions.includes('skip')) { <option value="skip">Skip</option> }
+                      @if (conflict.allowedDecisions.includes('createUniqueName')) { <option value="createUniqueName">Create Unique Name</option> }
+                    </select>
+                  </label>
+                }
+              </div>
+            </section>
+          } @else {
+            <p class="ready" role="status">Destination is ready. No name conflicts were found.</p>
+          }
+        }
+
+        @if (store.error(); as error) { <p class="error" role="alert">{{ error }}</p> }
+      </div>
+
+      <footer>
+        <span aria-live="polite">{{ store.canSubmit() ? 'Ready to start' : 'Review the destination and conflicts' }}</span>
+        <div>
+          <button type="button" [disabled]="store.busy()" (click)="cancel()">Cancel</button>
+          <button type="button" class="primary" [disabled]="!store.canSubmit()" (click)="start()">Start</button>
+        </div>
+      </footer>
+    }
+  </dialog>
+</div>

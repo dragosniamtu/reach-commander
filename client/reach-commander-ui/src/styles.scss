@@ -166,7 +166,10 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
   .password-dialog,
   .rename-workspace,
   .upload-panel,
-  .extraction-dialog
+  .extraction-dialog,
+  .copy-move-dialog,
+  .progress-dialog,
+  .task-indicator
 ) {
   border-radius: 0 !important;
   box-shadow: none !important;
@@ -191,6 +194,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
   .rename-backdrop,
   .upload-backdrop,
   .extraction-backdrop,
+  .transfer-backdrop,
   .metrics-backdrop
 ) {
   background: rgb(0 0 64 / .92) !important;

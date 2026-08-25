@@ -1,0 +1,8 @@
+@if (task(); as task) {
+  <button type="button" class="task-indicator" [attr.aria-label]="accessibleLabel(task)" (click)="restore()">
+    <span class="task-icon" aria-hidden="true">⇄</span>
+    <span class="task-kind">{{ kindLabel(task.kind) }}</span>
+    <strong>{{ progressLabel(task) }}</strong>
+    @if (store.queuedCount() > 0) { <span class="queued">+{{ store.queuedCount() }} queued</span> }
+  </button>
+}

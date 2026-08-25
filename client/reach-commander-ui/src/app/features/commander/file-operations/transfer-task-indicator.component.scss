@@ -1,0 +1,8 @@
+:host { display: inline-flex; min-width: 0; }
+.task-indicator { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; max-width: 250px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-2); background: var(--surface-2); font: 600 9px/1 var(--font-ui); cursor: pointer; }
+.task-indicator:hover { color: var(--text-1); border-color: var(--accent); background: var(--accent-dim); }
+.task-icon { color: var(--accent-text); font-size: 13px; }
+.task-kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+strong { color: var(--accent-text); font: 700 9px/1 var(--font-mono); }
+.queued { color: var(--text-4); font: 8px/1 var(--font-mono); white-space: nowrap; }
+@media (max-width: 640px) { .task-kind, .queued { display: none; } .task-indicator { padding-inline: 7px; } }

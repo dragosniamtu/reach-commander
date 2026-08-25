@@ -1,0 +1,61 @@
+<div class="transfer-backdrop" data-testid="transfer-progress-dialog">
+  <dialog open class="progress-dialog" aria-modal="true" aria-labelledby="transfer-progress-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+    @if (store.activeTask(); as task) {
+      <header>
+        <div>
+          <span class="eyebrow">Background-capable task</span>
+          <h2 id="transfer-progress-title">{{ kindLabel(task.kind) }}</h2>
+          <p>{{ phaseLabel(task) }}</p>
+        </div>
+        <span class="phase-chip" [class.terminal]="terminal()">{{ task.phase }}</span>
+      </header>
+
+      <div class="dialog-body">
+        <section class="current-item">
+          <span>Current item</span>
+          <strong>{{ task.progress.currentLogicalName ?? (task.phase === 'queued' ? 'Waiting for an available worker…' : 'Preparing files…') }}</strong>
+        </section>
+
+        <section class="progress-block">
+          <div class="progress-heading">
+            <strong>{{ task.progress.completedItems }} of {{ task.progress.totalItems }} items</strong>
+            <strong>{{ task.progress.percentage === null ? 'Calculating…' : task.progress.percentage + '%' }}</strong>
+          </div>
+          @if (task.progress.percentage !== null && task.progress.totalBytes !== null) {
+            <progress max="100" [value]="task.progress.percentage" [attr.aria-label]="kindLabel(task.kind) + ' ' + task.progress.percentage + '%'"></progress>
+          } @else {
+            <div class="indeterminate" role="progressbar" [attr.aria-label]="kindLabel(task.kind) + ' progress is unknown'"></div>
+          }
+          <p>
+            {{ task.progress.completedBytes | fileSize }}
+            @if (task.progress.totalBytes !== null) { of {{ task.progress.totalBytes | fileSize }} }
+          </p>
+        </section>
+
+        <dl>
+          <div><dt>Speed</dt><dd>{{ task.progress.bytesPerSecond === null ? '—' : (task.progress.bytesPerSecond | fileSize) + '/s' }}</dd></div>
+          <div><dt>Elapsed</dt><dd>{{ task.progress.elapsed }}</dd></div>
+          <div><dt>Estimated remaining</dt><dd>{{ task.progress.estimatedRemaining ?? '—' }}</dd></div>
+          <div><dt>Queue</dt><dd>{{ task.queuePosition > 0 ? '#' + task.queuePosition : 'Running' }}</dd></div>
+        </dl>
+
+        @if (task.warnings.length > 0) {
+          <ul class="warnings">@for (warning of task.warnings; track warning) { <li>{{ warning }}</li> }</ul>
+        }
+        @if (terminal() && task.outcomes.length > 0) {
+          <section class="results"><h3>Result details</h3><p>{{ task.outcomes.length }} item outcomes are available.</p></section>
+        }
+      </div>
+
+      <footer>
+        <span class="sr-only" aria-live="polite">{{ announcement() }}</span>
+        <span>{{ terminal() ? 'Review the completed task before closing.' : 'You can keep this task running in the top toolbar.' }}</span>
+        <div>
+          @if (!terminal()) { <button type="button" (click)="background()">Background</button> }
+          @if (cancellable()) { <button type="button" class="danger" (click)="cancel()">Cancel {{ kindLabel(task.kind).toLowerCase() }}</button> }
+          @if (terminal()) { <button type="button" class="primary" (click)="close()">Close</button> }
+        </div>
+      </footer>
+    }
+  </dialog>
+</div>

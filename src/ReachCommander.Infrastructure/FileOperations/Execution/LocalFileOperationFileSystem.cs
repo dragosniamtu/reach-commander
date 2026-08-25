@@ -55,13 +55,20 @@ internal sealed class LocalFileOperationFileSystem : IFileOperationFileSystem
 
     public MoveAttempt TryMove(string sourcePhysicalPath, string destinationPhysicalPath)
     {
-        if (Directory.Exists(sourcePhysicalPath))
+        try
         {
-            Directory.Move(sourcePhysicalPath, destinationPhysicalPath);
+            if (Directory.Exists(sourcePhysicalPath))
+            {
+                Directory.Move(sourcePhysicalPath, destinationPhysicalPath);
+            }
+            else
+            {
+                File.Move(sourcePhysicalPath, destinationPhysicalPath, overwrite: false);
+            }
         }
-        else
+        catch (IOException exception) when (NativeMoveErrorClassifier.IsCrossDevice(exception))
         {
-            File.Move(sourcePhysicalPath, destinationPhysicalPath, overwrite: false);
+            return MoveAttempt.CrossDevice;
         }
 
         return MoveAttempt.Moved;
@@ -95,4 +102,7 @@ internal sealed class LocalFileOperationFileSystem : IFileOperationFileSystem
             return null;
         }
     }
+
+    public FileAttributes GetAttributes(string physicalPath) =>
+        File.GetAttributes(physicalPath);
 }

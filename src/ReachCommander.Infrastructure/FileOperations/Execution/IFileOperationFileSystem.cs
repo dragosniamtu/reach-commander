@@ -29,4 +29,6 @@ internal interface IFileOperationFileSystem
     void ApplyBasicMetadata(string sourcePhysicalPath, string destinationPhysicalPath);
 
     long? GetAvailableBytes(string physicalDirectory);
+
+    FileAttributes GetAttributes(string physicalPath);
 }

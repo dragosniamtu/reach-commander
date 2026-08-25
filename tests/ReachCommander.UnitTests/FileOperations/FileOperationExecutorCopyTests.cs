@@ -214,5 +214,6 @@ public sealed class FileOperationExecutorCopyTests : IDisposable
         public void DeleteDirectory(string physicalPath, bool recursive) => inner.DeleteDirectory(physicalPath, recursive);
         public void ApplyBasicMetadata(string source, string destination) => inner.ApplyBasicMetadata(source, destination);
         public long? GetAvailableBytes(string physicalDirectory) => inner.GetAvailableBytes(physicalDirectory);
+        public FileAttributes GetAttributes(string physicalPath) => inner.GetAttributes(physicalPath);
     }
 }

@@ -19,9 +19,9 @@ internal sealed class FileOperationExecutor(
         PersistedFileOperationDocument claimed,
         CancellationToken cancellationToken)
     {
-        if (claimed.Plan.Kind != FileOperationKind.Copy)
+        if (claimed.Plan.Kind is not (FileOperationKind.Copy or FileOperationKind.Move))
         {
-            throw new InvalidOperationException("The Copy executor received an unsupported operation kind.");
+            throw new InvalidOperationException("The transfer executor received an unsupported operation kind.");
         }
 
         try
@@ -30,6 +30,7 @@ internal sealed class FileOperationExecutor(
                 claimed.Plan.LockTargets,
                 cancellationToken);
             await RevalidateAsync(claimed, cancellationToken);
+            await ThrowIfCancellationRequestedAsync(claimed.OperationId, cancellationToken);
             var running = await repository.UpdateAsync(
                 claimed.OperationId,
                 document => document with
@@ -37,7 +38,11 @@ internal sealed class FileOperationExecutor(
                     Status = document.Status with { Phase = FileOperationPhase.Running },
                 },
                 cancellationToken);
-            return await ExecuteCopyAsync(running, cancellationToken);
+            return await ExecuteTransferAsync(running, cancellationToken);
+        }
+        catch (FileOperationCancelledException)
+        {
+            return await MarkCancelledAsync(claimed.OperationId, CancellationToken.None);
         }
         catch (FileOperationException exception)
         {
@@ -53,7 +58,7 @@ internal sealed class FileOperationExecutor(
         }
     }
 
-    private async Task<FileOperationStatus> ExecuteCopyAsync(
+    private async Task<FileOperationStatus> ExecuteTransferAsync(
         PersistedFileOperationDocument operation,
         CancellationToken cancellationToken)
     {
@@ -69,18 +74,28 @@ internal sealed class FileOperationExecutor(
         var outcomes = new List<FileOperationItemOutcome>();
         var completedItems = 0;
         long completedBytes = 0;
+        var sourceDirectoriesToRemove = new List<DirectoryMoveCleanup>();
 
         foreach (var entry in plan.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            await ThrowIfCancellationRequestedAsync(operation.OperationId, cancellationToken);
             var rule = FindRule(rules, entry.SourceLogicalPath);
-            if (rule?.Skip == true)
+            if (rule?.NoOperationResult is not null)
             {
+                if (rule.NoOperationResult == FileOperationItemResult.Completed &&
+                    entry.Fingerprint.Length is not null)
+                {
+                    completedBytes = checked(completedBytes + entry.Fingerprint.Length.Value);
+                }
+
                 outcomes.Add(Outcome(
                     plan,
                     entry,
-                    entry.DestinationLogicalPath,
-                    FileOperationItemResult.Skipped,
+                    rule.DestinationPrefix is null
+                        ? entry.DestinationLogicalPath
+                        : Remap(entry.SourceLogicalPath, rule.SourcePrefix, rule.DestinationPrefix),
+                    rule.NoOperationResult.Value,
                     null,
                     null));
                 completedItems++;
@@ -103,7 +118,10 @@ internal sealed class FileOperationExecutor(
             {
                 if (entry.Fingerprint.Type == FileEntryType.Directory)
                 {
-                    rules.Add(new(entry.SourceLogicalPath, null, Skip: true));
+                    rules.Add(new(
+                        entry.SourceLogicalPath,
+                        null,
+                        FileOperationItemResult.Skipped));
                 }
 
                 outcomes.Add(Outcome(
@@ -130,7 +148,7 @@ internal sealed class FileOperationExecutor(
                     cancellationToken);
                 if (entry.Fingerprint.Type == FileEntryType.Directory)
                 {
-                    rules.Add(new(entry.SourceLogicalPath, destinationLogicalPath, Skip: false));
+                    rules.Add(new(entry.SourceLogicalPath, destinationLogicalPath, null));
                 }
             }
 
@@ -138,13 +156,61 @@ internal sealed class FileOperationExecutor(
             {
                 if (entry.Fingerprint.Type == FileEntryType.Directory)
                 {
-                    await CopyDirectoryAsync(
+                    if (plan.Kind == FileOperationKind.Move)
+                    {
+                        var movedAtomically = await MoveDirectoryAsync(
+                            operation.OperationId,
+                            plan.SourceId!,
+                            plan.DestinationSourceId!,
+                            entry,
+                            destinationLogicalPath,
+                            decision,
+                            cancellationToken);
+                        if (movedAtomically)
+                        {
+                            rules.Add(new(
+                                entry.SourceLogicalPath,
+                                destinationLogicalPath,
+                                FileOperationItemResult.Completed));
+                        }
+                        else
+                        {
+                            sourceDirectoriesToRemove.Add(new(entry, destinationLogicalPath));
+                        }
+                    }
+                    else
+                    {
+                        await CopyDirectoryAsync(
+                            operation.OperationId,
+                            plan.DestinationSourceId!,
+                            entry,
+                            destinationLogicalPath,
+                            decision,
+                            cancellationToken);
+                    }
+                }
+                else if (plan.Kind == FileOperationKind.Move)
+                {
+                    var move = await MoveFileAsync(
                         operation.OperationId,
+                        plan.SourceId!,
                         plan.DestinationSourceId!,
                         entry,
                         destinationLogicalPath,
                         decision,
+                        completedItems,
+                        completedBytes,
+                        tracker,
+                        outcomes,
                         cancellationToken);
+                    completedBytes = checked(completedBytes + move.ProcessedBytes);
+                    outcomes.Add(Outcome(
+                        plan,
+                        entry,
+                        destinationLogicalPath,
+                        move.Result,
+                        move.ErrorCode,
+                        move.Detail));
                 }
                 else
                 {
@@ -163,13 +229,17 @@ internal sealed class FileOperationExecutor(
                     completedBytes = checked(completedBytes + copiedBytes);
                 }
 
-                outcomes.Add(Outcome(
-                    plan,
-                    entry,
-                    destinationLogicalPath,
-                    FileOperationItemResult.Completed,
-                    null,
-                    null));
+                if (entry.Fingerprint.Type == FileEntryType.Directory ||
+                    plan.Kind == FileOperationKind.Copy)
+                {
+                    outcomes.Add(Outcome(
+                        plan,
+                        entry,
+                        destinationLogicalPath,
+                        FileOperationItemResult.Completed,
+                        null,
+                        null));
+                }
             }
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException)
@@ -177,7 +247,10 @@ internal sealed class FileOperationExecutor(
                 completedBytes = Math.Max(completedBytes, tracker.CompletedBytes);
                 if (entry.Fingerprint.Type == FileEntryType.Directory)
                 {
-                    rules.Add(new(entry.SourceLogicalPath, null, Skip: true));
+                    rules.Add(new(
+                        entry.SourceLogicalPath,
+                        null,
+                        FileOperationItemResult.Skipped));
                 }
 
                 outcomes.Add(Outcome(
@@ -197,7 +270,18 @@ internal sealed class FileOperationExecutor(
                 cancellationToken);
         }
 
-        var phase = outcomes.Any(outcome => outcome.Result == FileOperationItemResult.Failed)
+        if (plan.Kind == FileOperationKind.Move)
+        {
+            await RemoveMovedSourceDirectoriesAsync(
+                plan,
+                sourceDirectoriesToRemove,
+                outcomes,
+                cancellationToken);
+        }
+
+        var phase = outcomes.Any(outcome => outcome.Result is
+                FileOperationItemResult.Failed or
+                FileOperationItemResult.CopiedButNotRemoved)
             ? FileOperationPhase.CompletedWithErrors
             : FileOperationPhase.Completed;
         var completed = await repository.UpdateAsync(
@@ -272,6 +356,266 @@ internal sealed class FileOperationExecutor(
         }
     }
 
+    private async Task<bool> MoveDirectoryAsync(
+        Guid operationId,
+        string sourceId,
+        string destinationSourceId,
+        PlannedFileOperationEntry entry,
+        string destinationLogicalPath,
+        FileOperationConflictDecision? decision,
+        CancellationToken cancellationToken)
+    {
+        var existing = await inspector.TryGetAsync(
+            destinationSourceId,
+            destinationLogicalPath,
+            cancellationToken);
+        if (existing?.Type == FileEntryType.Directory)
+        {
+            await CopyDirectoryAsync(
+                operationId,
+                destinationSourceId,
+                entry,
+                destinationLogicalPath,
+                decision,
+                cancellationToken);
+            return false;
+        }
+
+        QuarantinedEntry? quarantine = null;
+        var destination = await ResolveDestinationAsync(
+            destinationSourceId,
+            destinationLogicalPath,
+            cancellationToken);
+        if (existing is not null)
+        {
+            if (decision != FileOperationConflictDecision.Overwrite)
+            {
+                throw new IOException("A directory destination conflict was not approved.");
+            }
+
+            quarantine = await QuarantineAsync(
+                operationId,
+                destinationSourceId,
+                destinationLogicalPath,
+                existing.Type,
+                cancellationToken);
+        }
+
+        var source = await pathSecurity.ResolveAsync(
+            sourceId,
+            entry.SourceLogicalPath,
+            cancellationToken);
+        try
+        {
+            var attempt = fileSystem.TryMove(source.PhysicalPath, destination.PhysicalPath);
+            if (attempt == MoveAttempt.Moved)
+            {
+                if (quarantine is not null)
+                {
+                    DeleteOwned(quarantine.PhysicalPath, quarantine.Type);
+                    await RemoveJournalAsync(operationId, quarantine.OwnedName, cancellationToken);
+                }
+
+                return true;
+            }
+
+            if (quarantine is not null)
+            {
+                RestoreQuarantine(quarantine, destination.PhysicalPath);
+                await RemoveJournalAsync(operationId, quarantine.OwnedName, cancellationToken);
+                quarantine = null;
+            }
+
+            await CopyDirectoryAsync(
+                operationId,
+                destinationSourceId,
+                entry,
+                destinationLogicalPath,
+                decision,
+                cancellationToken);
+            return false;
+        }
+        catch
+        {
+            if (quarantine is not null && !fileSystem.Exists(destination.PhysicalPath))
+            {
+                RestoreQuarantine(quarantine, destination.PhysicalPath);
+                await RemoveJournalAsync(operationId, quarantine.OwnedName, CancellationToken.None);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<MoveFileResult> MoveFileAsync(
+        Guid operationId,
+        string sourceId,
+        string destinationSourceId,
+        PlannedFileOperationEntry entry,
+        string destinationLogicalPath,
+        FileOperationConflictDecision? decision,
+        int completedItems,
+        long completedBytesBeforeFile,
+        FileOperationProgressTracker tracker,
+        IReadOnlyList<FileOperationItemOutcome> outcomes,
+        CancellationToken cancellationToken)
+    {
+        var source = await pathSecurity.ResolveAsync(
+            sourceId,
+            entry.SourceLogicalPath,
+            cancellationToken);
+        var destination = await ResolveDestinationAsync(
+            destinationSourceId,
+            destinationLogicalPath,
+            cancellationToken);
+        var existing = await inspector.TryGetAsync(
+            destinationSourceId,
+            destinationLogicalPath,
+            cancellationToken);
+        QuarantinedEntry? quarantine = null;
+        if (existing is not null)
+        {
+            if (decision != FileOperationConflictDecision.Overwrite)
+            {
+                throw new IOException("A file destination conflict was not approved.");
+            }
+
+            quarantine = await QuarantineAsync(
+                operationId,
+                destinationSourceId,
+                destinationLogicalPath,
+                existing.Type,
+                cancellationToken);
+        }
+
+        try
+        {
+            var attempt = fileSystem.TryMove(source.PhysicalPath, destination.PhysicalPath);
+            if (attempt == MoveAttempt.Moved)
+            {
+                if (quarantine is not null)
+                {
+                    DeleteOwned(quarantine.PhysicalPath, quarantine.Type);
+                    await RemoveJournalAsync(operationId, quarantine.OwnedName, cancellationToken);
+                }
+
+                return new(
+                    entry.Fingerprint.Length ?? 0,
+                    FileOperationItemResult.Completed,
+                    null,
+                    null);
+            }
+
+            var copiedBytes = await CopyFileAsync(
+                operationId,
+                sourceId,
+                destinationSourceId,
+                entry,
+                destinationLogicalPath,
+                decision: null,
+                completedItems,
+                completedBytesBeforeFile,
+                tracker,
+                outcomes,
+                cancellationToken);
+            if (quarantine is not null)
+            {
+                DeleteOwned(quarantine.PhysicalPath, quarantine.Type);
+                await RemoveJournalAsync(operationId, quarantine.OwnedName, cancellationToken);
+                quarantine = null;
+            }
+
+            var currentSource = await inspector.TryGetAsync(
+                sourceId,
+                entry.SourceLogicalPath,
+                cancellationToken);
+            if (currentSource?.Fingerprint != entry.Fingerprint || currentSource.IsSymbolicLink)
+            {
+                return CopiedButNotRemoved(copiedBytes);
+            }
+
+            try
+            {
+                fileSystem.DeleteFile(source.PhysicalPath);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                return CopiedButNotRemoved(copiedBytes);
+            }
+
+            return new(copiedBytes, FileOperationItemResult.Completed, null, null);
+        }
+        catch
+        {
+            if (quarantine is not null && !fileSystem.Exists(destination.PhysicalPath))
+            {
+                RestoreQuarantine(quarantine, destination.PhysicalPath);
+                await RemoveJournalAsync(operationId, quarantine.OwnedName, CancellationToken.None);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task RemoveMovedSourceDirectoriesAsync(
+        FileOperationPlan plan,
+        IReadOnlyList<DirectoryMoveCleanup> directories,
+        List<FileOperationItemOutcome> outcomes,
+        CancellationToken cancellationToken)
+    {
+        foreach (var cleanup in directories.OrderByDescending(
+                     item => item.Entry.SourceLogicalPath.Count(character => character == '/')))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = await pathSecurity.ResolveAsync(
+                plan.SourceId!,
+                cleanup.Entry.SourceLogicalPath,
+                cancellationToken);
+            if (!fileSystem.Exists(source.PhysicalPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                fileSystem.DeleteDirectory(source.PhysicalPath, recursive: false);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                var index = outcomes.FindIndex(outcome =>
+                    outcome.SourceLogicalPath.Equals(
+                        cleanup.Entry.SourceLogicalPath,
+                        StringComparison.OrdinalIgnoreCase));
+                if (index >= 0)
+                {
+                    outcomes[index] = Outcome(
+                        plan,
+                        cleanup.Entry,
+                        cleanup.DestinationLogicalPath,
+                        FileOperationItemResult.CopiedButNotRemoved,
+                        "move_source_not_removed",
+                        "The item was copied but the source could not be removed.");
+                }
+            }
+        }
+    }
+
+    private static MoveFileResult CopiedButNotRemoved(long copiedBytes) => new(
+        copiedBytes,
+        FileOperationItemResult.CopiedButNotRemoved,
+        "move_source_not_removed",
+        "The item was copied but the source could not be removed.");
+
+    private void RestoreQuarantine(QuarantinedEntry quarantine, string destinationPhysicalPath)
+    {
+        if (fileSystem.TryMove(quarantine.PhysicalPath, destinationPhysicalPath) != MoveAttempt.Moved)
+        {
+            throw new IOException("A same-directory quarantine restore crossed filesystems.");
+        }
+    }
+
     private async Task<long> CopyFileAsync(
         Guid operationId,
         string sourceId,
@@ -321,7 +665,7 @@ internal sealed class FileOperationExecutor(
                     var latest = await repository.GetDocumentAsync(operationId, token);
                     if (latest.CancellationRequested)
                     {
-                        throw new OperationCanceledException(token);
+                        throw new FileOperationCancelledException();
                     }
 
                     await SaveProgressAsync(
@@ -573,6 +917,36 @@ internal sealed class FileOperationExecutor(
         return failed.Status;
     }
 
+    private async Task<FileOperationStatus> MarkCancelledAsync(
+        Guid operationId,
+        CancellationToken cancellationToken)
+    {
+        var cancelled = await repository.UpdateAsync(
+            operationId,
+            document => document with
+            {
+                Status = document.Status with
+                {
+                    Phase = FileOperationPhase.Cancelled,
+                },
+                Journal = null,
+            },
+            cancellationToken);
+        return cancelled.Status;
+    }
+
+    private async Task ThrowIfCancellationRequestedAsync(
+        Guid operationId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var latest = await repository.GetDocumentAsync(operationId, cancellationToken);
+        if (latest.CancellationRequested)
+        {
+            throw new FileOperationCancelledException();
+        }
+    }
+
     private void DeleteOwned(string physicalPath, FileEntryType type)
     {
         if (type == FileEntryType.Directory)
@@ -629,10 +1003,20 @@ internal sealed class FileOperationExecutor(
     private sealed record DestinationRule(
         string SourcePrefix,
         string? DestinationPrefix,
-        bool Skip);
+        FileOperationItemResult? NoOperationResult);
 
     private sealed record QuarantinedEntry(
         string OwnedName,
         string PhysicalPath,
         FileEntryType Type);
+
+    private sealed record MoveFileResult(
+        long ProcessedBytes,
+        FileOperationItemResult Result,
+        string? ErrorCode,
+        string? Detail);
+
+    private sealed record DirectoryMoveCleanup(
+        PlannedFileOperationEntry Entry,
+        string DestinationLogicalPath);
 }

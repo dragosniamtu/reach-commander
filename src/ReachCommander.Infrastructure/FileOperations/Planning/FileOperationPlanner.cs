@@ -189,6 +189,7 @@ internal sealed class FileOperationPlanner(
             destinationPath,
             topLevelSourcePath,
             source.Fingerprint,
+            existing?.Fingerprint,
             conflictId,
             isTopLevel));
         if (source.Type == FileEntryType.File)

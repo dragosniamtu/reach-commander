@@ -67,7 +67,7 @@ public sealed class JsonFileOperationPlanStoreTests : IDisposable
             ["/photo.jpg"],
             "downloads",
             "/",
-            [new("/photo.jpg", "/photo.jpg", "/photo.jpg", fingerprint, null, true)],
+            [new("/photo.jpg", "/photo.jpg", "/photo.jpg", fingerprint, null, null, true)],
             [],
             null,
             [],

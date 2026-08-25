@@ -8,6 +8,7 @@ internal sealed record PlannedFileOperationEntry(
     string DestinationLogicalPath,
     string TopLevelSourceLogicalPath,
     FileOperationEntryFingerprint Fingerprint,
+    FileOperationEntryFingerprint? DestinationFingerprint,
     Guid? ConflictId,
     bool IsTopLevel);
 

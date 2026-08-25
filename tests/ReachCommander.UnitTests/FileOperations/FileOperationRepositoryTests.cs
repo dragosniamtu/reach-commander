@@ -166,7 +166,7 @@ public sealed class FileOperationRepositoryTests : IDisposable
             [sourcePath],
             "downloads",
             "/",
-            [new(sourcePath, sourcePath, sourcePath, fingerprint, null, true)],
+            [new(sourcePath, sourcePath, sourcePath, fingerprint, null, null, true)],
             [],
             null,
             [],

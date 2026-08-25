@@ -199,6 +199,33 @@ test('security policy describes account persistence and secure deployment', asyn
   }
 });
 
+test('operator docs define the explicit trusted LAN HTTP boundary', async () => {
+  const paths = [
+    'README.md',
+    'docs/INSTALL.md',
+    'docs/deployment/ubuntu.md',
+    'deploy/README.md',
+    'SECURITY.md',
+  ];
+  const content = (await Promise.all(paths.map(readRequired))).join('\n');
+  for (const required of [
+    'Direct HTTP on trusted LAN',
+    'http://<server-lan-ip>:<port>',
+    '8092',
+    '8080',
+    'all host interfaces',
+    'DHCP',
+    'Authentication__AllowInsecureHttp',
+    'authentication remains enabled',
+    'antiforgery remains enabled',
+    'rate limiting remains enabled',
+    'router forwarding',
+    'PWA installation requires HTTPS',
+  ]) {
+    assert.ok(content.includes(required), `trusted LAN docs are missing: ${required}`);
+  }
+});
+
 test('published operator material never pipes downloaded code into a shell', async () => {
   const paths = [
     'README.md',

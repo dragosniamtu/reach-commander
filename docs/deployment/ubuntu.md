@@ -4,7 +4,7 @@ This is the production installation path for an Ubuntu host. It installs a small
 
 A root-owned coordination lock remains at `/opt/.reachcommander.lock`. It lives outside the replaceable deployment tree so install, update, and uninstall operations cannot accidentally switch lock inodes while another command is active.
 
-> **Security boundary:** ReachCommander provides built-in single-administrator authentication, but it does not terminate TLS. Keep its published port on `127.0.0.1` and put an HTTPS reverse proxy in front of it. Optional proxy authentication adds defense in depth; do not expose the application port directly to the internet.
+> **Security boundary:** ReachCommander provides built-in single-administrator authentication, but it does not terminate TLS. The recommended default publishes only to `127.0.0.1` for an HTTPS reverse proxy. **Direct HTTP on trusted LAN** is an explicit unencrypted exception for a private network you control; never expose either application endpoint directly to the internet.
 
 ## Prerequisites
 
@@ -90,11 +90,12 @@ The version-pinned flow is recommended for a server because it is repeatable and
 
 The interactive installer asks for:
 
-- the host bind address and port; accept `127.0.0.1:8092` when using a reverse proxy;
+- one of two network modes: **Secure HTTPS reverse proxy (recommended)** on `127.0.0.1`, or **Direct HTTP on trusted LAN** on all host interfaces;
+- the host port, which defaults to `8092` in either mode;
 - a non-root numeric UID and GID for the container process;
 - one or more existing host source directories, their labels and identifiers, and whether each is read-only or read-write;
 - the default source for each pane;
-- the exact `I have HTTPS` acknowledgement before installation.
+- the exact mode-specific acknowledgement: `I have HTTPS` or `I understand LAN HTTP is unencrypted`.
 
 The first installation always resolves `stable` and persists its exact image digest. After installation, `reachcommander update` can follow `stable`, switch to `edge`, or select an exact `vX.Y.Z` release.
 
@@ -103,6 +104,16 @@ Start with read-only sources. Enable read-write only for a narrow directory that
 The configured UID/GID must already be able to access each source. Never recursively change source ownership with `chown` or permissions with `chmod` just to make the container work. Inspect the path one component at a time with `namei -l /your/source`, then grant only the minimum required access to the exact directory using deliberate ownership, group membership, or an ACL. The installer never creates, mounts, changes ownership of, or deletes source data. The authenticated application can mutate sources explicitly configured read-write through its reviewed file operations.
 
 Read the [file operations and managed Trash runbook](../operations.md) before enabling writes. `/opt/reachcommander/data` holds durable queue metadata, while recoverable deleted payloads live in source-local `.reachcommander-trash`. Back up both separately when Trash recovery matters.
+
+### Direct HTTP on trusted LAN
+
+Choose **Direct HTTP on trusted LAN** only for a network you control. Docker publishes host port `8092` on all host interfaces and forwards it to ReachCommander's container port `8080`. Open `http://<server-lan-ip>:<port>` from another device; the default is `http://<server-lan-ip>:8092`.
+
+This Radarr-style wildcard publication does not save one DHCP address, so a later DHCP change does not require ReachCommander reconfiguration. The installer detects RFC1918 addresses only to print convenient URLs. It does not configure Ubuntu firewall rules, router forwarding, DNS, certificates, or a private-interface boundary.
+
+`Authentication__AllowInsecureHttp=true` changes cookie transport only. Administrator authentication remains enabled, authorization remains enabled, antiforgery remains enabled, and rate limiting remains enabled in Production. HTTP does not encrypt credentials, cookies, filenames, or file contents. Never forward this port from a router or expose it through a public host interface; use the default HTTPS reverse-proxy mode or a trusted VPN instead.
+
+Ordinary browser access works over LAN HTTP. PWA installation requires HTTPS because production service workers require a secure context. Rerun the checksum-verified installer to change access mode or port; reconfiguration preserves the administrator account, Data Protection keys, sources, durable operations, and application state.
 
 On success the installer creates:
 
@@ -129,9 +140,9 @@ Reconfiguration is journaled before any active file changes. If a signal, proces
 
 ReachCommander protects the Angular UI and every file API with its built-in single-administrator authentication. Use this first-run sequence:
 
-1. Complete installation with the upstream bound to `127.0.0.1`, then configure the HTTPS reverse proxy before opening ReachCommander from another machine.
+1. Complete installation in the recommended loopback mode and configure the HTTPS reverse proxy, or explicitly select trusted-LAN HTTP and accept its unencrypted-transport warning.
 2. Read the active random first-run setup code with `sudo reachcommander logs`. A restart invalidates the previous code and emits a new one while setup is incomplete.
-3. Open the HTTPS URL and enter the setup code, administrator username, and password. The setup code is consumed when the account is created.
+3. Open the HTTPS URL, or the printed trusted-LAN HTTP URL when that mode was explicitly selected, and enter the setup code, administrator username, and password. The setup code is consumed when the account is created.
 4. On later visits, use the login screen. The non-persistent HttpOnly cookie has a 12-hour sliding session lifetime and no Remember Me option.
 5. Use the account menu for password change or logout. Changing the password invalidates every older session.
 

@@ -980,7 +980,9 @@ doctor_authentication_data() {
 }
 
 command_doctor() {
+  local access_mode=''
   local bind_address=''
+  local allow_insecure_http=''
   local port=''
   local runtime_uid=''
   local runtime_gid=''
@@ -1028,14 +1030,22 @@ command_doctor() {
     doctor_fail 'Compose configuration is invalid'
   fi
 
-  if bind_address="$(read_env_value REACHCOMMANDER_BIND_ADDRESS)"; then
-    if [[ "$bind_address" == '127.0.0.1' ]]; then
-      doctor_pass 'Bind address is loopback-only'
-    else
-      doctor_warn 'Bind address is not loopback'
-    fi
+  if access_mode="$(read_env_value REACHCOMMANDER_ACCESS_MODE)" &&
+    bind_address="$(read_env_value REACHCOMMANDER_BIND_ADDRESS)" &&
+    allow_insecure_http="$(read_env_value REACHCOMMANDER_ALLOW_INSECURE_HTTP)"; then
+    case "$access_mode:$bind_address:$allow_insecure_http" in
+      'secure-https:127.0.0.1:false')
+        doctor_pass 'Secure HTTPS upstream is loopback-only'
+        ;;
+      'trusted-lan-http:0.0.0.0:true')
+        doctor_warn 'Trusted LAN HTTP listens on every host interface'
+        ;;
+      *)
+        doctor_fail 'Network access policy is inconsistent'
+        ;;
+    esac
   else
-    doctor_fail 'Bind address is missing or duplicated'
+    doctor_fail 'Network access policy is missing or duplicated'
   fi
 
   if port="$(read_env_value REACHCOMMANDER_PORT)" && rc_validate_port "$port" >/dev/null 2>&1; then

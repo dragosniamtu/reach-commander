@@ -8,7 +8,9 @@ Include the affected commit, deployment mode, reproduction steps, impact, and wh
 
 ## Deployment boundary
 
-ReachCommander has built-in single-administrator authentication and an authenticated-by-default API, but it does not terminate TLS. Bind the application to `127.0.0.1` and publish it through an HTTPS reverse proxy. Optional proxy authentication is useful defense in depth, but it does not replace ReachCommander's own login or HTTPS.
+ReachCommander has built-in single-administrator authentication and an authenticated-by-default API, but it does not terminate TLS. The recommended Ubuntu default binds to `127.0.0.1` for an HTTPS reverse proxy. Optional proxy authentication is useful defense in depth, but it does not replace ReachCommander's own login or HTTPS.
+
+The explicit **Direct HTTP on trusted LAN** mode publishes host port `8092` on all host interfaces and forwards it to container port `8080`. `Authentication__AllowInsecureHttp=true` relaxes only the Secure-cookie transport requirement: authentication remains enabled, authorization remains enabled, antiforgery remains enabled, and rate limiting remains enabled. HTTP still exposes credentials, cookies, filenames, and file contents to observers on the network. Never use router forwarding or a public interface for this mode. Its wildcard bind tolerates DHCP changes, but PWA installation requires HTTPS.
 
 The administrator password is never stored in the image, Compose model, browser storage, or configuration. The persisted record at `/opt/reachcommander/data/auth/account.json` contains a salted password hash and security stamp; `/opt/reachcommander/data/keys` contains the ASP.NET Core Data Protection key ring used for cookies. Both paths contain security-sensitive state. Back them up together, protect backup files as credentials, and use the Ubuntu guide's verified backup procedure.
 

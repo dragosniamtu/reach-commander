@@ -7,6 +7,7 @@ The Ubuntu bundle is versioned, packaged, and checksum verified. The macOS boots
 The published Ubuntu installer archive contains:
 
 - `install.sh`, the interactive root entry point;
+- `lan_address.py`, the local RFC1918 display-address helper;
 - `reachcommander`, the fixed-path lifecycle command;
 - `render_config.py`, the structured deployment renderer;
 - `compose.release.yaml`, the hardened published-image template;
@@ -16,6 +17,8 @@ The published Ubuntu installer archive contains:
 - `VERSION` and `LICENSE`.
 
 The archive contains no credentials, source directories, generated authentication state, Compose files, or user configuration. `stable`, `edge`, and an exact `vX.Y.Z` are discovery channels; an installed deployment always persists the resolved immutable image digest.
+
+Ubuntu installations default to a loopback-only HTTPS reverse-proxy upstream. The explicit **Direct HTTP on trusted LAN** mode publishes host port `8092` on all host interfaces and forwards it to container port `8080`; open `http://<server-lan-ip>:<port>`. It keeps authentication protections enabled but provides no transport encryption. Do not add router forwarding or public exposure; DHCP address changes do not require reconfiguration, and PWA installation requires HTTPS.
 
 The installer creates a dedicated mode-`0700` `data/auth` account directory and `data/keys` Data Protection key ring outside the container image. Reconfiguration preserves those bytes. Uninstall can retain the inactive data tree in place or copy every validated authentication file to a verified mode-`0600` backup before removing it.
 

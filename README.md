@@ -105,7 +105,7 @@ tests/e2e                           deterministic Playwright acceptance flow
 
 For a production Ubuntu server, use the versioned release bundle and follow the [Ubuntu installation guide](docs/deployment/ubuntu.md). It covers checksum verification, the interactive installer, first-run setup, read-only/read-write source policy, digest-pinned updates with rollback, authentication-data backups, and HTTPS examples for Nginx, Caddy, and Traefik.
 
-ReachCommander has built-in single-administrator authentication, but no TLS listener. Keep the application port on loopback and expose it only through an HTTPS reverse proxy; proxy authentication is optional defense in depth. The repository clone and source-build workflow below remain the development path.
+ReachCommander has built-in single-administrator authentication, but no TLS listener. Ubuntu installations default to a loopback-only HTTPS reverse-proxy upstream. The explicit **Direct HTTP on trusted LAN** mode publishes host port `8092` on all host interfaces and forwards it to container port `8080`; open `http://<server-lan-ip>:<port>`. Authentication, authorization, antiforgery, and rate limiting remain enabled, but transport is unencrypted. Do not enable router forwarding or public exposure. DHCP changes need no reconfiguration; PWA installation requires HTTPS. The repository clone and source-build workflow below remain the development path.
 
 ## Install on macOS
 

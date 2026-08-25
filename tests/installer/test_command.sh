@@ -249,12 +249,24 @@ rm -f -- "$INSTALL_ROOT/state/install-transaction"
 pass "doctor detects an interrupted installer reconfiguration"
 
 cp -- "$INSTALL_ROOT/.env" "$TEST_ROOT/env.backup"
-sed 's/^REACHCOMMANDER_BIND_ADDRESS=.*/REACHCOMMANDER_BIND_ADDRESS=0.0.0.0/' "$TEST_ROOT/env.backup" >"$INSTALL_ROOT/.env"
+sed \
+  -e 's/^REACHCOMMANDER_ACCESS_MODE=.*/REACHCOMMANDER_ACCESS_MODE=trusted-lan-http/' \
+  -e 's/^REACHCOMMANDER_BIND_ADDRESS=.*/REACHCOMMANDER_BIND_ADDRESS=0.0.0.0/' \
+  -e 's/^REACHCOMMANDER_ALLOW_INSECURE_HTTP=.*/REACHCOMMANDER_ALLOW_INSECURE_HTTP=true/' \
+  "$TEST_ROOT/env.backup" >"$INSTALL_ROOT/.env"
 run_command doctor
-assert_equal "0" "$last_status" "doctor warning status"
-[[ "$last_output" == *'[WARN] Bind address is not loopback'* ]] || fail "doctor loopback warning missing"
+assert_equal "0" "$last_status" "doctor trusted LAN status"
+[[ "$last_output" == *'[WARN] Trusted LAN HTTP listens on every host interface'* ]] || fail "doctor trusted LAN warning missing"
+
+sed \
+  's/^REACHCOMMANDER_ALLOW_INSECURE_HTTP=.*/REACHCOMMANDER_ALLOW_INSECURE_HTTP=false/' \
+  "$INSTALL_ROOT/.env" >"$TEST_ROOT/env.inconsistent"
+cp -- "$TEST_ROOT/env.inconsistent" "$INSTALL_ROOT/.env"
+run_command doctor
+assert_equal "1" "$last_status" "doctor inconsistent access policy status"
+[[ "$last_output" == *'[FAIL] Network access policy is inconsistent'* ]] || fail "doctor inconsistent access policy failure missing"
 cp -- "$TEST_ROOT/env.backup" "$INSTALL_ROOT/.env"
-pass "doctor warns without failing for non-loopback exposure"
+pass "doctor validates secure and trusted LAN access policies"
 
 cp -- "$INSTALL_ROOT/state/current-image" "$TEST_ROOT/current-image.backup"
 printf 'ghcr.io/dragosniamtu/reach-commander@sha256:%s\n' "$(printf 'b%.0s' {1..64})" >"$INSTALL_ROOT/state/current-image"

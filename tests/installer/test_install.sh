@@ -14,11 +14,22 @@ fi
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 BUNDLE="$TEST_ROOT/bundle"
-mkdir -p "$BUNDLE/lib"
+mkdir -p "$BUNDLE/lib" "$BUNDLE/systemd"
 cp -- "$INSTALLER_SOURCE" "$BUNDLE/install.sh"
 cp -- "$REPOSITORY_ROOT/deploy/render_config.py" "$BUNDLE/render_config.py"
 cp -- "$REPOSITORY_ROOT/deploy/compose.release.yaml" "$BUNDLE/compose.release.yaml"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$BUNDLE/lib/common.sh"
+for updater_source in compose.updater.yaml updater_protocol.py updater_service.py; do
+  if [[ -f "$REPOSITORY_ROOT/deploy/$updater_source" ]]; then
+    cp -- "$REPOSITORY_ROOT/deploy/$updater_source" "$BUNDLE/$updater_source"
+  fi
+done
+if [[ -f "$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service" ]]; then
+  cp -- \
+    "$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service" \
+    "$BUNDLE/systemd/reachcommander-updater.service"
+fi
+printf 'v1.4.0\n' >"$BUNDLE/VERSION"
 printf '#!/usr/bin/env bash\nprintf "management placeholder\\n"\n' >"$BUNDLE/reachcommander"
 chmod +x "$BUNDLE/install.sh" "$BUNDLE/reachcommander"
 
@@ -35,11 +46,15 @@ export REACHCOMMANDER_TEST_INSTALL_ROOT="$TEST_ROOT/install root"
 export REACHCOMMANDER_TEST_COMMAND_PATH="$TEST_ROOT/bin/reachcommander"
 export REACHCOMMANDER_TEST_BACKUP_ROOT="$TEST_ROOT/external backups"
 export REACHCOMMANDER_TEST_LOCK_PATH="$TEST_ROOT/.reachcommander.lock"
+export REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH="$TEST_ROOT/systemd/reachcommander-updater.service"
+export REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY="$TEST_ROOT/run/reachcommander-updater"
+export REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH="$REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY/updater.sock"
 export SUDO_UID=1000
 export SUDO_GID=1000
 export FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
 export FAKE_FLOCK_LOG="$TEST_ROOT/flock.log"
 export FAKE_SYNC_LOG="$TEST_ROOT/sync.log"
+export FAKE_SYSTEMCTL_LOG="$TEST_ROOT/systemctl.log"
 FAKE_DOCKER_DIGESTS="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})"
 export FAKE_DOCKER_DIGESTS
 export FAKE_DOCKER_HEALTH=healthy
@@ -50,6 +65,11 @@ export FAKE_DOCKER_PULL_EXIT=0
 export FAKE_DOCKER_INSPECT_EXIT=0
 export FAKE_FLOCK_EXIT=0
 export FAKE_SYNC_EXIT=0
+export FAKE_SYSTEMCTL_START_EXIT=0
+export FAKE_SYSTEMCTL_RESTART_EXIT=0
+export FAKE_SYSTEMCTL_STOP_EXIT=0
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+export FAKE_DOCKER_REVISION_LABEL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 tests_run=0
 last_status=0
@@ -79,6 +99,14 @@ assert_equal() {
 run_installer() {
   local input="$1"
   local output="$2"
+  if [[
+    ! -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" &&
+    ! -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" &&
+    ! -e "$REACHCOMMANDER_TEST_COMMAND_PATH"
+  ]]; then
+    rm -f -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
+    rm -rf -- "$REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY"
+  fi
   set +e
   printf '%s\n' "$input" | bash "$BUNDLE/install.sh" >"$output" 2>&1
   last_status=$?
@@ -137,6 +165,13 @@ set -e
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "preflight failure wrote deployment"
 pass "missing prerequisite stops before deployment writes"
 
+printf 'v01.4.0\n' >"$BUNDLE/VERSION"
+run_installer '' "$TEST_ROOT/invalid-bundle-version.out"
+(( last_status != 0 )) || fail "invalid bundle VERSION must fail preflight"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "invalid bundle VERSION wrote deployment"
+printf 'v1.4.0\n' >"$BUNDLE/VERSION"
+pass "installer requires one stable semantic bundle VERSION"
+
 collision_input="$(printf '%s\n' \
   '' '' '' '' \
   'Media' "$SOURCE_ONE" '' 'RO' 'y' \
@@ -193,11 +228,13 @@ if (( last_status != 0 )); then
 fi
 assert_equal "0" "$last_status" "first installation status"
 for required_file in \
-  .env compose.yaml config/sources.json state/source-mounts.json \
+  .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
-  bin/render_config.py lib/common.sh; do
+  state/current-version state/previous-version \
+  bin/render_config.py bin/updater_service.py lib/common.sh lib/updater_protocol.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$required_file" ]] || fail "missing installed $required_file"
 done
+[[ -f "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "updater systemd unit missing"
 [[ -f "$REACHCOMMANDER_TEST_LOCK_PATH" ]] || fail "fixed external lock missing"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/command.lock" ]] || fail "deployment contains a replaceable lock inode"
 [[ -x "$REACHCOMMANDER_TEST_COMMAND_PATH" ]] || fail "management command was not installed"
@@ -216,7 +253,14 @@ grep -q 'read_only: true' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fa
 grep -q 'read_only: false' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RW mount missing"
 grep -A2 -F 'target: /data' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" |
   grep -q 'read_only: false' || fail "authentication data mount is not writable"
+grep -q '/run/reachcommander-updater' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.override.yaml" || fail "updater socket mount missing"
+! grep -q '/var/run/docker.sock' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.override.yaml" || fail "Docker socket mount must not be installed"
 assert_equal "stable" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel")" "saved channel"
+assert_equal "v1.4.0" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/current-version")" "saved version"
+[[ ! -s "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/previous-version" ]] || fail "initial previous version is not empty"
+systemctl_calls="$(tr '\0' '\n' <"$FAKE_SYSTEMCTL_LOG")"
+[[ "$systemctl_calls" == *'daemon-reload'* ]] || fail "systemd daemon reload missing"
+[[ "$systemctl_calls" == *'enable'* && "$systemctl_calls" == *'--now'* ]] || fail "updater service enable/start missing"
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "first source canary"
 assert_equal "keep two" "$(cat -- "$SOURCE_TWO/canary.txt")" "second source canary"
 pass "first install renders mixed sources and starts a digest-pinned service"
@@ -229,6 +273,9 @@ case "$(uname -s)" in
     assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config")" "config directory mode"
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json")" "source configuration mode"
     assert_equal "600" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env")" "environment mode"
+    assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/updater_service.py")" "updater service mode"
+    assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/updater_protocol.py")" "updater protocol mode"
+    assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")" "updater unit mode"
     for authentication_directory in data data/auth data/keys; do
       assert_equal \
         "700" \
@@ -292,6 +339,74 @@ pass "healthy reconfiguration replaces generated configuration"
 
 deployment_before="$(active_deployment_fingerprint)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+unit_before="$(sha256sum "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")"
+: >"$FAKE_SYSTEMCTL_LOG"
+export FAKE_SYSTEMCTL_START_EXIT=1
+run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-updater-start-failure.out"
+(( last_status != 0 )) || fail "updater service start failure must fail reconfiguration"
+assert_equal "$deployment_before" "$(active_deployment_fingerprint)" "updater-start-failure deployment rollback"
+assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" "updater-start-failure command rollback"
+assert_equal "$unit_before" "$(sha256sum "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")" "updater-start-failure unit rollback"
+systemctl_calls="$(tr '\0' '\n' <"$FAKE_SYSTEMCTL_LOG")"
+[[ "$systemctl_calls" == *'restart'* ]] || fail "previous updater service was not restarted after rollback"
+export FAKE_SYSTEMCTL_START_EXIT=0
+pass "failed updater service startup restores the previous deployment and unit"
+
+for legacy_file in \
+  compose.override.yaml \
+  state/current-version \
+  state/previous-version \
+  bin/updater_service.py \
+  lib/updater_protocol.py; do
+  rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/$legacy_file"
+done
+rm -f -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
+: >"$FAKE_SYSTEMCTL_LOG"
+run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-legacy-migration.out"
+if (( last_status != 0 )); then
+  cat -- "$TEST_ROOT/reconfigure-legacy-migration.out" >&2
+fi
+assert_equal "0" "$last_status" "legacy updater migration status"
+for migrated_file in \
+  compose.override.yaml \
+  state/current-version \
+  state/previous-version \
+  bin/updater_service.py \
+  lib/updater_protocol.py; do
+  [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$migrated_file" ]] || fail "legacy migration missing $migrated_file"
+done
+[[ -f "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "legacy migration missing systemd unit"
+assert_equal "v1.4.0" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/current-version")" "migrated current version"
+pass "legacy installation is migrated to updater support in one transaction"
+
+printf 'edge\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel"
+export FAKE_DOCKER_REVISION_LABEL=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-edge-preservation.out"
+assert_equal "0" "$last_status" "edge channel preservation status"
+assert_equal "edge" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel")" "preserved edge channel"
+assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/current-version")" "edge display version"
+
+printf 'v1.3.0-beta.1\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel"
+export FAKE_DOCKER_VERSION_LABEL=v1.3.0-beta.1
+run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-pin-preservation.out"
+assert_equal "0" "$last_status" "exact pin preservation status"
+assert_equal "v1.3.0-beta.1" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel")" "preserved exact pin"
+assert_equal "v1.3.0-beta.1" "$(cat -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/current-version")" "pinned display version"
+printf 'stable\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel"
+printf 'v1.4.0\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/current-version"
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+export FAKE_DOCKER_REVISION_LABEL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+pass "reconfiguration preserves edge and exact-version channels"
+
+printf '{"schemaVersion":1,"phase":"current"}\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json"
+journal_before="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json")"
+run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-journal-preservation.out"
+assert_equal "0" "$last_status" "journal preservation reconfiguration status"
+assert_equal "$journal_before" "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json")" "updater journal preservation"
+pass "reconfiguration preserves the host updater journal"
+
+deployment_before="$(active_deployment_fingerprint)"
+command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
 export FAKE_SYNC_FAIL_MATCH="$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.reconfigure-transaction/deployment/.env"
 export FAKE_SYNC_FAIL_ONCE_FILE="$TEST_ROOT/backup-sync-failed-once"
 run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-backup-failure.out"
@@ -338,16 +453,19 @@ mkdir -p \
   "$recovery_backup/deployment/state" \
   "$recovery_backup/deployment/bin" \
   "$recovery_backup/deployment/lib" \
-  "$recovery_backup/command"
+  "$recovery_backup/command" \
+  "$recovery_backup/systemd"
 for recovery_file in \
-  .env compose.yaml config/sources.json state/source-mounts.json \
+  .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
-  bin/render_config.py lib/common.sh; do
+  state/current-version state/previous-version \
+  bin/render_config.py bin/updater_service.py lib/common.sh lib/updater_protocol.py; do
   cp -- \
     "$REACHCOMMANDER_TEST_INSTALL_ROOT/$recovery_file" \
     "$recovery_backup/deployment/$recovery_file"
 done
 cp -- "$REACHCOMMANDER_TEST_COMMAND_PATH" "$recovery_backup/command/reachcommander"
+cp -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" "$recovery_backup/systemd/reachcommander-updater.service"
 printf '%s\n' "$recovery_backup" >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/install-transaction"
 printf 'corrupt interrupted state\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
 run_installer $'n\n' "$TEST_ROOT/recover-incomplete-reconfiguration.out"
@@ -377,6 +495,16 @@ run_installer "$install_input" "$TEST_ROOT/pull-failure.out"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT" ]] || fail "pull failure leaked the lock scaffold"
 export FAKE_DOCKER_PULL_EXIT=0
 pass "image pull failure leaves staged state unpublished"
+
+export FAKE_DOCKER_VERSION_LABEL=v1.5.0
+rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
+rm -f -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
+mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+run_installer "$install_input" "$TEST_ROOT/version-mismatch.out"
+(( last_status != 0 )) || fail "bundle/image version mismatch must fail install"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "version mismatch installed deployment"
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+pass "bundle version must match the trusted image version label"
 
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
 mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"

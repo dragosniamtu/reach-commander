@@ -29,6 +29,8 @@ test('installer verification runs inside acceptance before publication', async (
   const acceptance = content.slice(acceptanceStart, smokeStart);
   for (const command of [
     'python3 -m unittest tests/installer/test_render_config.py -v',
+    'python3 -m unittest tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py -v',
+    'systemd-analyze verify deploy/systemd/reachcommander-updater.service',
     'bash tests/installer/test_common.sh',
     'bash tests/installer/test_install.sh',
     'bash tests/installer/test_command.sh',

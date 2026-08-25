@@ -83,6 +83,12 @@ jobs:
       - name: Test installer render configuration
         run: python3 tools/run_with_annotations.py "Installer render configuration failed" python3 -m unittest tests/installer/test_render_config.py -v
 
+      - name: Test restricted host updater contracts
+        run: python3 tools/run_with_annotations.py "Host updater contracts failed" python3 -m unittest tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py -v
+
+      - name: Verify updater systemd unit
+        run: systemd-analyze verify deploy/systemd/reachcommander-updater.service
+
       - name: Test CI diagnostic reporter
         run: python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v
 
@@ -113,6 +119,7 @@ jobs:
             tests/installer/test_install.sh \
             tests/installer/test_command.sh \
             tests/installer/test_package.sh \
+            tests/installer/fake-bin/systemctl \
             tests/installer/macos/test_helpers.sh \
             tests/installer/macos/test_install.sh \
             tests/installer/macos/fake-bin/docker \

@@ -6,6 +6,10 @@ REPOSITORY_ROOT="$(cd -- "$TEST_DIRECTORY/../.." && pwd)"
 COMMAND_SOURCE="$REPOSITORY_ROOT/deploy/reachcommander"
 RENDERER="$REPOSITORY_ROOT/deploy/render_config.py"
 TEMPLATE="$REPOSITORY_ROOT/deploy/compose.release.yaml"
+UPDATER_COMPOSE="$REPOSITORY_ROOT/deploy/compose.updater.yaml"
+UPDATER_PROTOCOL="$REPOSITORY_ROOT/deploy/updater_protocol.py"
+UPDATER_SERVICE="$REPOSITORY_ROOT/deploy/updater_service.py"
+UPDATER_UNIT="$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
 
 if [[ ! -f "$COMMAND_SOURCE" ]]; then
@@ -36,6 +40,9 @@ mkdir -p \
   "$(dirname -- "$COMMAND_PATH")"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
+cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
+cp -- "$UPDATER_PROTOCOL" "$INSTALL_ROOT/lib/updater_protocol.py"
+cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"
 cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
 chmod +x "$COMMAND_PATH"
 printf 'source canary\n' >"$SOURCE_PATH/canary.txt"
@@ -81,8 +88,12 @@ export REACHCOMMANDER_TEST_INSTALL_ROOT="$INSTALL_ROOT"
 export REACHCOMMANDER_TEST_COMMAND_PATH="$COMMAND_PATH"
 export REACHCOMMANDER_TEST_BACKUP_ROOT="$TEST_ROOT/backups"
 export REACHCOMMANDER_TEST_LOCK_PATH="$TEST_ROOT/.reachcommander.lock"
+export REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH="$TEST_ROOT/systemd/reachcommander-updater.service"
+export REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY="$TEST_ROOT/run/reachcommander-updater"
+export REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH="$REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY/updater.sock"
 export FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
 export FAKE_FLOCK_LOG="$TEST_ROOT/flock.log"
+export FAKE_SYSTEMCTL_LOG="$TEST_ROOT/systemctl.log"
 export FAKE_DOCKER_HEALTH=healthy
 export FAKE_DOCKER_COMPOSE_EXIT=0
 export FAKE_DOCKER_CONFIG_EXIT=0
@@ -91,6 +102,9 @@ export FAKE_DOCKER_INSPECT_EXIT=0
 export FAKE_FLOCK_EXIT=0
 export FAKE_DOCKER_VERSION_LABEL=v1.4.0
 export FAKE_DOCKER_REVISION_LABEL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+mkdir -p -- "$(dirname -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")" "$REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY"
+cp -- "$UPDATER_UNIT" "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH"
+: >"$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
 
 tests_run=0
 last_status=0
@@ -559,6 +573,9 @@ printf '%s\n' "${uninstall_args[@]}" | grep -q '^down$' || fail "successful unin
 if printf '%s\n' "${uninstall_args[@]}" | grep -q '^-v$'; then
   fail "uninstall requested Compose volume deletion"
 fi
+[[ ! -e "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "uninstall retained updater unit"
+systemctl_calls="$(tr '\0' '\n' <"$FAKE_SYSTEMCTL_LOG")"
+[[ "$systemctl_calls" == *'disable'* && "$systemctl_calls" == *'--now'* ]] || fail "uninstall did not disable updater service"
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "successful uninstall source canary"
 assert_equal "ancestor canary" "$(cat -- "$TEST_ROOT/ancestor-canary.txt")" "successful uninstall ancestor canary"
 pass "uninstall backs up generated state and preserves every source ancestor"
@@ -571,6 +588,9 @@ mkdir -p \
   "$INSTALL_ROOT/data/keys"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
+cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
+cp -- "$UPDATER_PROTOCOL" "$INSTALL_ROOT/lib/updater_protocol.py"
+cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"
 cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
 chmod +x "$COMMAND_PATH"
 python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output "$INSTALL_ROOT"
@@ -579,6 +599,9 @@ grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROO
 : >"$INSTALL_ROOT/state/previous-image"
 printf 'v1.3.0\n' >"$INSTALL_ROOT/state/current-version"
 : >"$INSTALL_ROOT/state/previous-version"
+mkdir -p -- "$(dirname -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")" "$REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY"
+cp -- "$UPDATER_UNIT" "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH"
+: >"$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
 cp -- "$TEST_ROOT/account-valid.json" "$INSTALL_ROOT/data/auth/account.json"
 printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
 printf '<key id="command-fixture" />\n' >"$INSTALL_ROOT/data/keys/key-command.xml"

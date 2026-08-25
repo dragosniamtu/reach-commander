@@ -18,6 +18,22 @@ fi
 # shellcheck source=lib/common.sh
 source "$COMMON_LIBRARY"
 
+init_updater_paths() {
+  RC_UPDATER_UNIT_PATH='/etc/systemd/system/reachcommander-updater.service'
+  RC_UPDATER_RUNTIME_DIRECTORY='/run/reachcommander-updater'
+  RC_UPDATER_SOCKET_PATH="$RC_UPDATER_RUNTIME_DIRECTORY/updater.sock"
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
+    RC_UPDATER_UNIT_PATH="${REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH:-}"
+    RC_UPDATER_RUNTIME_DIRECTORY="${REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY:-}"
+    RC_UPDATER_SOCKET_PATH="${REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH:-}"
+    if [[ -z "$RC_UPDATER_UNIT_PATH" || -z "$RC_UPDATER_RUNTIME_DIRECTORY" || -z "$RC_UPDATER_SOCKET_PATH" ]]; then
+      rc_die 'all updater test paths are required'
+      return 1
+    fi
+  fi
+  export RC_UPDATER_UNIT_PATH RC_UPDATER_RUNTIME_DIRECTORY RC_UPDATER_SOCKET_PATH
+}
+
 usage() {
   cat >&2 <<'EOF'
 Usage:
@@ -61,6 +77,7 @@ if ! validate_invocation "$@"; then
 fi
 
 rc_init_paths
+init_updater_paths
 rc_assert_safe_install_root
 if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]] || (( EUID == 0 )); then
   rc_require_root
@@ -416,6 +433,7 @@ authentication_data_tree_is_safe() {
 UNINSTALL_FILES=(
   '.env'
   'compose.yaml'
+  'compose.override.yaml'
   'config/sources.json'
   'state/source-mounts.json'
   'state/channel'
@@ -425,7 +443,9 @@ UNINSTALL_FILES=(
   'state/previous-version'
   'state/command.lock'
   'bin/render_config.py'
+  'bin/updater_service.py'
   'lib/common.sh'
+  'lib/updater_protocol.py'
 )
 
 paths_overlap() {
@@ -460,7 +480,7 @@ validate_uninstall_tree() {
     relative_path="${path#"$RC_INSTALL_ROOT"/}"
     case "$relative_path" in
       config|state|bin|lib|backups|data|data/auth|data/keys|\
-      .env|compose.yaml|\
+      .env|compose.yaml|compose.override.yaml|\
       config/sources.json|\
       state/source-mounts.json|\
       state/channel|\
@@ -469,9 +489,12 @@ validate_uninstall_tree() {
       state/current-version|\
       state/previous-version|\
       state/failed-image|\
+      state/system-update.json|\
       state/command.lock|\
       bin/render_config.py|\
-      lib/common.sh)
+      bin/updater_service.py|\
+      lib/common.sh|\
+      lib/updater_protocol.py)
         ;;
       data/auth/account.json|\
       data/auth/bootstrap.json|\
@@ -487,6 +510,10 @@ validate_uninstall_tree() {
   done < <(find "$RC_INSTALL_ROOT" -mindepth 1 -print0)
   if (( invalid != 0 )); then
     rc_die 'install root contains an unexpected or symlinked entry'
+    return 1
+  fi
+  if [[ ! -f "$RC_UPDATER_UNIT_PATH" || -L "$RC_UPDATER_UNIT_PATH" ]]; then
+    rc_die 'updater systemd unit is missing or unsafe'
     return 1
   fi
 }
@@ -517,7 +544,12 @@ validate_uninstall_separation() {
   local source_path
   local owned_path
   for source_path in "${UNINSTALL_SOURCE_PATHS[@]}"; do
-    for owned_path in "$RC_INSTALL_ROOT" "$RC_COMMAND_PATH" "$RC_BACKUP_ROOT"; do
+    for owned_path in \
+      "$RC_INSTALL_ROOT" \
+      "$RC_COMMAND_PATH" \
+      "$RC_BACKUP_ROOT" \
+      "$RC_UPDATER_UNIT_PATH" \
+      "$RC_UPDATER_RUNTIME_DIRECTORY"; do
       if paths_overlap "$source_path" "$owned_path"; then
         rc_die 'a configured source overlaps an uninstall target'
         return 1
@@ -565,10 +597,23 @@ create_uninstall_backup() {
   if [[ -f "$RC_INSTALL_ROOT/state/failed-image" ]]; then
     backup_uninstall_file 'state/failed-image' "$backup_destination" || return 1
   fi
+  if [[ -f "$RC_INSTALL_ROOT/state/system-update.json" ]]; then
+    backup_uninstall_file 'state/system-update.json' "$backup_destination" || return 1
+  fi
   if ! install -m 0700 -- "$RC_COMMAND_PATH" "$backup_destination/reachcommander-command" ||
     ! sync -f -- "$backup_destination/reachcommander-command" ||
     ! cmp -s -- "$RC_COMMAND_PATH" "$backup_destination/reachcommander-command"; then
     rc_die 'management command backup verification failed'
+    return 1
+  fi
+  if ! install -m 0644 -- \
+    "$RC_UPDATER_UNIT_PATH" \
+    "$backup_destination/reachcommander-updater.service" ||
+    ! sync -f -- "$backup_destination/reachcommander-updater.service" ||
+    ! cmp -s -- \
+      "$RC_UPDATER_UNIT_PATH" \
+      "$backup_destination/reachcommander-updater.service"; then
+    rc_die 'updater unit backup verification failed'
     return 1
   fi
 }
@@ -625,7 +670,7 @@ remove_authentication_data() {
 remove_generated_deployment() {
   local relative_path
   local directory
-  for relative_path in "${UNINSTALL_FILES[@]}" 'state/failed-image'; do
+  for relative_path in "${UNINSTALL_FILES[@]}" 'state/failed-image' 'state/system-update.json'; do
     rm -f -- "$RC_INSTALL_ROOT/$relative_path" || return 1
   done
   for directory in backups config state bin lib; do
@@ -636,12 +681,30 @@ remove_generated_deployment() {
 }
 
 restart_uninstall_service() {
-  if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
+  if systemctl daemon-reload &&
+    systemctl enable --now reachcommander-updater.service &&
+    rc_compose up -d reachcommander &&
+    rc_wait_healthy reachcommander 60; then
     printf 'ReachCommander: the previous service was restarted after uninstall stopped.\n' >&2
     return 0
   fi
   printf 'ReachCommander: uninstall stopped and automatic service restart failed; manual recovery is required.\n' >&2
   return 1
+}
+
+stop_updater_service() {
+  if ! systemctl disable --now reachcommander-updater.service; then
+    rc_die 'updater service could not be stopped'
+    return 1
+  fi
+}
+
+remove_updater_service_files() {
+  rm -f -- "$RC_UPDATER_UNIT_PATH" "$RC_UPDATER_SOCKET_PATH" || return 1
+  systemctl daemon-reload || return 1
+  if [[ -d "$RC_UPDATER_RUNTIME_DIRECTORY" && ! -L "$RC_UPDATER_RUNTIME_DIRECTORY" ]]; then
+    rmdir -- "$RC_UPDATER_RUNTIME_DIRECTORY" 2>/dev/null || true
+  fi
 }
 
 command_uninstall() {
@@ -715,9 +778,17 @@ command_uninstall() {
       return 1
     fi
   fi
+  if ! stop_updater_service; then
+    restart_uninstall_service || true
+    return 1
+  fi
   if ! rc_compose down; then
     restart_uninstall_service || true
     rc_die 'Compose teardown failed; deployment and command were preserved'
+    return 1
+  fi
+  if ! remove_updater_service_files; then
+    rc_die 'updater service files could not be removed'
     return 1
   fi
   if [[ "$authentication_action" == 'backup' ]] && ! remove_authentication_data; then
@@ -784,6 +855,7 @@ doctor_required_files() {
   for required in \
     '.env' \
     'compose.yaml' \
+    'compose.override.yaml' \
     'config/sources.json' \
     'state/source-mounts.json' \
     'state/channel' \
@@ -792,7 +864,9 @@ doctor_required_files() {
     'state/current-version' \
     'state/previous-version' \
     'bin/render_config.py' \
-    'lib/common.sh'; do
+    'bin/updater_service.py' \
+    'lib/common.sh' \
+    'lib/updater_protocol.py'; do
     if [[ ! -f "$RC_INSTALL_ROOT/$required" || -L "$RC_INSTALL_ROOT/$required" ]]; then
       missing=1
       doctor_fail "Required deployment file is missing or symlinked: $required"
@@ -805,6 +879,11 @@ doctor_required_files() {
     doctor_pass 'Management command is installed at the fixed path'
   else
     doctor_fail 'Management command is missing, symlinked, or not executable'
+  fi
+  if [[ -f "$RC_UPDATER_UNIT_PATH" && ! -L "$RC_UPDATER_UNIT_PATH" ]]; then
+    doctor_pass 'Updater systemd unit is installed at the fixed path'
+  else
+    doctor_fail 'Updater systemd unit is missing or symlinked'
   fi
 }
 
@@ -1017,6 +1096,23 @@ command_doctor() {
     doctor_pass 'Container is healthy'
   else
     doctor_fail 'Container is not healthy'
+  fi
+
+  if systemctl is-active --quiet reachcommander-updater.service; then
+    doctor_pass 'Updater service is active'
+  else
+    doctor_fail 'Updater service is not active'
+  fi
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
+    if [[ -f "$RC_UPDATER_SOCKET_PATH" && ! -L "$RC_UPDATER_SOCKET_PATH" ]]; then
+      doctor_pass 'Updater socket is ready'
+    else
+      doctor_fail 'Updater socket is unavailable'
+    fi
+  elif [[ -S "$RC_UPDATER_SOCKET_PATH" ]]; then
+    doctor_pass 'Updater socket is ready'
+  else
+    doctor_fail 'Updater socket is unavailable'
   fi
 
   if (( DOCTOR_FAILURES > 0 )); then

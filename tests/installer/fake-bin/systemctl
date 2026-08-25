@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -n "${FAKE_SYSTEMCTL_LOG:-}" ]]; then
+  printf '%s\0' "$@" >>"$FAKE_SYSTEMCTL_LOG"
+  printf '\0' >>"$FAKE_SYSTEMCTL_LOG"
+fi
+
+case "${1:-}" in
+  daemon-reload)
+    exit "${FAKE_SYSTEMCTL_DAEMON_RELOAD_EXIT:-0}"
+    ;;
+  enable)
+    if [[ "${2:-}" != '--now' || "${3:-}" != 'reachcommander-updater.service' ]]; then
+      exit 97
+    fi
+    if [[ "${FAKE_SYSTEMCTL_START_EXIT:-0}" != '0' ]]; then
+      exit "$FAKE_SYSTEMCTL_START_EXIT"
+    fi
+    if [[ -n "${REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH:-}" ]]; then
+      mkdir -p -- "$(dirname -- "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH")"
+      : >"$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
+    fi
+    ;;
+  restart)
+    [[ "${2:-}" == 'reachcommander-updater.service' ]] || exit 97
+    if [[ -n "${REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH:-}" ]]; then
+      mkdir -p -- "$(dirname -- "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH")"
+      : >"$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
+    fi
+    exit "${FAKE_SYSTEMCTL_RESTART_EXIT:-0}"
+    ;;
+  stop | disable)
+    if [[ -n "${REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH:-}" ]]; then
+      rm -f -- "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
+    fi
+    exit "${FAKE_SYSTEMCTL_STOP_EXIT:-0}"
+    ;;
+  is-active)
+    [[ -e "${REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH:-/missing}" ]]
+    ;;
+  *)
+    printf 'fake systemctl: unsupported invocation\n' >&2
+    exit 97
+    ;;
+esac

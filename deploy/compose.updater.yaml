@@ -1,0 +1,7 @@
+services:
+  reachcommander:
+    volumes:
+      - type: bind
+        source: /run/reachcommander-updater
+        target: /run/reachcommander-updater
+        read_only: true

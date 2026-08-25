@@ -7,12 +7,21 @@ SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIBRARY="$SCRIPT_DIRECTORY/lib/common.sh"
 RENDERER="$SCRIPT_DIRECTORY/render_config.py"
 COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
+UPDATER_COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.updater.yaml"
 MANAGEMENT_COMMAND="$SCRIPT_DIRECTORY/reachcommander"
+UPDATER_PROTOCOL="$SCRIPT_DIRECTORY/updater_protocol.py"
+UPDATER_SERVICE="$SCRIPT_DIRECTORY/updater_service.py"
+UPDATER_UNIT="$SCRIPT_DIRECTORY/systemd/reachcommander-updater.service"
+BUNDLE_VERSION_FILE="$SCRIPT_DIRECTORY/VERSION"
 WORK_ROOT=''
 INSTALL_COMMITTED=false
 INSTALL_TRANSACTION_ACTIVE=false
 HAD_EXISTING=false
 RECONFIGURE_BACKUP_DIRECTORY=''
+BUNDLE_VERSION=''
+UPDATER_UNIT_PATH=''
+UPDATER_RUNTIME_DIRECTORY=''
+UPDATER_SOCKET_PATH=''
 
 if [[ ! -f "$COMMON_LIBRARY" ]]; then
   printf 'ReachCommander: installer bundle is missing lib/common.sh\n' >&2
@@ -81,17 +90,67 @@ prompt_value() {
 
 require_bundle() {
   local bundle_file
-  for bundle_file in "$RENDERER" "$COMPOSE_TEMPLATE" "$MANAGEMENT_COMMAND"; do
-    if [[ ! -f "$bundle_file" ]]; then
+  for bundle_file in \
+    "$RENDERER" \
+    "$COMPOSE_TEMPLATE" \
+    "$UPDATER_COMPOSE_TEMPLATE" \
+    "$MANAGEMENT_COMMAND" \
+    "$UPDATER_PROTOCOL" \
+    "$UPDATER_SERVICE" \
+    "$UPDATER_UNIT" \
+    "$BUNDLE_VERSION_FILE"; do
+    if [[ ! -f "$bundle_file" || -L "$bundle_file" ]]; then
       rc_die 'installer bundle is incomplete'
       return 1
     fi
   done
 }
 
+read_bundle_version() {
+  local number='(0|[1-9][0-9]*)'
+  BUNDLE_VERSION="$(<"$BUNDLE_VERSION_FILE")"
+  if [[ ! "$BUNDLE_VERSION" =~ ^v${number}\.${number}\.${number}$ ]]; then
+    rc_die 'installer bundle VERSION must be one stable semantic version'
+    return 1
+  fi
+}
+
+init_updater_paths() {
+  UPDATER_UNIT_PATH='/etc/systemd/system/reachcommander-updater.service'
+  UPDATER_RUNTIME_DIRECTORY='/run/reachcommander-updater'
+  UPDATER_SOCKET_PATH="$UPDATER_RUNTIME_DIRECTORY/updater.sock"
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
+    UPDATER_UNIT_PATH="${REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH:-}"
+    UPDATER_RUNTIME_DIRECTORY="${REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY:-}"
+    UPDATER_SOCKET_PATH="${REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH:-}"
+    if [[ -z "$UPDATER_UNIT_PATH" || -z "$UPDATER_RUNTIME_DIRECTORY" || -z "$UPDATER_SOCKET_PATH" ]]; then
+      rc_die 'all updater test paths are required'
+      return 1
+    fi
+  fi
+  export UPDATER_UNIT_PATH UPDATER_RUNTIME_DIRECTORY UPDATER_SOCKET_PATH
+}
+
+assert_updater_layout_safe() {
+  local path
+  for path in \
+    "$(dirname -- "$UPDATER_UNIT_PATH")" \
+    "$UPDATER_RUNTIME_DIRECTORY"; do
+    if [[ -L "$path" || -e "$path" && ! -d "$path" ]]; then
+      rc_die 'updater-owned directories must not be symlinks or files'
+      return 1
+    fi
+  done
+  if [[ -L "$UPDATER_UNIT_PATH" || -e "$UPDATER_UNIT_PATH" && ! -f "$UPDATER_UNIT_PATH" ]]; then
+    rc_die 'updater service unit path is unsafe'
+    return 1
+  fi
+}
+
 preflight() {
-  rc_require_commands docker python3 readlink flock install mktemp setpriv sync find
+  rc_require_commands docker python3 readlink flock install mktemp setpriv sync find systemctl
   require_bundle
+  read_bundle_version
   if ! docker compose version >/dev/null 2>&1; then
     rc_die 'Docker Compose v2 is required'
     return 1
@@ -120,7 +179,12 @@ reject_installer_path_overlap() {
   local source_path="$1"
   local owned_path
   local canonical_owned
-  for owned_path in "$RC_INSTALL_ROOT" "$RC_BACKUP_ROOT" "$(dirname -- "$RC_COMMAND_PATH")"; do
+  for owned_path in \
+    "$RC_INSTALL_ROOT" \
+    "$RC_BACKUP_ROOT" \
+    "$(dirname -- "$RC_COMMAND_PATH")" \
+    "$UPDATER_UNIT_PATH" \
+    "$UPDATER_RUNTIME_DIRECTORY"; do
     canonical_owned="$(readlink -m -- "$owned_path")"
     if [[
       "$source_path" == "$canonical_owned" ||
@@ -390,7 +454,7 @@ copy_atomic() {
   fi
 }
 
-DEPLOYMENT_FILES=(
+LEGACY_DEPLOYMENT_FILES=(
   '.env'
   'compose.yaml'
   'config/sources.json'
@@ -402,12 +466,28 @@ DEPLOYMENT_FILES=(
   'lib/common.sh'
 )
 
+UPDATER_DEPLOYMENT_FILES=(
+  'compose.override.yaml'
+  'state/current-version'
+  'state/previous-version'
+  'bin/updater_service.py'
+  'lib/updater_protocol.py'
+)
+
+DEPLOYMENT_FILES=(
+  "${LEGACY_DEPLOYMENT_FILES[@]}"
+  "${UPDATER_DEPLOYMENT_FILES[@]}"
+)
+
 file_mode() {
   case "$1" in
     bin/*)
       printf '0755\n'
       ;;
     config/sources.json)
+      printf '0644\n'
+      ;;
+    lib/updater_protocol.py)
       printf '0644\n'
       ;;
     *)
@@ -419,8 +499,11 @@ file_mode() {
 backup_existing_deployment() {
   local backup_directory="$1"
   local relative_path
-  mkdir -p -- "$backup_directory/deployment" "$backup_directory/command"
-  for relative_path in "${DEPLOYMENT_FILES[@]}"; do
+  mkdir -p -- \
+    "$backup_directory/deployment" \
+    "$backup_directory/command" \
+    "$backup_directory/systemd"
+  for relative_path in "${LEGACY_DEPLOYMENT_FILES[@]}"; do
     if [[ ! -f "$RC_INSTALL_ROOT/$relative_path" || -L "$RC_INSTALL_ROOT/$relative_path" ]]; then
       rc_die 'existing deployment is incomplete or symlinked'
       return 1
@@ -437,9 +520,42 @@ backup_existing_deployment() {
       return 1
     fi
   done
+  for relative_path in "${UPDATER_DEPLOYMENT_FILES[@]}"; do
+    if [[ ! -e "$RC_INSTALL_ROOT/$relative_path" ]]; then
+      continue
+    fi
+    if [[ ! -f "$RC_INSTALL_ROOT/$relative_path" || -L "$RC_INSTALL_ROOT/$relative_path" ]]; then
+      rc_die 'existing updater deployment state is unsafe'
+      return 1
+    fi
+    mkdir -p -- "$backup_directory/deployment/$(dirname -- "$relative_path")"
+    if ! install -m "$(file_mode "$relative_path")" -- \
+      "$RC_INSTALL_ROOT/$relative_path" \
+      "$backup_directory/deployment/$relative_path" ||
+      ! sync -f -- "$backup_directory/deployment/$relative_path" ||
+      ! cmp -s -- \
+        "$RC_INSTALL_ROOT/$relative_path" \
+        "$backup_directory/deployment/$relative_path"; then
+      rc_die 'existing updater deployment backup could not be verified'
+      return 1
+    fi
+  done
   if [[ ! -f "$RC_COMMAND_PATH" || -L "$RC_COMMAND_PATH" ]]; then
     rc_die 'existing management command is missing or symlinked'
     return 1
+  fi
+  if [[ -e "$UPDATER_UNIT_PATH" ]]; then
+    if [[ ! -f "$UPDATER_UNIT_PATH" || -L "$UPDATER_UNIT_PATH" ]] ||
+      ! install -m 0644 -- \
+        "$UPDATER_UNIT_PATH" \
+        "$backup_directory/systemd/reachcommander-updater.service" ||
+      ! sync -f -- "$backup_directory/systemd/reachcommander-updater.service" ||
+      ! cmp -s -- \
+        "$UPDATER_UNIT_PATH" \
+        "$backup_directory/systemd/reachcommander-updater.service"; then
+      rc_die 'existing updater unit backup could not be verified'
+      return 1
+    fi
   fi
   if ! install -m 0755 -- \
     "$RC_COMMAND_PATH" \
@@ -471,7 +587,7 @@ install_staged_deployment() {
 restore_deployment() {
   local backup_directory="$1"
   local relative_path
-  for relative_path in "${DEPLOYMENT_FILES[@]}"; do
+  for relative_path in "${LEGACY_DEPLOYMENT_FILES[@]}"; do
     [[ -f "$backup_directory/deployment/$relative_path" ]] || {
       rc_die 'reconfiguration recovery backup is incomplete'
       return 1
@@ -480,6 +596,16 @@ restore_deployment() {
       "$backup_directory/deployment/$relative_path" \
       "$RC_INSTALL_ROOT/$relative_path" \
       "$(file_mode "$relative_path")" || return 1
+  done
+  for relative_path in "${UPDATER_DEPLOYMENT_FILES[@]}"; do
+    if [[ -f "$backup_directory/deployment/$relative_path" ]]; then
+      copy_atomic \
+        "$backup_directory/deployment/$relative_path" \
+        "$RC_INSTALL_ROOT/$relative_path" \
+        "$(file_mode "$relative_path")" || return 1
+    else
+      rm -f -- "$RC_INSTALL_ROOT/$relative_path" || return 1
+    fi
   done
   chmod 0755 -- "$RC_INSTALL_ROOT/config" || return 1
   chmod 0644 -- "$RC_INSTALL_ROOT/config/sources.json" || return 1
@@ -491,6 +617,62 @@ restore_deployment() {
     "$backup_directory/command/reachcommander" \
     "$RC_COMMAND_PATH" \
     0755 || return 1
+}
+
+restore_updater_unit() {
+  local backup_directory="$1"
+  local backed_up_unit="$backup_directory/systemd/reachcommander-updater.service"
+  if [[ -f "$backed_up_unit" && ! -L "$backed_up_unit" ]]; then
+    copy_atomic "$backed_up_unit" "$UPDATER_UNIT_PATH" 0644 || return 1
+    systemctl daemon-reload || return 1
+    systemctl restart reachcommander-updater.service || return 1
+    wait_for_updater_socket || return 1
+    return 0
+  fi
+  systemctl disable --now reachcommander-updater.service >/dev/null 2>&1 || true
+  rm -f -- "$UPDATER_UNIT_PATH" || return 1
+  systemctl daemon-reload || return 1
+  rm -f -- "$UPDATER_SOCKET_PATH" || return 1
+  if [[ -d "$UPDATER_RUNTIME_DIRECTORY" && ! -L "$UPDATER_RUNTIME_DIRECTORY" ]]; then
+    rmdir -- "$UPDATER_RUNTIME_DIRECTORY" 2>/dev/null || true
+  fi
+}
+
+updater_socket_is_ready() {
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && (( EUID != 0 )); then
+    [[ -f "$UPDATER_SOCKET_PATH" && ! -L "$UPDATER_SOCKET_PATH" ]]
+  else
+    [[ -S "$UPDATER_SOCKET_PATH" ]]
+  fi
+}
+
+wait_for_updater_socket() {
+  local attempt
+  for attempt in {1..100}; do
+    if updater_socket_is_ready; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  rc_die 'updater service socket did not become ready'
+  return 1
+}
+
+install_updater_service() {
+  copy_atomic "$UPDATER_UNIT" "$UPDATER_UNIT_PATH" 0644 || return 1
+  systemctl daemon-reload || return 1
+  systemctl enable --now reachcommander-updater.service || return 1
+  systemctl restart reachcommander-updater.service || return 1
+  wait_for_updater_socket
+}
+
+remove_initial_updater_service() {
+  systemctl disable --now reachcommander-updater.service >/dev/null 2>&1 || true
+  rm -f -- "$UPDATER_UNIT_PATH" "$UPDATER_SOCKET_PATH" || return 1
+  systemctl daemon-reload || return 1
+  if [[ -d "$UPDATER_RUNTIME_DIRECTORY" && ! -L "$UPDATER_RUNTIME_DIRECTORY" ]]; then
+    rmdir -- "$UPDATER_RUNTIME_DIRECTORY" 2>/dev/null || true
+  fi
 }
 
 remove_reconfiguration_backup() {
@@ -512,7 +694,8 @@ remove_reconfiguration_backup() {
     deployment/state \
     deployment/bin \
     deployment/lib \
-    command; do
+    command \
+    systemd; do
     if [[ -L "$backup_directory/$directory" || -e "$backup_directory/$directory" && ! -d "$backup_directory/$directory" ]]; then
       rc_die 'reconfiguration backup contains an unsafe directory'
       return 1
@@ -522,13 +705,15 @@ remove_reconfiguration_backup() {
     rm -f -- "$backup_directory/deployment/$relative_path"
   done
   rm -f -- "$backup_directory/command/reachcommander"
+  rm -f -- "$backup_directory/systemd/reachcommander-updater.service"
   for directory in \
     deployment/config \
     deployment/state \
     deployment/bin \
     deployment/lib \
     deployment \
-    command; do
+    command \
+    systemd; do
     if [[ -d "$backup_directory/$directory" ]]; then
       rmdir -- "$backup_directory/$directory" || return 1
     fi
@@ -562,6 +747,10 @@ rollback_reconfiguration_transaction() {
   local marker="$RC_INSTALL_ROOT/state/install-transaction"
   if ! restore_deployment "$RECONFIGURE_BACKUP_DIRECTORY"; then
     rc_die 'reconfiguration rollback could not restore the previous files'
+    return 1
+  fi
+  if ! restore_updater_unit "$RECONFIGURE_BACKUP_DIRECTORY"; then
+    rc_die 'reconfiguration rollback could not restore the previous updater service'
     return 1
   fi
   if [[ "$restart_previous" == 'true' ]]; then
@@ -647,6 +836,7 @@ handle_install_signal() {
       fi
     else
       rc_compose down >/dev/null 2>&1 || true
+      remove_initial_updater_service || true
       remove_partial_initial_deployment
     fi
   fi
@@ -675,8 +865,10 @@ trap 'handle_install_signal 143' TERM
 
 preflight
 rc_init_paths
+init_updater_paths
 rc_assert_safe_install_root
 assert_generated_layout_safe
+assert_updater_layout_safe
 if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]] || (( EUID == 0 )); then
   rc_require_root
 fi
@@ -691,8 +883,25 @@ if [[ -f "$RC_INSTALL_ROOT/.env" || -f "$RC_INSTALL_ROOT/compose.yaml" ]]; then
     exit 0
   fi
 fi
+INSTALL_CHANNEL='stable'
+if [[ "$HAD_EXISTING" == 'true' ]]; then
+  if [[ ! -f "$RC_INSTALL_ROOT/state/channel" || -L "$RC_INSTALL_ROOT/state/channel" ]] ||
+    ! IFS= read -r INSTALL_CHANNEL <"$RC_INSTALL_ROOT/state/channel" ||
+    [[ -z "$INSTALL_CHANNEL" ]]; then
+    rc_die 'existing update channel could not be read'
+    exit 1
+  fi
+  if ! rc_validate_channel "$INSTALL_CHANNEL" >/dev/null 2>&1; then
+    rc_die 'existing update channel is invalid'
+    exit 1
+  fi
+fi
 if [[ "$HAD_EXISTING" == 'false' && -e "$RC_COMMAND_PATH" ]]; then
   rc_die 'management command exists without a complete deployment'
+  exit 1
+fi
+if [[ "$HAD_EXISTING" == 'false' && -e "$UPDATER_UNIT_PATH" ]]; then
+  rc_die 'updater service unit exists without a ReachCommander deployment'
   exit 1
 fi
 
@@ -735,21 +944,31 @@ WORK_ROOT="$(mktemp -d "$install_parent/.reachcommander-install.XXXXXX")"
 REQUEST_PATH="$WORK_ROOT/request.json"
 STAGE_ROOT="$WORK_ROOT/deployment"
 
-write_request "$REQUEST_PATH" "$RC_IMAGE_REPOSITORY:stable"
+write_request "$REQUEST_PATH" "$RC_IMAGE_REPOSITORY:$INSTALL_CHANNEL"
 python3 "$RENDERER" render \
   --request "$REQUEST_PATH" \
   --template "$COMPOSE_TEMPLATE" \
   --output "$STAGE_ROOT"
+install -m 0600 -- "$UPDATER_COMPOSE_TEMPLATE" "$STAGE_ROOT/compose.override.yaml"
 docker compose --project-directory "$STAGE_ROOT" config --quiet
 
-RESOLVED_IMAGE="$(rc_pull_digest stable)"
+RESOLVED_IMAGE="$(rc_pull_digest "$INSTALL_CHANNEL")"
+RESOLVED_VERSION="$(rc_image_display_version "$RESOLVED_IMAGE" "$INSTALL_CHANNEL")"
+if [[ "$INSTALL_CHANNEL" == 'stable' && "$RESOLVED_VERSION" != "$BUNDLE_VERSION" ]]; then
+  rc_die 'installer bundle version does not match the trusted image label'
+  exit 1
+fi
 python3 "$RENDERER" set-image --env "$STAGE_ROOT/.env" --image "$RESOLVED_IMAGE"
 mkdir -p -- "$STAGE_ROOT/bin" "$STAGE_ROOT/lib"
 install -m 0755 -- "$RENDERER" "$STAGE_ROOT/bin/render_config.py"
+install -m 0755 -- "$UPDATER_SERVICE" "$STAGE_ROOT/bin/updater_service.py"
 install -m 0600 -- "$COMMON_LIBRARY" "$STAGE_ROOT/lib/common.sh"
-rc_atomic_write "$STAGE_ROOT/state/channel" $'stable\n'
+install -m 0644 -- "$UPDATER_PROTOCOL" "$STAGE_ROOT/lib/updater_protocol.py"
+rc_atomic_write "$STAGE_ROOT/state/channel" "$INSTALL_CHANNEL"$'\n'
 rc_atomic_write "$STAGE_ROOT/state/current-image" "$RESOLVED_IMAGE"$'\n'
 rc_atomic_write "$STAGE_ROOT/state/previous-image" ''
+rc_atomic_write "$STAGE_ROOT/state/current-version" "$RESOLVED_VERSION"$'\n'
+rc_atomic_write "$STAGE_ROOT/state/previous-version" ''
 docker compose --project-directory "$STAGE_ROOT" config --quiet
 
 if [[ "$HAD_EXISTING" == 'true' ]]; then
@@ -769,6 +988,21 @@ if ! install_staged_deployment "$STAGE_ROOT" || ! prepare_authentication_data; t
   fi
   remove_partial_initial_deployment
   rc_die 'initial deployment files could not be installed'
+  exit 1
+fi
+
+if ! install_updater_service; then
+  if [[ "$HAD_EXISTING" == 'true' ]]; then
+    if rollback_reconfiguration_transaction true; then
+      rc_die 'updater service failed to start; the previous deployment was restored'
+      exit 2
+    fi
+    rc_die 'updater service failed to start and rollback requires manual recovery'
+    exit 3
+  fi
+  remove_initial_updater_service || true
+  remove_partial_initial_deployment
+  rc_die 'updater service failed to start; initial deployment was removed'
   exit 1
 fi
 INSTALL_COMMITTED=true

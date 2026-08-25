@@ -43,10 +43,14 @@ trap 'exit 143' TERM
 required_sources=(
   "$REPOSITORY_ROOT/LICENSE"
   "$SCRIPT_DIRECTORY/compose.release.yaml"
+  "$SCRIPT_DIRECTORY/compose.updater.yaml"
   "$SCRIPT_DIRECTORY/install.sh"
   "$SCRIPT_DIRECTORY/reachcommander"
   "$SCRIPT_DIRECTORY/render_config.py"
+  "$SCRIPT_DIRECTORY/updater_protocol.py"
+  "$SCRIPT_DIRECTORY/updater_service.py"
   "$SCRIPT_DIRECTORY/lib/common.sh"
+  "$SCRIPT_DIRECTORY/systemd/reachcommander-updater.service"
 )
 for required_source in "${required_sources[@]}"; do
   if [[ ! -f "$required_source" || -L "$required_source" ]]; then
@@ -55,22 +59,29 @@ for required_source in "${required_sources[@]}"; do
   fi
 done
 
-install -d -m 0755 -- "$PACKAGE_ROOT" "$PACKAGE_ROOT/lib"
+install -d -m 0755 -- "$PACKAGE_ROOT" "$PACKAGE_ROOT/lib" "$PACKAGE_ROOT/systemd"
 install -m 0644 -- "$REPOSITORY_ROOT/LICENSE" "$PACKAGE_ROOT/LICENSE"
 printf '%s\n' "$VERSION" >"$PACKAGE_ROOT/VERSION"
 chmod 0644 -- "$PACKAGE_ROOT/VERSION"
 install -m 0644 -- "$SCRIPT_DIRECTORY/compose.release.yaml" "$PACKAGE_ROOT/compose.release.yaml"
+install -m 0644 -- "$SCRIPT_DIRECTORY/compose.updater.yaml" "$PACKAGE_ROOT/compose.updater.yaml"
 install -m 0755 -- "$SCRIPT_DIRECTORY/install.sh" "$PACKAGE_ROOT/install.sh"
 install -m 0755 -- "$SCRIPT_DIRECTORY/reachcommander" "$PACKAGE_ROOT/reachcommander"
 install -m 0644 -- "$SCRIPT_DIRECTORY/render_config.py" "$PACKAGE_ROOT/render_config.py"
+install -m 0644 -- "$SCRIPT_DIRECTORY/updater_protocol.py" "$PACKAGE_ROOT/updater_protocol.py"
+install -m 0755 -- "$SCRIPT_DIRECTORY/updater_service.py" "$PACKAGE_ROOT/updater_service.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/lib/common.sh" "$PACKAGE_ROOT/lib/common.sh"
-chmod 0755 -- "$PACKAGE_ROOT" "$PACKAGE_ROOT/lib" "$PACKAGE_ROOT/install.sh" "$PACKAGE_ROOT/reachcommander"
+install -m 0644 -- "$SCRIPT_DIRECTORY/systemd/reachcommander-updater.service" "$PACKAGE_ROOT/systemd/reachcommander-updater.service"
+chmod 0755 -- "$PACKAGE_ROOT" "$PACKAGE_ROOT/lib" "$PACKAGE_ROOT/systemd" "$PACKAGE_ROOT/install.sh" "$PACKAGE_ROOT/reachcommander" "$PACKAGE_ROOT/updater_service.py"
 chmod 0644 -- \
   "$PACKAGE_ROOT/LICENSE" \
   "$PACKAGE_ROOT/VERSION" \
   "$PACKAGE_ROOT/compose.release.yaml" \
+  "$PACKAGE_ROOT/compose.updater.yaml" \
   "$PACKAGE_ROOT/render_config.py" \
-  "$PACKAGE_ROOT/lib/common.sh"
+  "$PACKAGE_ROOT/updater_protocol.py" \
+  "$PACKAGE_ROOT/lib/common.sh" \
+  "$PACKAGE_ROOT/systemd/reachcommander-updater.service"
 
 ARCHIVE_NAME='reachcommander-installer.tar.gz'
 ARCHIVE_PATH="$OUTPUT_DIRECTORY/$ARCHIVE_NAME"
@@ -90,11 +101,16 @@ tar "${tar_options[@]}" --mode=0755 -cf "$TAR_TEMPORARY" reachcommander-installe
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/LICENSE
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/VERSION
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.release.yaml
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.updater.yaml
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/install.sh
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/lib
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/lib/common.sh
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/reachcommander
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/render_config.py
+tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/systemd
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/systemd/reachcommander-updater.service
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/updater_protocol.py
+tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/updater_service.py
 if ! gzip -n <"$TAR_TEMPORARY" >"$ARCHIVE_TEMPORARY"; then
   rm -f -- "$TAR_TEMPORARY"
   rm -f -- "$ARCHIVE_TEMPORARY"

@@ -332,6 +332,71 @@ describe('CommanderStore', () => {
     ]);
   });
 
+  it('captures selected file-operation rows in visible order and ignores later state changes', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true }),
+      source('media', { defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('zeta.txt'), entry('alpha.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    await store.navigateTo('right', '/Movies');
+    store.selectWithPointer('left', 1, 'replace');
+    store.selectWithPointer('left', 0, 'toggle');
+
+    const captured = store.captureFileOperationContext('copy');
+    store.clearSelection('left');
+    await store.navigateTo('right', '/Changed');
+
+    expect(captured).toEqual({
+      kind: 'copy',
+      sourceId: 'downloads',
+      logicalPaths: ['/alpha.txt', '/zeta.txt'],
+      destinationSourceId: 'media',
+      destinationLogicalDirectory: '/Movies',
+      selectedNames: ['alpha.txt', 'zeta.txt'],
+      knownTotalBytes: 2,
+    });
+    expect(Object.isFrozen(captured)).toBe(true);
+    expect(Object.isFrozen(captured?.logicalPaths)).toBe(true);
+  });
+
+  it('captures the focused row when no file-operation selection exists', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true }),
+      source('media', { defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('one.txt'), entry('two.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.moveCursor('left', 1);
+
+    expect(store.captureFileOperationContext('move')?.logicalPaths).toEqual(['/two.txt']);
+  });
+
+  it('rejects parent rows, archive sources, and invalid opposite destinations', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true }),
+      source('media', { defaultRight: true }),
+      source('readonly', { isReadOnly: true }),
+    ]);
+    api.entries.set('downloads:/Folder', [entry('one.txt')]);
+    api.archives.set('downloads:/photos.7z:/', archiveDirectory('/'));
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    await store.navigateTo('left', '/Folder');
+    expect(store.captureFileOperationContext('copy')).toBeNull();
+
+    await store.openArchive('left', '/photos.7z');
+    expect(store.captureFileOperationContext('copy')).toBeNull();
+
+    await store.returnArchiveToParent('left');
+    await store.selectSource('right', 'readonly');
+    store.moveCursor('left', 1);
+    expect(store.captureFileOperationContext('copy')).toBeNull();
+  });
+
   it('opens a primary archive and navigates directories without reopening nested archives', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true, defaultRight: true }),

@@ -14,6 +14,11 @@ import { PanelPersistence, PersistedPanelState } from './panel-persistence';
 import { normalizeLogicalPath, parentLogicalPath } from './path-utils';
 import { buildVisibleRows } from './file-table.viewmodel';
 import { MultiRenameContext } from './multi-rename.models';
+import {
+  CapturedFileOperationContext,
+  freezeFileOperationContext,
+  TransferOperationKind,
+} from './file-operation.models';
 
 @Injectable({ providedIn: 'root' })
 export class CommanderStore {
@@ -416,6 +421,55 @@ export class CommanderStore {
       isAvailable: source.isAvailable,
       isReadOnly: source.isReadOnly,
     };
+  }
+
+  captureFileOperationContext(
+    kind: TransferOperationKind,
+  ): CapturedFileOperationContext | null {
+    const sourceSide = this.activePanelState();
+    const destinationSide: PanelSide = sourceSide === 'left' ? 'right' : 'left';
+    const sourcePanel = this.panel(sourceSide)();
+    const destinationPanel = this.panel(destinationSide)();
+    const sourceTab = activeTab(sourcePanel);
+    const destinationTab = activeTab(destinationPanel);
+    if (!sourceTab || sourceTab.location.kind !== 'filesystem' ||
+        !destinationTab || destinationTab.location.kind !== 'filesystem') {
+      return null;
+    }
+
+    const source = this.sourceState().find(
+      (candidate) => candidate.id === sourceTab.location.sourceId,
+    );
+    const destination = this.sourceState().find(
+      (candidate) => candidate.id === destinationTab.location.sourceId,
+    );
+    if (!source?.isAvailable || (kind === 'move' && source.isReadOnly) ||
+        !destination?.isAvailable || destination.isReadOnly) {
+      return null;
+    }
+
+    const rows = buildVisibleRows(sourcePanel);
+    const entries = sourcePanel.selectedItems.size > 0
+      ? rows.filter((row) => !row.isParent && sourcePanel.selectedItems.has(row.relativePath))
+      : rows[sourcePanel.cursorIndex] && !rows[sourcePanel.cursorIndex]!.isParent
+        ? [rows[sourcePanel.cursorIndex]!]
+        : [];
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const knownTotalBytes = entries.every((entry) => entry.size !== null)
+      ? entries.reduce((total, entry) => total + entry.size!, 0)
+      : null;
+    return freezeFileOperationContext({
+      kind,
+      sourceId: source.id,
+      logicalPaths: entries.map((entry) => entry.relativePath),
+      destinationSourceId: destination.id,
+      destinationLogicalDirectory: destinationTab.location.path,
+      selectedNames: entries.map((entry) => entry.name),
+      knownTotalBytes,
+    });
   }
 
   initialize(): Promise<void> {

@@ -237,6 +237,7 @@ jobs:
           set -Eeuo pipefail
           smoke_root="$(mktemp -d "${RUNNER_TEMP:?}/reachcommander-smoke.XXXXXX")"
           failure_context=''
+          diagnostics_path='artifacts/container-smoke/diagnostics.txt'
           cleanup() {
             docker rm --force reachcommander-smoke >/dev/null 2>&1 || true
             case "$smoke_root" in
@@ -263,6 +264,7 @@ jobs:
             local health_history='[]'
             local application_logs='ReachCommander smoke container was not created or was removed before diagnostics.'
             local detail
+            local annotation_logs
             local annotation_detail
             trap - ERR
             printf '%s\n' \
@@ -270,12 +272,18 @@ jobs:
             if docker inspect reachcommander-smoke >/dev/null 2>&1; then
               state="$(docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' reachcommander-smoke 2>&1 || true)"
               health_history="$(docker inspect --format '{{json .State.Health.Log}}' reachcommander-smoke 2>&1 || true)"
-              application_logs="$(docker logs --tail 200 reachcommander-smoke 2>&1 || true)"
+              application_logs="$(docker logs --tail 200 reachcommander-smoke 2>&1 |
+                sed -E 's/(ReachCommander first-run setup code: )[A-Za-z0-9_-]+/\1[REDACTED]/g' || true)"
               application_logs="${application_logs: -12000}"
             fi
-            detail="$(printf 'Failed command:\n%s\nCommand output:\n%s\nContainer state:\n%s\nHealth history:\n%s\nApplication logs:\n%s' \
-              "$failed_command" "$failure_context" "$state" "$health_history" "$application_logs")"
-            annotation_detail="${detail:0:4000}"
+            detail="$(printf 'Application logs:\n%s\nFailed command:\n%s\nCommand output:\n%s\nContainer state:\n%s\nHealth history:\n%s' \
+              "$application_logs" "$failed_command" "$failure_context" "$state" "$health_history")"
+            mkdir -p -- "$(dirname -- "$diagnostics_path")"
+            printf '%s\n' "$detail" >"$diagnostics_path"
+            annotation_logs="${application_logs: -3000}"
+            annotation_detail="$(printf 'Application log tail:\n%s\nFailed command:\n%s\nContainer state:\n%s' \
+              "$annotation_logs" "$failed_command" "$state")"
+            annotation_detail="${annotation_detail:0:4000}"
             printf '::error title=Hardened container smoke failed::%s\n' \
               "$(workflow_escape "$annotation_detail")"
             printf '%s\n' "$detail"
@@ -386,6 +394,15 @@ jobs:
             diagnose 1 'authenticated Copy, Trash, and Restore lifecycle'
           fi
           printf '%s\n' "$failure_context"
+
+      - name: Upload hardened container diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardened-container-diagnostics
+          path: artifacts/container-smoke
+          if-no-files-found: ignore
+          retention-days: 7
 
   container-publish:
     name: Publish verified multi-architecture image

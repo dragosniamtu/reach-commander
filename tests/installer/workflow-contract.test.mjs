@@ -25,7 +25,7 @@ test('diagnostic uploads use the current Node 24 artifact action', async () => {
   const content = await workflow();
   const uploads = content.match(/uses: actions\/upload-artifact@v7/g) ?? [];
 
-  assert.equal(uploads.length, 2);
+  assert.equal(uploads.length, 3);
   assert.doesNotMatch(content, /uses: actions\/upload-artifact@v4/);
 });
 
@@ -362,7 +362,15 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
     /::error title=Hardened container smoke failed::Diagnostic handler reached\./,
   );
   assert.match(smoke, /::error title=Hardened container smoke failed::/);
-  assert.match(smoke, /annotation_detail="\$\{detail:0:4000\}"/);
+  assert.match(smoke, /diagnostics_path='artifacts\/container-smoke\/diagnostics\.txt'/);
+  assert.match(smoke, /printf '%s\\n' "\$detail" >"\$diagnostics_path"/);
+  assert.match(smoke, /annotation_logs="\$\{application_logs: -3000\}"/);
+  assert.match(smoke, /Application log tail:\\n%s/);
+  assert.match(smoke, /annotation_detail="\$\{annotation_detail:0:4000\}"/);
+  assert.match(
+    smoke,
+    /ReachCommander first-run setup code: \)\[A-Za-z0-9_-\]\+\/\\1\[REDACTED\]/,
+  );
   assert.match(smoke, /Failed command:\\n%s/);
   assert.match(smoke, /trap 'diagnose "\$\?" "\$BASH_COMMAND"' ERR/);
   assert.match(smoke, /if ! failure_context="\$\(docker compose[^\n]*2>&1\)"; then/);
@@ -378,6 +386,9 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   assert.match(smoke, /docker inspect --format 'status=/);
   assert.match(smoke, /docker inspect --format '\{\{json \.State\.Health\.Log\}\}'/);
   assert.match(smoke, /docker logs --tail 200 reachcommander-smoke/);
+  assert.match(smoke, /name: Upload hardened container diagnostics/);
+  assert.match(smoke, /name: hardened-container-diagnostics/);
+  assert.match(smoke, /path: artifacts\/container-smoke/);
   assert.match(
     smoke,
     /if \[\[ "\$status" == unhealthy \|\| "\$status" == missing \]\]; then\s+diagnose 1/,

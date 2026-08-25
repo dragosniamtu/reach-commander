@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+case "$*" in
+  '-j -4 address show up')
+    printf '%s\n' "${FAKE_IP_ADDRESS_JSON:-[]}"
+    ;;
+  '-j -4 route show default')
+    printf '%s\n' "${FAKE_IP_ROUTE_JSON:-[]}"
+    ;;
+  *)
+    printf 'unsupported fake ip invocation: %s\n' "$*" >&2
+    exit 64
+    ;;
+esac

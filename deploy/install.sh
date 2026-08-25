@@ -6,6 +6,7 @@ umask 077
 SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIBRARY="$SCRIPT_DIRECTORY/lib/common.sh"
 RENDERER="$SCRIPT_DIRECTORY/render_config.py"
+LAN_ADDRESS_HELPER="$SCRIPT_DIRECTORY/lan_address.py"
 COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
 UPDATER_COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.updater.yaml"
 MANAGEMENT_COMMAND="$SCRIPT_DIRECTORY/reachcommander"
@@ -22,6 +23,8 @@ BUNDLE_VERSION=''
 UPDATER_UNIT_PATH=''
 UPDATER_RUNTIME_DIRECTORY=''
 UPDATER_SOCKET_PATH=''
+ACCESS_MODE=''
+BIND_ADDRESS=''
 
 if [[ ! -f "$COMMON_LIBRARY" ]]; then
   printf 'ReachCommander: installer bundle is missing lib/common.sh\n' >&2
@@ -92,6 +95,7 @@ require_bundle() {
   local bundle_file
   for bundle_file in \
     "$RENDERER" \
+    "$LAN_ADDRESS_HELPER" \
     "$COMPOSE_TEMPLATE" \
     "$UPDATER_COMPOSE_TEMPLATE" \
     "$MANAGEMENT_COMMAND" \
@@ -410,6 +414,7 @@ write_request() {
   local default_right
   python3 "$RENDERER" create-request \
     --output "$request_path" \
+    --access-mode "$ACCESS_MODE" \
     --bind-address "$BIND_ADDRESS" \
     --port "$PORT" \
     --uid "$RUNTIME_UID" \
@@ -909,8 +914,27 @@ invoking_ids="$(rc_invoking_ids)"
 default_uid="${invoking_ids%%:*}"
 default_gid="${invoking_ids##*:}"
 
-prompt_value 'Bind address' '127.0.0.1'
-BIND_ADDRESS="$REPLY_VALUE"
+printf 'Network access mode:\n'
+printf '  1. Secure HTTPS reverse proxy (recommended)\n'
+printf '  2. Direct HTTP on trusted LAN\n'
+prompt_value 'Select network access mode' '1'
+case "$REPLY_VALUE" in
+  1)
+    ACCESS_MODE='secure-https'
+    BIND_ADDRESS='127.0.0.1'
+    ;;
+  2)
+    ACCESS_MODE='trusted-lan-http'
+    BIND_ADDRESS='0.0.0.0'
+    printf 'WARNING: trusted LAN HTTP listens on every host interface.\n' >&2
+    printf 'Credentials, cookies, filenames, and file contents are not encrypted in transit.\n' >&2
+    printf 'Do not expose this port through router forwarding or a public interface.\n' >&2
+    ;;
+  *)
+    rc_die 'network access mode must be 1 or 2'
+    exit 1
+    ;;
+esac
 prompt_value 'Host port' '8092'
 PORT="$REPLY_VALUE"
 rc_validate_port "$PORT"
@@ -932,10 +956,18 @@ DEFAULT_RIGHT="$REPLY_VALUE"
 validate_default_source "$DEFAULT_RIGHT" 'default right source'
 
 printf 'ReachCommander includes its own administrator login; proxy authentication is optional.\n'
-prompt_value "Type 'I have HTTPS' to confirm encrypted transport" ''
-if [[ "$REPLY_VALUE" != 'I have HTTPS' ]]; then
-  rc_die 'HTTPS acknowledgement did not match'
-  exit 1
+if [[ "$ACCESS_MODE" == 'secure-https' ]]; then
+  prompt_value "Type 'I have HTTPS' to confirm encrypted transport" ''
+  if [[ "$REPLY_VALUE" != 'I have HTTPS' ]]; then
+    rc_die 'HTTPS acknowledgement did not match'
+    exit 1
+  fi
+else
+  prompt_value "Type 'I understand LAN HTTP is unencrypted' to continue" ''
+  if [[ "$REPLY_VALUE" != 'I understand LAN HTTP is unencrypted' ]]; then
+    rc_die 'trusted LAN HTTP acknowledgement did not match'
+    exit 1
+  fi
 fi
 
 install_parent="$(dirname -- "$RC_INSTALL_ROOT")"
@@ -1022,6 +1054,19 @@ else
   INSTALL_TRANSACTION_ACTIVE=false
 fi
 
-printf 'ReachCommander is healthy at http://%s:%s\n' "$BIND_ADDRESS" "$PORT"
-printf 'Publish this endpoint through an HTTPS reverse proxy; proxy authentication is optional.\n'
+if [[ "$ACCESS_MODE" == 'trusted-lan-http' ]]; then
+  printf 'ReachCommander is ready on the trusted LAN:\n'
+  detected_addresses=''
+  if detected_addresses="$(python3 "$LAN_ADDRESS_HELPER" 2>/dev/null)"; then
+    while IFS= read -r detected_address; do
+      [[ -n "$detected_address" ]] || continue
+      printf '  http://%s:%s\n' "$detected_address" "$PORT"
+    done <<<"$detected_addresses"
+  fi
+  printf '  http://<server-lan-ip>:%s\n' "$PORT"
+  printf 'Trusted LAN HTTP is unencrypted and listens on every host interface.\n'
+else
+  printf 'ReachCommander is healthy at http://127.0.0.1:%s\n' "$PORT"
+  printf 'Publish this endpoint through an HTTPS reverse proxy; proxy authentication is optional.\n'
+fi
 printf 'Run reachcommander doctor to verify the deployment.\n'

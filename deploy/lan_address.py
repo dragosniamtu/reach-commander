@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import pathlib
 import subprocess
 from collections.abc import Collection
@@ -122,6 +123,15 @@ def _physical_interfaces(root: pathlib.Path = pathlib.Path("/sys/class/net")) ->
 
 
 def system_snapshot() -> tuple[object, object, set[str]]:
+    if os.environ.get("REACHCOMMANDER_TESTING") == "1":
+        try:
+            return (
+                json.loads(os.environ.get("FAKE_IP_ADDRESS_JSON", "[]")),
+                json.loads(os.environ.get("FAKE_IP_ROUTE_JSON", "[]")),
+                set(),
+            )
+        except json.JSONDecodeError:
+            return ([], [], set())
     return (
         _ip_json("address", "show", "up"),
         _ip_json("route", "show", "default"),

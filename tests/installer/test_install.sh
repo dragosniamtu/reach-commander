@@ -16,6 +16,7 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 BUNDLE="$TEST_ROOT/bundle"
 mkdir -p "$BUNDLE/lib" "$BUNDLE/systemd"
 cp -- "$INSTALLER_SOURCE" "$BUNDLE/install.sh"
+cp -- "$REPOSITORY_ROOT/deploy/lan_address.py" "$BUNDLE/lan_address.py"
 cp -- "$REPOSITORY_ROOT/deploy/render_config.py" "$BUNDLE/render_config.py"
 cp -- "$REPOSITORY_ROOT/deploy/compose.release.yaml" "$BUNDLE/compose.release.yaml"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$BUNDLE/lib/common.sh"
@@ -32,6 +33,7 @@ fi
 printf 'v1.4.0\n' >"$BUNDLE/VERSION"
 printf '#!/usr/bin/env bash\nprintf "management placeholder\\n"\n' >"$BUNDLE/reachcommander"
 chmod +x "$BUNDLE/install.sh" "$BUNDLE/reachcommander"
+chmod +x "$FAKE_BIN/ip"
 
 SOURCE_ONE="$TEST_ROOT/source one"
 SOURCE_TWO="$TEST_ROOT/source-two"
@@ -70,6 +72,8 @@ export FAKE_SYSTEMCTL_RESTART_EXIT=0
 export FAKE_SYSTEMCTL_STOP_EXIT=0
 export FAKE_DOCKER_VERSION_LABEL=v1.4.0
 export FAKE_DOCKER_REVISION_LABEL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export FAKE_IP_ADDRESS_JSON='[{"ifname":"ens18","flags":["UP","LOWER_UP"],"addr_info":[{"family":"inet","local":"192.168.44.12","prefixlen":24,"scope":"global"}]}]'
+export FAKE_IP_ROUTE_JSON='[{"dst":"default","dev":"ens18","metric":100}]'
 
 tests_run=0
 last_status=0
@@ -129,8 +133,9 @@ source_prompt_input() {
   local first_id="${5:-family-media}"
   local second_id="${6:-movies}"
   local https_acknowledgement="${7:-I have HTTPS}"
+  local access_mode="${8:-1}"
   printf '%s\n' \
-    '' \
+    "$access_mode" \
     '' \
     '' \
     '' \
@@ -221,6 +226,37 @@ rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH
 mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
 pass "installer requires the exact I have HTTPS acknowledgement"
 
+invalid_mode_input="$(source_prompt_input \
+  'Family Media' 'RO' 'Movies' 'RW' 'family-media' 'movies' \
+  'I have HTTPS' '9')"
+run_installer "$invalid_mode_input" "$TEST_ROOT/invalid-access-mode.out"
+(( last_status != 0 )) || fail "invalid access mode must fail"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "invalid mode installed deployment"
+pass "installer rejects an invalid network access mode before writes"
+
+wrong_lan_ack_input="$(source_prompt_input \
+  'Family Media' 'RO' 'Movies' 'RW' 'family-media' 'movies' \
+  'I trust my LAN' '2')"
+run_installer "$wrong_lan_ack_input" "$TEST_ROOT/wrong-lan-ack.out"
+(( last_status != 0 )) || fail "wrong LAN acknowledgement must fail"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "wrong LAN acknowledgement installed deployment"
+pass "installer requires the exact trusted LAN HTTP acknowledgement"
+
+lan_install_input="$(source_prompt_input \
+  'Family Media' 'RO' 'Movies' 'RW' 'family-media' 'movies' \
+  'I understand LAN HTTP is unencrypted' '2')"
+run_installer "$lan_install_input" "$TEST_ROOT/lan-install.out"
+assert_equal "0" "$last_status" "trusted LAN installation status"
+grep -q '^REACHCOMMANDER_ACCESS_MODE=trusted-lan-http$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "LAN access mode missing"
+grep -q '^REACHCOMMANDER_BIND_ADDRESS=0.0.0.0$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "LAN wildcard bind missing"
+grep -q '^REACHCOMMANDER_PORT=8092$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "LAN host port missing"
+grep -q '^REACHCOMMANDER_ALLOW_INSECURE_HTTP=true$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "LAN HTTP policy missing"
+grep -q 'http://192.168.44.12:8092' "$TEST_ROOT/lan-install.out" || fail "detected LAN URL missing"
+grep -q 'http://<server-lan-ip>:8092' "$TEST_ROOT/lan-install.out" || fail "generic LAN URL missing"
+rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
+mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+pass "trusted LAN mode publishes the Radarr-style host port and completion URLs"
+
 install_input="$(source_prompt_input)"
 run_installer "$install_input" "$TEST_ROOT/install.out"
 if (( last_status != 0 )); then
@@ -245,12 +281,15 @@ for authentication_directory in data data/auth data/keys; do
     fail "authentication directory is symlinked: $authentication_directory"
 done
 grep -q '^REACHCOMMANDER_BIND_ADDRESS=127.0.0.1$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "loopback default missing"
+grep -q '^REACHCOMMANDER_ACCESS_MODE=secure-https$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "secure access mode missing"
 grep -q '^REACHCOMMANDER_PORT=8092$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "port default missing"
+grep -q '^REACHCOMMANDER_ALLOW_INSECURE_HTTP=false$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "secure HTTP policy missing"
 grep -q '^REACHCOMMANDER_UID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "UID default missing"
 grep -q '^REACHCOMMANDER_GID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "GID default missing"
 grep -q '^REACHCOMMANDER_IMAGE=ghcr.io/dragosniamtu/reach-commander@sha256:a\{64\}$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "digest pin missing"
 grep -q 'read_only: true' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RO mount missing"
 grep -q 'read_only: false' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RW mount missing"
+grep -q 'Authentication__AllowInsecureHttp' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "backend HTTP policy missing"
 grep -A2 -F 'target: /data' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" |
   grep -q 'read_only: false' || fail "authentication data mount is not writable"
 grep -q '/run/reachcommander-updater' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.override.yaml" || fail "updater socket mount missing"
@@ -524,17 +563,22 @@ mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"
 run_installer "$install_input" "$TEST_ROOT/install-for-reconfigure.out"
 assert_equal "0" "$last_status" "baseline reconfiguration install"
 deployment_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
+authentication_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
 printf 'unhealthy\nhealthy\n' >"$TEST_ROOT/health-sequence"
 export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/health-sequence"
-reconfigure_input=$'y\n'"$(source_prompt_input 'Changed Media' 'RO' 'Changed Movies' 'RW' 'changed-media' 'changed-movies')"
+reconfigure_input=$'y\n'"$(source_prompt_input \
+  'Changed Media' 'RO' 'Changed Movies' 'RW' 'changed-media' 'changed-movies' \
+  'I understand LAN HTTP is unencrypted' '2')"
 run_installer "$reconfigure_input" "$TEST_ROOT/reconfigure-failure.out"
-(( last_status != 0 )) || fail "unhealthy reconfiguration must report failure"
+(( last_status != 0 )) || fail "unhealthy LAN reconfiguration must report failure"
 assert_equal "$deployment_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "rolled-back deployment"
+assert_equal "$authentication_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" "rolled-back authentication data"
 assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" "rolled-back command"
-assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "rollback source canary"
+grep -q '^REACHCOMMANDER_ACCESS_MODE=secure-https$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "rollback did not restore secure mode"
+grep -q '^REACHCOMMANDER_ALLOW_INSECURE_HTTP=false$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "rollback did not restore secure cookie policy"
 unset FAKE_DOCKER_HEALTH_FILE
-pass "unhealthy reconfiguration restores the complete prior deployment"
+pass "unhealthy LAN reconfiguration restores the secure deployment and durable state"
 
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
 mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"

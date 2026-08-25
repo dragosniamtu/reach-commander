@@ -54,7 +54,7 @@ public sealed class SystemUpdateContractTests
             SystemUpdateStatusFactory.Pinned("v1.3.0", "v1.3.0", Now, Now),
             SystemUpdateStatusFactory.Blocked("stable", "v1.3.0", "v1.4.0", Now, Now),
             SystemUpdateStatusFactory.Applying("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
-            SystemUpdateStatusFactory.Completed("stable", "v1.4.0", "operation-1", Now, Now),
+            SystemUpdateStatusFactory.Completed("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
             SystemUpdateStatusFactory.RolledBack("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
             SystemUpdateStatusFactory.Failed("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
         };
@@ -137,7 +137,7 @@ public sealed class SystemUpdateContractTests
         SystemUpdatePhase.Available => SystemUpdateStatusFactory.Available("stable", "v1.3.0", "v1.4.0", Now, Now),
         SystemUpdatePhase.Blocked => SystemUpdateStatusFactory.Blocked("stable", "v1.3.0", "v1.4.0", Now, Now),
         SystemUpdatePhase.Applying => SystemUpdateStatusFactory.Applying("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
-        SystemUpdatePhase.Completed => SystemUpdateStatusFactory.Completed("stable", "v1.4.0", "operation-1", Now, Now),
+        SystemUpdatePhase.Completed => SystemUpdateStatusFactory.Completed("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
         SystemUpdatePhase.RolledBack => SystemUpdateStatusFactory.RolledBack("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
         SystemUpdatePhase.Failed => SystemUpdateStatusFactory.Failed("stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now),
         _ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null),

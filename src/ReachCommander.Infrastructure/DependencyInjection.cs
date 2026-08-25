@@ -34,6 +34,8 @@ using ReachCommander.Infrastructure.FileOperations.Execution;
 using ReachCommander.Infrastructure.FileOperations.Persistence;
 using ReachCommander.Infrastructure.FileOperations.Planning;
 using ReachCommander.Infrastructure.Trash;
+using ReachCommander.Application.SystemUpdates;
+using ReachCommander.Infrastructure.SystemUpdates;
 
 namespace ReachCommander.Infrastructure;
 
@@ -173,6 +175,32 @@ public static class DependencyInjection
         services.AddSingleton<IHardwareMetricsSnapshotProvider>(provider =>
             provider.GetRequiredService<HardwareMetricsSnapshotCache>());
         services.AddHostedService<HardwareMetricsSampler>();
+
+        services
+            .AddOptions<SystemUpdateOptions>()
+            .Bind(configuration.GetSection(SystemUpdateOptions.SectionName));
+        services.AddSingleton<ISystemUpdateRequestIdGenerator, SystemUpdateRequestIdGenerator>();
+        services.AddSingleton<ISystemUpdateDelay, SystemUpdateDelay>();
+        var systemUpdateOptions = configuration
+            .GetSection(SystemUpdateOptions.SectionName)
+            .Get<SystemUpdateOptions>() ?? new SystemUpdateOptions();
+        if (OperatingSystem.IsLinux() &&
+            systemUpdateOptions.Enabled &&
+            File.Exists(systemUpdateOptions.SocketPath))
+        {
+            services.AddSingleton<ISystemUpdaterTransport, UnixSystemUpdaterTransport>();
+            services.AddSingleton<ISystemUpdaterGateway, SystemUpdaterGateway>();
+        }
+        else
+        {
+            services.AddSingleton<ISystemUpdaterGateway, UnavailableSystemUpdaterGateway>();
+        }
+
+        services.AddSingleton<SystemUpdateCoordinator>();
+        services.AddSingleton<ISystemUpdateService>(provider =>
+            provider.GetRequiredService<SystemUpdateCoordinator>());
+        services.AddHostedService(provider =>
+            provider.GetRequiredService<SystemUpdateCoordinator>());
         return services;
     }
 }

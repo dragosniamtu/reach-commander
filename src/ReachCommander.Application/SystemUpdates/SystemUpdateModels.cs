@@ -57,6 +57,27 @@ public static class SystemUpdateStatusFactory
             "system_update_protocol_incompatible",
             "The installed host updater is incompatible. Refresh the Ubuntu installer bundle.");
 
+    public static SystemUpdateStatus SupportedUnavailable(
+        string? channel,
+        string? currentVersion,
+        string reasonCode,
+        string detail,
+        DateTimeOffset? lastCheckedAt,
+        DateTimeOffset now) =>
+        Create(
+            supported: true,
+            channel,
+            currentVersion,
+            targetVersion: null,
+            SystemUpdatePhase.Unavailable,
+            updateAvailable: false,
+            canApply: false,
+            reasonCode,
+            detail,
+            operationId: null,
+            lastCheckedAt,
+            now);
+
     public static SystemUpdateStatus Checking(DateTimeOffset now) =>
         Create(
             supported: true,
@@ -174,6 +195,7 @@ public static class SystemUpdateStatusFactory
     public static SystemUpdateStatus Completed(
         string channel,
         string currentVersion,
+        string targetVersion,
         string operationId,
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now) =>
@@ -181,7 +203,7 @@ public static class SystemUpdateStatusFactory
             supported: true,
             channel,
             Required(currentVersion, nameof(currentVersion)),
-            Required(currentVersion, nameof(currentVersion)),
+            Required(targetVersion, nameof(targetVersion)),
             SystemUpdatePhase.Completed,
             updateAvailable: false,
             canApply: false,

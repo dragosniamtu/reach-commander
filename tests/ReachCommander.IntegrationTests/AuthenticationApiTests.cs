@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -72,6 +73,75 @@ public sealed class AuthenticationApiTests
         Assert.Contains("ReachCommander.Antiforgery=", cookie, StringComparison.Ordinal);
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Production_http_keeps_secure_cookies_by_default()
+    {
+        await using var factory = new ReachCommanderApiFactory(
+            useRealSecurity: true,
+            environmentName: "Production");
+
+        var sessionOptions = factory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var antiforgeryOptions = factory.Services
+            .GetRequiredService<IOptions<AntiforgeryOptions>>()
+            .Value;
+
+        Assert.Equal(CookieSecurePolicy.Always, sessionOptions.Cookie.SecurePolicy);
+        Assert.Equal(CookieSecurePolicy.Always, antiforgeryOptions.Cookie.SecurePolicy);
+    }
+
+    [Fact]
+    public async Task Production_trusted_lan_http_supports_setup_without_disabling_security()
+    {
+        await using var factory = new ReachCommanderApiFactory(
+            useRealSecurity: true,
+            environmentName: "Production",
+            configurationOverrides: new Dictionary<string, string?>
+            {
+                ["Authentication:AllowInsecureHttp"] = "true",
+            });
+        using var client = CreateClient(factory);
+
+        var sessionOptions = factory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var antiforgeryOptions = factory.Services
+            .GetRequiredService<IOptions<AntiforgeryOptions>>()
+            .Value;
+        Assert.Equal(CookieSecurePolicy.SameAsRequest, sessionOptions.Cookie.SecurePolicy);
+        Assert.Equal(CookieSecurePolicy.SameAsRequest, antiforgeryOptions.Cookie.SecurePolicy);
+
+        var antiforgeryResponse = await client.GetAsync("/api/auth/antiforgery");
+        var antiforgery = await antiforgeryResponse.Content.ReadFromJsonAsync<AntiforgeryResponse>();
+        var antiforgeryCookie = Assert.Single(antiforgeryResponse.Headers.GetValues("Set-Cookie"));
+        Assert.Equal(HttpStatusCode.OK, antiforgeryResponse.StatusCode);
+        Assert.DoesNotContain("; secure", antiforgeryCookie, StringComparison.OrdinalIgnoreCase);
+
+        client.DefaultRequestHeaders.Add("X-ReachCommander-CSRF", antiforgery!.RequestToken);
+        var setupCode = await factory.GetFreshSetupCodeAsync();
+        var setup = await client.PostAsJsonAsync(
+            "/api/auth/setup",
+            new { setupCode, username = "dragos", password = "a-long-test-password" });
+
+        Assert.Equal(HttpStatusCode.OK, setup.StatusCode);
+        var sessionCookie = Assert.Single(
+            setup.Headers.GetValues("Set-Cookie"),
+            value => value.StartsWith("ReachCommander.Session=", StringComparison.Ordinal));
+        Assert.DoesNotContain("; secure", sessionCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/sources")).StatusCode);
+
+        client.DefaultRequestHeaders.Remove("X-ReachCommander-CSRF");
+        var passwordChange = await client.PostAsJsonAsync(
+            "/api/auth/password",
+            new
+            {
+                currentPassword = "a-long-test-password",
+                newPassword = "a-different-test-password",
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, passwordChange.StatusCode);
     }
 
     [Fact]

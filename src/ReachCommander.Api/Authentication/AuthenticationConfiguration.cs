@@ -37,7 +37,7 @@ public static class AuthenticationConfiguration
                 options.Cookie.Name = "ReachCommander.Session";
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Strict;
-                options.Cookie.SecurePolicy = CookieSecurePolicy(environment);
+                options.Cookie.SecurePolicy = CookieSecurePolicy(configuration, environment);
                 options.ExpireTimeSpan = TimeSpan.FromHours(12);
                 options.SlidingExpiration = true;
                 options.EventsType = typeof(AccountCookieEvents);
@@ -56,7 +56,7 @@ public static class AuthenticationConfiguration
             options.Cookie.Name = "ReachCommander.Antiforgery";
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Strict;
-            options.Cookie.SecurePolicy = CookieSecurePolicy(environment);
+            options.Cookie.SecurePolicy = CookieSecurePolicy(configuration, environment);
         });
         services.Configure<MvcOptions>(options =>
             options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
@@ -105,8 +105,12 @@ public static class AuthenticationConfiguration
                 Window = TimeSpan.FromMinutes(1),
             });
 
-    private static CookieSecurePolicy CookieSecurePolicy(IHostEnvironment environment) =>
-        environment.IsDevelopment() || environment.IsEnvironment("Testing")
+    private static CookieSecurePolicy CookieSecurePolicy(
+        IConfiguration configuration,
+        IHostEnvironment environment) =>
+        environment.IsDevelopment() ||
+        environment.IsEnvironment("Testing") ||
+        configuration.GetValue<bool>("Authentication:AllowInsecureHttp")
             ? Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest
             : Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
 }

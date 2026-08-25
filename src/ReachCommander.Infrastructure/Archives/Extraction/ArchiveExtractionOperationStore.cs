@@ -52,6 +52,15 @@ internal sealed class ArchiveExtractionOperationStore(TimeProvider clock)
         }
     }
 
+    public bool HasActiveOperations()
+    {
+        lock (_gate)
+        {
+            PruneTerminal();
+            return _entries.Values.Any(entry => !IsTerminal(entry.State));
+        }
+    }
+
     public CancellationToken GetCancellationToken(string operationId)
     {
         lock (_gate)

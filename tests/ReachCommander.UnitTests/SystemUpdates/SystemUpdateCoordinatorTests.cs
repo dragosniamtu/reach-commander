@@ -128,6 +128,88 @@ public sealed class SystemUpdateCoordinatorTests
         Assert.Equal("system_update_unavailable", result.ReasonCode);
     }
 
+    [Fact]
+    public async Task Manual_checks_are_rate_limited_after_a_completed_check()
+    {
+        var coordinator = CreateCoordinator(new FakeUpdaterGateway(CurrentSnapshot));
+        await coordinator.CheckAsync(default);
+
+        await Assert.ThrowsAsync<SystemUpdateCheckRateLimitedException>(() =>
+            coordinator.CheckAsync(default));
+    }
+
+    [Fact]
+    public async Task Apply_blocks_active_operations_before_host_request()
+    {
+        var available = CurrentSnapshot with { Phase = "available", ReasonCode = "update_available" };
+        var gateway = new FakeUpdaterGateway(available);
+        var operations = new FakeOperationProbe { Active = true };
+        var coordinator = CreateCoordinator(gateway, operations: operations);
+        await coordinator.CheckAsync(default);
+
+        await Assert.ThrowsAsync<SystemUpdateBlockedByOperationsException>(() =>
+            coordinator.ApplyAsync(default));
+
+        Assert.Equal(0, gateway.ApplyCount);
+        Assert.Equal(SystemUpdatePhase.Blocked, (await coordinator.GetAsync(default)).Phase);
+    }
+
+    [Fact]
+    public async Task Accepted_apply_keeps_mutations_drained()
+    {
+        var available = CurrentSnapshot with { Phase = "available", ReasonCode = "update_available" };
+        var applying = available with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+        };
+        var gate = new SystemMutationGate();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available, applying),
+            mutationGate: gate);
+        await coordinator.CheckAsync(default);
+
+        await coordinator.ApplyAsync(default);
+
+        Assert.Null(gate.TryEnter());
+
+        await Assert.ThrowsAsync<SystemUpdateInProgressException>(() =>
+            coordinator.ApplyAsync(default));
+        Assert.Null(gate.TryEnter());
+    }
+
+    [Fact]
+    public async Task Drain_timeout_reopens_mutations_without_calling_host()
+    {
+        var available = CurrentSnapshot with { Phase = "available", ReasonCode = "update_available" };
+        var gateway = new FakeUpdaterGateway(available);
+        var gate = new RecordingMutationGate { DrainResult = false };
+        var coordinator = CreateCoordinator(gateway, mutationGate: gate);
+        await coordinator.CheckAsync(default);
+
+        await Assert.ThrowsAsync<SystemUpdateFailedException>(() =>
+            coordinator.ApplyAsync(default));
+
+        Assert.Equal(1, gate.CancelCount);
+        Assert.Equal(0, gateway.ApplyCount);
+    }
+
+    [Fact]
+    public async Task Operation_probe_failure_fails_closed_without_leaking_detail()
+    {
+        var available = CurrentSnapshot with { Phase = "available", ReasonCode = "update_available" };
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available),
+            operations: new ThrowingOperationProbe());
+
+        var result = await coordinator.CheckAsync(default);
+
+        Assert.Equal(SystemUpdatePhase.Blocked, result.Phase);
+        Assert.False(result.CanApply);
+        Assert.DoesNotContain("physical", result.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReasonFor(string phase) => phase switch
     {
         "current" => "up_to_date",
@@ -140,9 +222,13 @@ public sealed class SystemUpdateCoordinatorTests
 
     private static SystemUpdateCoordinator CreateCoordinator(
         ISystemUpdaterGateway gateway,
-        ISystemUpdateDelay? delay = null) => new(
+        ISystemUpdateDelay? delay = null,
+        ISystemMutationGate? mutationGate = null,
+        ISystemUpdateOperationProbe? operations = null) => new(
             gateway,
             delay ?? new NeverSystemUpdateDelay(),
+            mutationGate ?? new SystemMutationGate(),
+            operations ?? new FakeOperationProbe(),
             new FixedTimeProvider(Now),
             NullLogger<SystemUpdateCoordinator>.Instance);
 
@@ -246,5 +332,33 @@ public sealed class SystemUpdateCoordinatorTests
     {
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
             Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+    }
+
+    private sealed class FakeOperationProbe : ISystemUpdateOperationProbe
+    {
+        public bool Active { get; set; }
+
+        public Task<bool> HasActiveOperationsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(Active);
+    }
+
+    private sealed class ThrowingOperationProbe : ISystemUpdateOperationProbe
+    {
+        public Task<bool> HasActiveOperationsAsync(CancellationToken cancellationToken) =>
+            throw new IOException("physical /opt/reachcommander failure");
+    }
+
+    private sealed class RecordingMutationGate : ISystemMutationGate
+    {
+        public bool DrainResult { get; init; } = true;
+
+        public int CancelCount { get; private set; }
+
+        public IAsyncDisposable? TryEnter() => throw new NotSupportedException();
+
+        public Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
+            Task.FromResult(DrainResult);
+
+        public void CancelDrain() => CancelCount++;
     }
 }

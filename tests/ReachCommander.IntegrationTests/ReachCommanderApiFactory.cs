@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using ReachCommander.Application.Authentication;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Archives;
+using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Domain.Archives;
 using ReachCommander.Infrastructure.Archives.Catalog;
 using ReachCommander.Infrastructure.Archives.Volumes;
@@ -24,6 +25,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
     private readonly TestLogCollector _logs = new();
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
     private readonly TestArchiveWorkerClient _archiveWorker = new();
+    private readonly TestSystemUpdateService _systemUpdates = new();
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
 
@@ -140,6 +142,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public IReadOnlyList<string> LogMessages => _logs.Messages;
 
+    internal TestSystemUpdateService SystemUpdates => _systemUpdates;
+
     public HttpClient CreateCookieClient() => CreateClient(new()
     {
         AllowAutoRedirect = false,
@@ -174,6 +178,13 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public void ResetArchiveWorker() => _archiveWorker.Reset();
 
+    public async Task<bool> BeginSystemUpdateDrainAsync() =>
+        await Services.GetRequiredService<ISystemMutationGate>()
+            .BeginDrainAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+
+    public void CancelSystemUpdateDrain() =>
+        Services.GetRequiredService<ISystemMutationGate>().CancelDrain();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -200,6 +211,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<TimeProvider>(_clock);
             services.RemoveAll<IArchiveWorkerClient>();
             services.AddSingleton<IArchiveWorkerClient>(_archiveWorker);
+            services.RemoveAll<ISystemUpdateService>();
+            services.AddSingleton<ISystemUpdateService>(_systemUpdates);
             if (!_useRealSecurity)
             {
                 services
@@ -419,5 +432,49 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             1,
             1,
             DateTimeOffset.Parse("2026-08-20T08:00:00Z"));
+    }
+
+    internal sealed class TestSystemUpdateService : ISystemUpdateService
+    {
+        private static readonly DateTimeOffset Now =
+            DateTimeOffset.Parse("2026-08-25T10:00:00Z");
+        private SystemUpdateStatus _status = SystemUpdateStatusFactory.Unavailable(Now);
+        private bool _backgroundOperationsActive;
+        private bool _checkRateLimited;
+        private int _applyCount;
+
+        public int ApplyCount => Volatile.Read(ref _applyCount);
+
+        public void SetAvailable() => _status = SystemUpdateStatusFactory.Available(
+            "stable", "v1.3.0", "v1.4.0", Now, Now);
+
+        public void SetBackgroundOperationsActive(bool value) =>
+            _backgroundOperationsActive = value;
+
+        public void SetCheckRateLimited() => _checkRateLimited = true;
+
+        public void SetRolledBack() => _status = SystemUpdateStatusFactory.RolledBack(
+            "stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now);
+
+        public Task<SystemUpdateStatus> GetAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(_status);
+
+        public Task<SystemUpdateStatus> CheckAsync(CancellationToken cancellationToken) =>
+            _checkRateLimited
+                ? throw new SystemUpdateCheckRateLimitedException()
+                : Task.FromResult(_status);
+
+        public Task<SystemUpdateStatus> ApplyAsync(CancellationToken cancellationToken)
+        {
+            if (_backgroundOperationsActive)
+            {
+                throw new SystemUpdateBlockedByOperationsException();
+            }
+
+            Interlocked.Increment(ref _applyCount);
+            _status = SystemUpdateStatusFactory.Applying(
+                "stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now);
+            return Task.FromResult(_status);
+        }
     }
 }

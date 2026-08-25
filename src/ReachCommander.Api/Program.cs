@@ -6,6 +6,7 @@ using ReachCommander.Api.Errors;
 using ReachCommander.Api.Uploads;
 using ReachCommander.Application.Sources;
 using ReachCommander.Infrastructure;
+using ReachCommander.Api.SystemUpdates;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +17,7 @@ builder.Services
             new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<AuthenticationExceptionHandler>();
+builder.Services.AddExceptionHandler<SystemUpdateExceptionHandler>();
 builder.Services.AddExceptionHandler<FileOperationExceptionHandler>();
 builder.Services.AddExceptionHandler<FileAccessExceptionHandler>();
 builder.Services.AddOpenApi();
@@ -44,6 +46,7 @@ app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<SystemMutationGateMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {

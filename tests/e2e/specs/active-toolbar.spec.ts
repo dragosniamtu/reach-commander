@@ -134,6 +134,17 @@ test("keeps toolbar and metrics usable at supported compact width", async ({
   });
 });
 
+test("collapses brand copy before topbar controls compete for space", async ({ page }) => {
+  const brandCopy = page.locator(".brand-block > div");
+
+  await page.setViewportSize({ width: 1121, height: 800 });
+  await page.goto("/");
+  await expect(brandCopy).toBeVisible();
+
+  await page.setViewportSize({ width: 1120, height: 800 });
+  await expect(brandCopy).toBeHidden();
+});
+
 test("keeps the toolbar hierarchy clear at desktop widths", async ({
   page,
 }, testInfo) => {

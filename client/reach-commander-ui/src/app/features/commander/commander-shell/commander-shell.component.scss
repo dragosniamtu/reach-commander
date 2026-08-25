@@ -227,14 +227,14 @@
   }
 }
 @media (max-width: 1120px) {
+  .brand-block > div {
+    display: none;
+  }
   .read-mode {
     display: none !important;
   }
 }
 @media (max-width: 760px) {
-  .brand-block > div {
-    display: none;
-  }
   .top-actions > button:not(.install-app):not(.theme-toggle) {
     display: none;
   }

@@ -4,6 +4,10 @@ import test from 'node:test';
 
 const workflowUrl = new URL('../../.github/workflows/ci.yml', import.meta.url);
 const dockerignoreUrl = new URL('../../.dockerignore', import.meta.url);
+const containerOperationsSmokeUrl = new URL(
+  '../../tools/container_file_operations_smoke.py',
+  import.meta.url,
+);
 
 async function workflow() {
   return readFile(workflowUrl, 'utf8');
@@ -274,6 +278,41 @@ test('container smoke uses the real rendered non-root configuration', async () =
   }
   assert.doesNotMatch(smoke, /cat >[^\n]*sources\.json/);
   assert.doesNotMatch(smoke, /chmod 0644[^\n]*sources\.json/);
+});
+
+test('container smoke proves Copy, Trash, Restore, and host-path redaction', async () => {
+  const content = await workflow();
+  const smokeStart = content.indexOf('  container-smoke:');
+  const publishStart = content.indexOf('  container-publish:');
+  assert.notEqual(smokeStart, -1);
+  assert.notEqual(publishStart, -1);
+  const smoke = content.slice(smokeStart, publishStart);
+  const lifecycle = await readFile(containerOperationsSmokeUrl, 'utf8');
+
+  for (const marker of [
+    '--id source-a',
+    '--id source-b',
+    '--access rw',
+    'type=bind,source=$smoke_root/source-a,target=/sources/source-a',
+    'type=bind,source=$smoke_root/source-b,target=/sources/source-b',
+    'tools/container_file_operations_smoke.py',
+  ]) {
+    assert.ok(smoke.includes(marker), `container smoke is missing: ${marker}`);
+  }
+  for (const endpoint of [
+    '/api/file-operations/preview',
+    '/api/file-operations',
+    '/api/trash/preview-delete',
+    '/api/trash/delete',
+    '/api/trash?sourceId=source-b',
+    '/api/trash/preview-restore',
+    '/api/trash/restore',
+  ]) {
+    assert.ok(lifecycle.includes(endpoint), `container lifecycle is missing: ${endpoint}`);
+  }
+  assert.match(lifecycle, /assert_no_host_paths/);
+  assert.match(lifecycle, /copy-canary\.txt/);
+  assert.match(lifecycle, /trash-canary\.txt/);
 });
 
 test('container smoke preserves and annotates runtime diagnostics before cleanup', async () => {

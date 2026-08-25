@@ -164,7 +164,7 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: tests/e2e
 
-      - name: Run browser acceptance
+      - name: Run browser acceptance, including file operations and managed Trash
         run: python3 ../../tools/run_with_annotations.py "Browser acceptance failed" npm test
         working-directory: tests/e2e
 
@@ -276,11 +276,14 @@ jobs:
           }
           trap 'diagnose "$?" "$BASH_COMMAND"' ERR
           trap cleanup EXIT
-          mkdir -p "$smoke_root/source"
+          mkdir -p "$smoke_root/source-a/incoming" "$smoke_root/source-b/target"
+          printf '%s\n' 'copy payload' >"$smoke_root/source-a/incoming/copy.txt"
+          printf '%s\n' 'copy canary' >"$smoke_root/source-a/incoming/copy-canary.txt"
+          printf '%s\n' 'trash canary' >"$smoke_root/source-b/target/trash-canary.txt"
           mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys"
-          chmod 0755 "$smoke_root" "$smoke_root/source"
+          chmod 0755 "$smoke_root" "$smoke_root/source-a" "$smoke_root/source-b"
           chmod 0700 "$smoke_root/data" "$smoke_root/data/auth" "$smoke_root/data/keys"
-          sudo chown -R 1000:1000 "$smoke_root/data"
+          sudo chown -R 1000:1000 "$smoke_root/data" "$smoke_root/source-a" "$smoke_root/source-b"
           python3 deploy/render_config.py create-request \
             --output "$smoke_root/request.json" \
             --bind-address 127.0.0.1 \
@@ -290,11 +293,19 @@ jobs:
             --image ghcr.io/dragosniamtu/reach-commander:stable
           python3 deploy/render_config.py add-source \
             --request "$smoke_root/request.json" \
-            --id smoke \
-            --name Smoke \
-            --host-path "$smoke_root/source" \
-            --access ro \
+            --id source-a \
+            --name 'Source A' \
+            --host-path "$smoke_root/source-a" \
+            --access rw \
             --default-left true \
+            --default-right false
+          python3 deploy/render_config.py add-source \
+            --request "$smoke_root/request.json" \
+            --id source-b \
+            --name 'Source B' \
+            --host-path "$smoke_root/source-b" \
+            --access rw \
+            --default-left false \
             --default-right true
           python3 deploy/render_config.py render \
             --request "$smoke_root/request.json" \
@@ -314,7 +325,8 @@ jobs:
             --publish 127.0.0.1::8080 \
             --mount "type=bind,source=$smoke_root/deployment/config,target=/config,readonly" \
             --mount "type=bind,source=$smoke_root/data,target=/data" \
-            --mount "type=bind,source=$smoke_root/source,target=/sources/smoke,readonly" \
+            --mount "type=bind,source=$smoke_root/source-a,target=/sources/source-a" \
+            --mount "type=bind,source=$smoke_root/source-b,target=/sources/source-b" \
             reachcommander:smoke 2>&1)"; then
             diagnose 1 'docker run hardened candidate'
           fi
@@ -344,6 +356,22 @@ jobs:
               "$published" "$port" "$curl_output")"
             diagnose 1 'curl host health endpoint'
           fi
+          setup_code=''
+          for attempt in {1..20}; do
+            setup_code="$(docker logs reachcommander-smoke 2>&1 | sed -n 's/.*ReachCommander first-run setup code: \([A-Za-z0-9_-]\{40,\}\).*/\1/p' | tail -n 1)"
+            [[ -n "$setup_code" ]] && break
+            sleep 0.25
+          done
+          [[ -n "$setup_code" ]]
+          failure_context=''
+          if ! failure_context="$(REACHCOMMANDER_SMOKE_SETUP_CODE="$setup_code" \
+            python3 tools/container_file_operations_smoke.py \
+              --base-url "http://127.0.0.1:$port" \
+              --source-a-root "$smoke_root/source-a" \
+              --source-b-root "$smoke_root/source-b" 2>&1)"; then
+            diagnose 1 'authenticated Copy, Trash, and Restore lifecycle'
+          fi
+          printf '%s\n' "$failure_context"
 
   container-publish:
     name: Publish verified multi-architecture image

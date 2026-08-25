@@ -16,7 +16,8 @@ ReachCommander is a production-oriented, self-hosted dual-pane file manager insp
 
 ReachCommander demonstrates more than a file-browser UI:
 
-- **Server-authoritative mutations:** previews are short-lived plans; execution revalidates paths, fingerprints, conflicts, source policy, and write access.
+- **Server-authoritative mutations:** previews are short-lived plans; execution revalidates paths, fingerprints, conflicts, source policy, and write access before Copy, Move, Delete, Restore, MkDir, rename, upload, or extraction.
+- **Durable transfer safety:** one persisted FIFO queue stages copies beside their destination, commits before cross-device source removal, survives restarts, supports cancellation, and reports logical recovery data without leaking host paths.
 - **Safe batch algorithms:** two-phase temporary renames support swaps, cycles, and case-only changes with compensation and one-level Undo.
 - **Streamed upload safety:** multipart files are bounded, staged beside their destination, committed all-or-nothing, and serialized with renames through a shared directory lock.
 - **Isolated archive handling:** ZIP, RAR, and 7z parsing runs in a bounded child worker; previews are immutable, extraction is conflict-safe, and the worker never receives destination paths.
@@ -31,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 525 cross-platform .NET tests, 250 Angular tests, 2 PWA contract tests, and 23 real-browser scenarios |
+| Quality | 600+ cross-platform .NET checks, 295 Angular tests, PWA contract tests, and 27 real-browser scenarios |
 
 ## What ReachCommander includes
 
@@ -48,13 +49,15 @@ ReachCommander demonstrates more than a file-browser UI:
 - Bounded streamed multi-file uploads with review, progress, cancellation, conflict rejection, and compensation.
 - Read-only virtual browsing for supported single and multi-volume ZIP, RAR, and 7z archives.
 - F5 extraction of selected archive entries or one focused unopened archive, with immutable review, live progress, cancellation, conflict blocking, and recovery guidance.
+- F5 Copy, F6 Move, F7 MkDir, and F8 Delete with immutable previews, durable queued progress, Background/restore, Overwrite, Skip, and Create Unique Name conflict handling.
+- Source-local managed Trash with Restore, conflict-safe unique naming, selected permanent deletion, and source-scoped or all-source Empty Trash.
 - Live CPU, memory, storage, GPU, thermal, fan, network, and uptime telemetry when the host exposes it.
 - Installable PWA delivery with offline shell startup, explicit updates, and network-only filesystem/API data.
 - Built-in first-run setup and single-administrator login with a 12-hour sliding session and no Remember Me option.
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
-Copy, move, delete, single-item F4 rename, downloads, file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
+Single-item F4 rename, downloads, file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
 
 ## Architecture
 
@@ -71,6 +74,7 @@ Browser / installed PWA
                       ├─ JSON source catalog
                       ├─ canonical path security
                       ├─ local filesystem browser
+                      ├─ durable file-operation queue and managed Trash
                       ├─ controlled rename/upload/extraction executors
                       └─ bounded archive worker process
 ```
@@ -359,6 +363,20 @@ Uploads stream multipart bodies and stage files beside their destination. Arbitr
 
 The browser shows progress and permits cancellation while bytes are being sent. Finalization is intentionally non-cancellable. Folder upload, drag-and-drop, clipboard/URL import, resume, and a background transfer queue are not included.
 
+## File operations and managed Trash
+
+ReachCommander supports **Copy (F5)**, **Move (F6)**, **Create Directory (F7)**, and **Delete (F8)**. F5 keeps archive extraction priority when the current selection is an eligible archive. Filesystem Copy/Move captures the selected visible rows—or the focused non-parent row—and the opposite pane's writable filesystem folder before opening its review. Editing the destination path creates a new server preview; later pane navigation cannot redirect the captured operation.
+
+Copy and Move conflicts support **Overwrite**, **Skip**, and **Create Unique Name** (`file (2).txt`). Start remains disabled until every conflict has a valid decision. Submitted operations enter one durable FIFO shared with Trash work. The blocking progress dialog reports items, bytes, percentage when known, throughput, elapsed time, ETA, queue position, cancellation state, and safe item outcomes. **Background** minimizes it to the top bar; selecting that task restores the same modal. Logging out clears browser polling without cancelling the authenticated server job, and the task is restored after the next login.
+
+Move uses copy-then-delete semantics when a direct rename is unavailable: staged output is committed first, durable state is flushed, and only then is the source removed. Cancellation is cooperative and never interrupts an atomic finalization step. Startup marks abandoned in-flight work as interrupted and conservatively cleans only entries whose persisted identity still proves ownership. See the [file operations runbook](docs/operations.md) for recovery guidance.
+
+Delete defaults to source-local managed Trash when that writable source can be safely owned. Trash records the original logical path and never expires automatically. Open **Trash** in the top toolbar to filter by source, select multiple items, Restore them, permanently delete selected Trash entries, or Empty Trash for one source or all sources. Restore can recreate missing parent folders and uses the same conflict decisions as Copy/Move.
+
+Permanent deletion never silently replaces Trash. The UI and API require this exact acknowledgement: **“This deletion is permanent, cannot be undone, and is unrecoverable.”** If managed Trash is unavailable, the dialog explains why and requires permanent mode explicitly.
+
+Back up `/data` for authentication plus durable operation metadata, and back up each writable source's `.reachcommander-trash` when deleted files must remain recoverable. Uninstallers do not remove source-local Trash. Read-only sources may be copied from but cannot be moved, deleted, restored into, or used for MkDir. None of these controls replaces filesystem backups.
+
 ## Archives
 
 Press `Enter` or double-click a supported primary archive to open it as a virtual folder. The pane displays `Archive · RO`, uses a source-qualified path such as `Downloads:/photos.zip!/Family`, and keeps search, sort, selection, tabs, refresh, and parent navigation available. Archive contents are always read-only: Add files and Multi-Rename remain disabled, and an archive-looking entry inside another archive remains an ordinary file because nested browsing is not supported.
@@ -429,9 +447,12 @@ If normal compensation cannot safely remove staging data, the UI reports only lo
 | `Ctrl+T` | Create a tab at the active path |
 | `Ctrl+W` | Close the active tab; the last tab is replaced with a root tab |
 | Type while a pane has focus | Append to its active-panel search |
-| `F5` | Extract eligible selected archive entries or one focused unopened archive into the opposite pane |
+| `F5` | Extract an eligible archive; otherwise Copy filesystem selection to the opposite pane |
+| `F6` | Move filesystem selection to the opposite pane |
+| `F7` | Create one directory in the active writable filesystem folder |
+| `F8` | Review recoverable Trash or explicitly confirmed permanent deletion |
 | `F9` | Toggle the command reference menu |
-| `F3`, `F4`, `F6`–`F8` | Reserved/disabled until a later milestone |
+| `F3`, `F4` | Reserved/disabled until a later milestone |
 
 Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source buttons, toolbar actions, tabs, sortable headings, the path field, search, and F9 also work with pointer/touch input.
 
@@ -458,6 +479,20 @@ POST /api/archive-extractions/preview
 POST /api/archive-extractions/{planId}/execute
 GET /api/archive-extractions/{operationId}
 POST /api/archive-extractions/{operationId}/cancel
+POST /api/file-operations/preview
+POST /api/file-operations
+GET /api/file-operations
+GET /api/file-operations/{operationId}
+POST /api/file-operations/{operationId}/cancel
+DELETE /api/file-operations/{operationId}
+POST /api/directories
+POST /api/trash/preview-delete
+POST /api/trash/delete
+GET /api/trash
+POST /api/trash/preview-restore
+POST /api/trash/restore
+DELETE /api/trash/items
+DELETE /api/trash
 GET /health
 ```
 
@@ -471,7 +506,7 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 - The backend rejects NUL characters, relative traversal, rooted paths, drive-qualified paths, and UNC paths.
 - Every request is resolved beneath its configured source. Existing path components are canonicalized one by one, symbolic links are resolved, and containment is checked after each resolution and on the final path.
 - A symlink that escapes its source is rejected even if the final target exists.
-- Multi-Rename, Add files, and archive extraction are the only current write paths. All require explicit `readOnly: false`, re-resolve logical paths beneath a configured source, reject symbolic-link targets, and serialize overlapping directory mutations. The archive worker never receives the destination root or final names.
+- Copy, Move, MkDir, managed Trash, Restore, permanent Delete, Empty Trash, Multi-Rename, Add files, and archive extraction are the current write paths. All require explicit `readOnly: false`, re-resolve logical paths beneath configured sources, reject symbolic-link targets, reserved internal names, and unsafe traversal, and serialize overlapping mutations. The archive worker never receives the destination root or final names.
 - The checked-in sample bind mounts remain read-only, providing defense in depth until an administrator opts a narrow source into writes at both configuration and filesystem layers.
 - The PWA service worker has no API data groups and explicitly excludes `/api/**` and `/health` from navigation fallback; it cannot provide stale filesystem or operation results offline.
 - Filesystem exceptions are converted to stable, non-leaking Problem Details. Automated tests use temporary fixture trees, never developer data.
@@ -512,10 +547,9 @@ Archive fixture generation, immutable upstream provenance, expected catalogs, an
 
 ## Roadmap
 
-- **Milestone 2A — controlled active-panel operations (current):** Total Commander-inspired Multi-Rename, complete authoritative preview, one-level Undo, wildcard search, bounded all-or-nothing uploads, read-only archive browsing, and controlled extraction.
-- **Milestone 2B — remaining safe mutations:** confirmation dialogs and secure F4 single rename, F5 copy, F6 move, F7 create directory, and F8 delete endpoints.
-- **Milestone 3 — resilient transfers:** queued jobs, `BackgroundService`, channels, SignalR progress, throughput/ETA, cancellation, failure recovery, and verified copy-then-delete cross-device moves.
+- **Milestone 2 — controlled active-panel operations (current):** Multi-Rename, bounded uploads, archive browsing/extraction, F5 Copy, F6 Move, F7 MkDir, F8 Delete, durable queued progress, and managed Trash/Restore.
+- **Milestone 3 — richer transfers:** optional SignalR push progress, pause/resume where the underlying operation can prove safety, downloads, and administrator-visible recovery tooling.
 - **Milestone 4 — multi-user access control:** additional users, per-source permissions, read-only roles, settings, and feature flags.
 - **Milestone 5 — richer file workflows:** image/video/PDF/text previews, thumbnail mode, recursive search, downloads, optional nested/password archive workflows, bookmarks, history, and favorites.
 
-The recommended next step is Milestone 2B as a separate security-reviewed slice: define each mutation's authorization/read-only invariants first, add temporary-filesystem tests, implement confirmation UX, then expose the function keys one operation at a time.
+The recommended next step is a security-reviewed download and preview slice that preserves the same configured-source and logical-path boundary.

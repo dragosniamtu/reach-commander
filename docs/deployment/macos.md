@@ -89,7 +89,7 @@ The password is never written into the image, Compose file, installer output, or
   data/keys/
 ```
 
-`data/auth/account.json` contains the salted account record. `data/keys` contains the ASP.NET Core Data Protection keys used for session cookies. Back up both together, protect the backup like credentials, and restore them only while ReachCommander is stopped. Deleting only `data/auth/account.json` starts account recovery on the next run; deleting `data/keys` signs out existing sessions but does not reset the account.
+`data/auth/account.json` contains the salted account record. `data/keys` contains the ASP.NET Core Data Protection keys used for session cookies. The `data` tree also contains durable file-operation metadata. Back it up while ReachCommander is stopped, protect the backup like credentials, and restore it as one unit. Separately back up `.reachcommander-trash` inside every writable configured source when deleted files must remain recoverable; installer lifecycle backups do not copy source-local Trash. See the [file operations runbook](../operations.md). Deleting only `data/auth/account.json` starts account recovery on the next run; deleting `data/keys` signs out existing sessions but does not reset the account.
 
 ## Installation state and lifecycle
 
@@ -169,4 +169,4 @@ mv "$RC_MAC_ROOT" "$RC_REMOVED"
 printf 'ReachCommander state retained at %s\n' "$RC_REMOVED"
 ```
 
-Verify the retained account, key, and configuration backup before deleting it manually. Source folders and external volumes are outside the installer-owned directory and are never removal targets.
+Verify the retained account, key, operation metadata, and configuration backup before deleting it manually. Source folders, external volumes, and their source-local `.reachcommander-trash` directories are outside the installer-owned directory and are never removal targets.

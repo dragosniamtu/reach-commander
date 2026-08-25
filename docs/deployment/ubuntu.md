@@ -98,9 +98,11 @@ The interactive installer asks for:
 
 The first installation always resolves `stable` and persists its exact image digest. After installation, `reachcommander update` can follow `stable`, switch to `edge`, or select an exact `vX.Y.Z` release.
 
-Start with read-only sources. Enable read-write only for a narrow directory that genuinely needs upload, rename, or extraction. The installer maps each host directory to an isolated container path; `config/sources.json` contains container paths, while the canonical host paths are retained only in root-owned `state/source-mounts.json` for validation and safe uninstall backup.
+Start with read-only sources. Enable read-write only for a narrow directory that genuinely needs Copy/Move destinations, MkDir, managed Trash/Restore, upload, rename, or extraction. The installer maps each host directory to an isolated container path; `config/sources.json` contains container paths, while the canonical host paths are retained only in root-owned `state/source-mounts.json` for validation and safe uninstall backup.
 
-The configured UID/GID must already be able to access each source. Never recursively change source ownership with `chown` or permissions with `chmod` just to make the container work. Inspect the path one component at a time with `namei -l /your/source`, then grant only the minimum required access to the exact directory using deliberate ownership, group membership, or an ACL. ReachCommander never creates, mounts, changes ownership of, or deletes source data.
+The configured UID/GID must already be able to access each source. Never recursively change source ownership with `chown` or permissions with `chmod` just to make the container work. Inspect the path one component at a time with `namei -l /your/source`, then grant only the minimum required access to the exact directory using deliberate ownership, group membership, or an ACL. The installer never creates, mounts, changes ownership of, or deletes source data. The authenticated application can mutate sources explicitly configured read-write through its reviewed file operations.
+
+Read the [file operations and managed Trash runbook](../operations.md) before enabling writes. `/opt/reachcommander/data` holds durable queue metadata, while recoverable deleted payloads live in source-local `.reachcommander-trash`. Back up both separately when Trash recovery matters.
 
 On success the installer creates:
 
@@ -255,7 +257,7 @@ The command first asks what to do with authentication data:
 - `retain` is the default. It removes the container, command, and generated deployment files but leaves the inactive authentication tree at `/opt/reachcommander/data` and prints that exact path.
 - `backup` stops the service, copies the generated deployment plus every allowlisted authentication file to a timestamped directory under `/var/backups/reachcommander`, sets authentication backup files to mode `0600`, flushes them, compares every copy byte-for-byte, and only then removes the original data tree.
 
-After that selection, the command requires the exact confirmation `uninstall ReachCommander`. It revalidates every recorded source path and the authentication-data tree, stops the application before its final validation or backup, tears down Compose without deleting volumes, and removes only the installer-owned allowlist. Source directories and their contents are never removed. If final validation or verified backup creation fails, uninstall preserves the deployment and attempts to restart the previously healthy service.
+After that selection, the command requires the exact confirmation `uninstall ReachCommander`. It revalidates every recorded source path and the authentication-data tree, stops the application before its final validation or backup, tears down Compose without deleting volumes, and removes only the installer-owned allowlist. Source directories and their contents are never removed by the uninstaller. This includes source-local `.reachcommander-trash`, which is not copied into the installer backup and must be retained or backed up with its source. If final validation or verified backup creation fails, uninstall preserves the deployment and attempts to restart the previously healthy service.
 
 Keep a verified backup until you have confirmed that you no longer need the account, cookie keys, generated source mapping, or pinned image record.
 

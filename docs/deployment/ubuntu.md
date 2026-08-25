@@ -246,6 +246,27 @@ An update resolves the requested channel to an exact digest, backs up the deploy
 
 Run `sudo reachcommander status` to see the saved channel and exact running image. Use `sudo reachcommander doctor` and `sudo reachcommander logs` before retrying a failed update.
 
+### Automatic system update control
+
+The installer also deploys the root-owned `reachcommander-updater.service`. ReachCommander's backend checks the fixed `dragosniamtu/reach-commander` GitHub repository and matching GHCR package at startup and every six hours. It enables the toolbar button only when the trusted helper reports a different immutable digest. Discovery is automatic, but Apply always requires administrator confirmation and is refused while durable file or archive operations are active. Exact version pins remain pinned and do not follow new releases.
+
+The application is never given Docker control. Its container mounts the restricted Unix socket directory `/run/reachcommander-updater` read-only and never mounts `/var/run/docker.sock`. Browser and API requests contain no channel, image, digest, executable, arguments, or target version. The root helper owns discovery, backup, Compose activation, health validation, rollback, and its durable result journal.
+
+Existing installations must run the new checksum-verified installer once, using the same inspect, `SHA256SUMS`, and `sha256sum --check --strict SHA256SUMS` process described above. Rerunning it preserves the configured sources, authentication record, Data Protection keys, and pinned image while installing the helper, systemd unit, and Compose socket override. Until that one-time migration is complete, the UI reports system updates as unavailable. Updater helper upgrades are host-owned and therefore still require a future installer refresh; updating the application image does not replace the root helper.
+
+Inspect the boundary and its journal without changing state:
+
+```bash
+sudo systemctl status reachcommander-updater.service
+sudo journalctl -u reachcommander-updater.service --since today
+sudo reachcommander status
+sudo reachcommander doctor
+```
+
+During Apply, ReachCommander temporarily drains new mutations, waits for active work to finish, and restarts. Keep the browser tab open: it reconnects automatically, activates the matching PWA shell, and reloads once. If the candidate fails its health check, the helper restores the prior digest and reports the rollback. Preserve `/opt/reachcommander/state/system-update.json` and the normal update backups when investigating a failure.
+
+The in-app control is supported only for Ubuntu installer-managed deployments. It remains safely disabled for Windows development, macOS Docker Desktop, and manual container deployments because those environments do not have this restricted systemd boundary.
+
 ## Uninstall without touching source data
 
 ```bash

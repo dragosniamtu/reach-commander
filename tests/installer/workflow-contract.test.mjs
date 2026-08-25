@@ -369,3 +369,23 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
     'failure diagnostics must be installed before cleanup',
   );
 });
+
+test('Ubuntu updater contracts and hardened socket boundary gate publication', async () => {
+  const content = await workflow();
+  const acceptanceStart = content.indexOf('  acceptance:');
+  const smokeStart = content.indexOf('  container-smoke:');
+  const publishStart = content.indexOf('  container-publish:');
+  const acceptance = content.slice(acceptanceStart, smokeStart);
+  const smoke = content.slice(smokeStart, publishStart);
+
+  assert.match(acceptance, /test_updater_protocol\.py tests\/installer\/test_updater_service\.py/);
+  assert.match(acceptance, /systemd-analyze verify deploy\/systemd\/reachcommander-updater\.service/);
+  assert.match(acceptance, /Browser acceptance failed/);
+  assert.match(smoke, /\/run\/reachcommander-updater/);
+  assert.match(smoke, /if grep -Fx '\/var\/run\/docker\.sock'/);
+  assert.doesNotMatch(smoke, /--mount[^\n]*\/var\/run\/docker\.sock/);
+  assert.ok(
+    acceptance.indexOf('test_updater_protocol.py') < acceptance.indexOf('name: Restore .NET dependencies'),
+    'updater contracts must run before application and publication gates',
+  );
+});

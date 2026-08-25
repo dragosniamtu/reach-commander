@@ -37,7 +37,10 @@ describe('SystemUpdateStore', () => {
   });
 
   it('loads cached status then performs one fresh check without a six-hour browser timer', async () => {
-    api.getResults.push(() => Promise.resolve(status({ phase: 'current' })));
+    api.getResults.push(() => Promise.resolve(status({
+      phase: 'current',
+      lastCheckedAt: null,
+    })));
     api.checkResult = status({
       phase: 'available',
       targetVersion: 'v1.4.0',
@@ -52,6 +55,36 @@ describe('SystemUpdateStore', () => {
     expect(store.status()?.phase).toBe('available');
     expect(store.canApply()).toBe(true);
     expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it('does not POST a redundant check when the cached deployment is unsupported', async () => {
+    api.getResults.push(() => Promise.resolve(status({
+      supported: false,
+      channel: null,
+      phase: 'unavailable',
+      reasonCode: 'unsupported_installation',
+      detail: 'System updates require an Ubuntu installer-managed deployment.',
+      lastCheckedAt: null,
+    })));
+
+    await store.start();
+
+    expect(api.getCount).toBe(1);
+    expect(api.checkCount).toBe(0);
+    expect(store.status()?.reasonCode).toBe('unsupported_installation');
+  });
+
+  it('does not POST a redundant check when backend discovery is recent', async () => {
+    api.getResults.push(() => Promise.resolve(status({
+      phase: 'current',
+      lastCheckedAt: new Date().toISOString(),
+    })));
+
+    await store.start();
+
+    expect(api.getCount).toBe(1);
+    expect(api.checkCount).toBe(0);
+    expect(store.status()?.phase).toBe('current');
   });
 
   it('retains applying state across disconnects and completes after server recovery', async () => {

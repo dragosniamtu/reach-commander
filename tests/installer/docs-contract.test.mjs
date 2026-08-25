@@ -213,3 +213,35 @@ test('published operator material never pipes downloaded code into a shell', asy
   const content = (await Promise.all(paths.map(readRequired))).join('\n');
   assert.doesNotMatch(content, /(?:curl|wget)[^\r\n|]*\|[^\r\n]*(?:sh|bash)/i);
 });
+
+test('operator docs define the Ubuntu installer-managed system update boundary', async () => {
+  const paths = [
+    'README.md',
+    'docs/INSTALL.md',
+    'docs/deployment/ubuntu.md',
+    'docs/operations.md',
+    'deploy/README.md',
+  ];
+  const content = (await Promise.all(paths.map(readRequired))).join('\n');
+  for (const required of [
+    'reachcommander-updater.service',
+    'startup and every six hours',
+    'administrator confirmation',
+    'exact version pins remain pinned',
+    '/run/reachcommander-updater',
+    'never mounts',
+    '/var/run/docker.sock',
+    'Ubuntu installer-managed',
+    'manual container',
+    'macOS',
+    'Windows',
+    'sudo systemctl status reachcommander-updater.service',
+    'sudo journalctl -u reachcommander-updater.service --since today',
+    'sudo reachcommander status',
+    'sudo reachcommander doctor',
+  ]) {
+    assert.ok(content.toLowerCase().includes(required.toLowerCase()), `update docs are missing: ${required}`);
+  }
+  assert.match(content, /existing installations[\s\S]*run[\s\S]*checksum-verified installer/i);
+  assert.match(content, /updater helper[\s\S]*future installer/i);
+});

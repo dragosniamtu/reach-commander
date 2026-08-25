@@ -287,7 +287,7 @@ jobs:
           printf '%s\n' 'copy payload' >"$smoke_root/source-a/incoming/copy.txt"
           printf '%s\n' 'copy canary' >"$smoke_root/source-a/incoming/copy-canary.txt"
           printf '%s\n' 'trash canary' >"$smoke_root/source-b/target/trash-canary.txt"
-          mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys"
+          mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys" "$smoke_root/updater"
           chmod 0755 "$smoke_root" "$smoke_root/source-a" "$smoke_root/source-b"
           chmod 0700 "$smoke_root/data" "$smoke_root/data/auth" "$smoke_root/data/keys"
           sudo chown -R 1000:1000 "$smoke_root/data" "$smoke_root/source-a" "$smoke_root/source-b"
@@ -332,6 +332,7 @@ jobs:
             --publish 127.0.0.1::8080 \
             --mount "type=bind,source=$smoke_root/deployment/config,target=/config,readonly" \
             --mount "type=bind,source=$smoke_root/data,target=/data" \
+            --mount "type=bind,source=$smoke_root/updater,target=/run/reachcommander-updater,readonly" \
             --mount "type=bind,source=$smoke_root/source-a,target=/sources/source-a" \
             --mount "type=bind,source=$smoke_root/source-b,target=/sources/source-b" \
             reachcommander:smoke 2>&1)"; then
@@ -370,6 +371,12 @@ jobs:
             sleep 0.25
           done
           [[ -n "$setup_code" ]]
+          mount_destinations="$(docker inspect --format '{{range .Mounts}}{{println .Destination}}{{end}}' reachcommander-smoke)"
+          grep -Fx '/run/reachcommander-updater' <<<"$mount_destinations"
+          if grep -Fx '/var/run/docker.sock' <<<"$mount_destinations"; then
+            failure_context='The application container must never mount the Docker socket.'
+            diagnose 1 'verify updater socket boundary'
+          fi
           failure_context=''
           if ! failure_context="$(REACHCOMMANDER_SMOKE_SETUP_CODE="$setup_code" \
             python3 tools/container_file_operations_smoke.py \

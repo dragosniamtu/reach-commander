@@ -14,6 +14,7 @@ import { PwaService } from '../pwa/pwa.service';
 const initialPollMilliseconds = 1_000;
 const maximumPollMilliseconds = 15_000;
 const maximumReconnectAttempts = 24;
+const automaticCheckIntervalMilliseconds = 6 * 60 * 60 * 1_000;
 
 export interface SystemUpdateScheduler {
   schedule(callback: () => Promise<void> | void, delayMilliseconds: number): unknown;
@@ -133,7 +134,7 @@ export class SystemUpdateStore {
       }));
     }
 
-    if (this.isCurrentGeneration(generation)) {
+    if (this.isCurrentGeneration(generation) && requiresFreshCheck(this.status())) {
       await this.check();
     }
   }
@@ -415,6 +416,31 @@ function terminalResultId(status: SystemUpdateStatusDto | null): string | null {
   }
 
   return status.operationId ?? status.updatedAt;
+}
+
+function requiresFreshCheck(status: SystemUpdateStatusDto | null): boolean {
+  if (!status) {
+    return true;
+  }
+
+  if (!status.supported || status.reasonCode === 'version_pinned') {
+    return false;
+  }
+
+  if (status.phase === 'applying' ||
+      status.phase === 'completed' ||
+      status.phase === 'rolledBack' ||
+      status.phase === 'failed') {
+    return false;
+  }
+
+  if (!status.lastCheckedAt) {
+    return true;
+  }
+
+  const lastCheckedAt = Date.parse(status.lastCheckedAt);
+  return !Number.isFinite(lastCheckedAt) ||
+    Date.now() - lastCheckedAt >= automaticCheckIntervalMilliseconds;
 }
 
 function isConnectionLoss(error: unknown): boolean {

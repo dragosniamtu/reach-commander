@@ -323,6 +323,14 @@ The service worker caches only the versioned Angular shell, styles, and branding
 
 When a complete application update has downloaded, ReachCommander displays **Update available** without interrupting the current file operation. Select **Reload** when ready to switch to the new version, or **Later** to keep the current version until a future reload.
 
+### Full-stack system updates
+
+Ubuntu installer-managed deployments also expose a system-update control immediately before hardware telemetry. The backend asks the root-owned `reachcommander-updater.service` to check the configured repository and channel at startup and every six hours. Discovery is automatic; applying an update is always manual and requires administrator confirmation in the Angular UI. The browser sends no image, digest, channel, tag, or host command.
+
+The application container receives only the restricted Unix socket directory at `/run/reachcommander-updater`. It never mounts `/var/run/docker.sock`. The helper resolves `stable` to the newest non-prerelease GitHub release and its fixed GHCR digest, or resolves `edge` to its current GHCR digest and revision. Exact version pins remain pinned. A successful update health-checks the matching backend and PWA shell; an unhealthy candidate is rolled back.
+
+Existing Ubuntu installations must run the new checksum-verified installer once to install the helper, systemd unit, and socket mount. System updates are intentionally unavailable for Windows development, macOS Docker Desktop, and manual container deployments. See the [Ubuntu installation guide](docs/deployment/ubuntu.md#automatic-system-update-control) for migration and recovery commands.
+
 ## Active-panel toolbar and search
 
 The toolbar on the left side of the top bar always reflects the active panel, source, and logical directory; hardware monitoring remains on the right. Opening Multi-Rename or Add files captures that context, so switching panels cannot redirect an operation already under review.

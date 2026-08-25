@@ -66,6 +66,23 @@ When a task reports `interrupted`, `completedWithErrors`, or a recovery warning:
 
 Do not delete operation metadata to make a warning disappear. Preserve `/data` and the affected source tree for diagnosis.
 
+## Full-stack system update operations
+
+Only an Ubuntu installer-managed deployment provides the in-app system update boundary. Its `reachcommander-updater.service` performs automatic checks at startup and every six hours, while applying a discovered digest requires administrator confirmation. Exact version pins remain pinned. Windows, macOS, and manual container deployments report the feature as unsupported and continue to use their documented platform update commands.
+
+The application can ask the helper only for status, Check, or Apply through `/run/reachcommander-updater/updater.sock`; it never mounts `/var/run/docker.sock`. Apply blocks new file mutations, drains existing request leases, and rechecks the durable Copy/Move/Trash/archive queues before the host update begins. The browser reconnects after restart. A failed candidate is rolled back to the prior healthy digest when possible.
+
+For diagnosis, do not edit the helper journal or transaction state. Capture these outputs and keep physical source paths out of public reports:
+
+```bash
+sudo systemctl status reachcommander-updater.service
+sudo journalctl -u reachcommander-updater.service --since today
+sudo reachcommander status
+sudo reachcommander doctor
+```
+
+Existing installations must run the checksum-verified installer once to receive this boundary. Updater helper changes also require a future installer refresh because an unprivileged application update cannot replace root-owned code.
+
 ## Capacity and permissions
 
 An `RW` badge means application policy permits controlled writes; it does not grant host access. The process/container UID must have the required permissions and Docker bind mounts must be `rw`. Copy may read from an `RO` source, but Move, Delete, MkDir, Restore destinations, and Trash require writable policy and filesystem access.

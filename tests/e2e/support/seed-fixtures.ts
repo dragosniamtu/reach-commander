@@ -24,6 +24,54 @@ interface SourcesTemplate {
   sources: SourceTemplate[];
 }
 
+export type SystemUpdatePhase =
+  | 'unavailable'
+  | 'checking'
+  | 'current'
+  | 'available'
+  | 'blocked'
+  | 'applying'
+  | 'completed'
+  | 'rolledBack'
+  | 'failed';
+
+export interface SystemUpdateFixture {
+  readonly protocolVersion: number;
+  readonly supported: boolean;
+  readonly channel: string | null;
+  readonly currentVersion: string | null;
+  readonly targetVersion: string | null;
+  readonly phase: SystemUpdatePhase;
+  readonly updateAvailable: boolean;
+  readonly canApply: boolean;
+  readonly reasonCode: string | null;
+  readonly detail: string | null;
+  readonly operationId: string | null;
+  readonly lastCheckedAt: string | null;
+  readonly updatedAt: string;
+}
+
+export function systemUpdateFixture(
+  overrides: Partial<SystemUpdateFixture> = {},
+): SystemUpdateFixture {
+  return {
+    protocolVersion: 1,
+    supported: true,
+    channel: 'stable',
+    currentVersion: 'v1.3.0',
+    targetVersion: null,
+    phase: 'current',
+    updateAvailable: false,
+    canApply: false,
+    reasonCode: 'already_current',
+    detail: 'ReachCommander is up to date.',
+    operationId: null,
+    lastCheckedAt: '2026-08-25T10:00:00Z',
+    updatedAt: '2026-08-25T10:00:00Z',
+    ...overrides,
+  };
+}
+
 const healthUrl = 'http://127.0.0.1:8092/health';
 const setupCodePattern = /ReachCommander first-run setup code:\s+([A-Za-z0-9_-]{40,})/;
 

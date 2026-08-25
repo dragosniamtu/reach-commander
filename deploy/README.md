@@ -10,6 +10,8 @@ The published Ubuntu installer archive contains:
 - `reachcommander`, the fixed-path lifecycle command;
 - `render_config.py`, the structured deployment renderer;
 - `compose.release.yaml`, the hardened published-image template;
+- `compose.updater.yaml`, the read-only `/run/reachcommander-updater` socket mount;
+- `updater_service.py`, `updater_protocol.py`, and `systemd/reachcommander-updater.service`, the restricted root host boundary;
 - `lib/common.sh`, shared validation and Docker primitives;
 - `VERSION` and `LICENSE`.
 
@@ -26,3 +28,5 @@ sha256sum --check SHA256SUMS
 ```
 
 Only stable semantic versions are packaged. Prerelease images can be published but do not produce the stable installer asset.
+
+The Ubuntu installer-managed updater checks the fixed public repository/package at startup and every six hours. The application can request only target-free status, Check, and administrator-confirmed Apply actions over the Unix socket; exact version pins remain pinned. The application never mounts `/var/run/docker.sock`. Windows, macOS, and manual container deployments do not install this systemd helper. Existing installations must rerun a checksum-verified installer bundle once, and future changes to the root-owned updater helper require another installer refresh.

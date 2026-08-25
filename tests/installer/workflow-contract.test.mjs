@@ -364,7 +364,9 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   assert.match(smoke, /::error title=Hardened container smoke failed::/);
   assert.match(smoke, /diagnostics_path='artifacts\/container-smoke\/diagnostics\.txt'/);
   assert.match(smoke, /printf '%s\\n' "\$detail" >"\$diagnostics_path"/);
-  assert.match(smoke, /annotation_logs="\$\{application_logs: -3000\}"/);
+  assert.match(smoke, /if \(\( \$\{#application_logs\} > 12000 \)\); then/);
+  assert.match(smoke, /if \(\( \$\{#application_logs\} > 3000 \)\); then/);
+  assert.match(smoke, /annotation_logs="\$application_logs"/);
   assert.match(smoke, /Application log tail:\\n%s/);
   assert.match(smoke, /annotation_detail="\$\{annotation_detail:0:4000\}"/);
   assert.match(

@@ -274,13 +274,18 @@ jobs:
               health_history="$(docker inspect --format '{{json .State.Health.Log}}' reachcommander-smoke 2>&1 || true)"
               application_logs="$(docker logs --tail 200 reachcommander-smoke 2>&1 |
                 sed -E 's/(ReachCommander first-run setup code: )[A-Za-z0-9_-]+/\1[REDACTED]/g' || true)"
-              application_logs="${application_logs: -12000}"
+              if (( ${#application_logs} > 12000 )); then
+                application_logs="${application_logs: -12000}"
+              fi
             fi
             detail="$(printf 'Application logs:\n%s\nFailed command:\n%s\nCommand output:\n%s\nContainer state:\n%s\nHealth history:\n%s' \
               "$application_logs" "$failed_command" "$failure_context" "$state" "$health_history")"
             mkdir -p -- "$(dirname -- "$diagnostics_path")"
             printf '%s\n' "$detail" >"$diagnostics_path"
-            annotation_logs="${application_logs: -3000}"
+            annotation_logs="$application_logs"
+            if (( ${#application_logs} > 3000 )); then
+              annotation_logs="${application_logs: -3000}"
+            fi
             annotation_detail="$(printf 'Application log tail:\n%s\nFailed command:\n%s\nContainer state:\n%s' \
               "$annotation_logs" "$failed_command" "$state")"
             annotation_detail="${annotation_detail:0:4000}"

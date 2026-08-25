@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const workflowUrl = new URL('../../.github/workflows/ci.yml', import.meta.url);
+const installerUrl = new URL('../../deploy/install.sh', import.meta.url);
 const dockerignoreUrl = new URL('../../.dockerignore', import.meta.url);
 const containerOperationsSmokeUrl = new URL(
   '../../tools/container_file_operations_smoke.py',
@@ -18,6 +19,24 @@ test('push triggers include master and semantic-looking version tags', async () 
   assert.match(content, /push:\s*\n\s+branches:\s*\[master\]/);
   assert.match(content, /tags:\s*\['v\*'\]/);
   assert.match(content, /pull_request:\s*\n\s+branches:\s*\[master\]/);
+});
+
+test('diagnostic uploads use the current Node 24 artifact action', async () => {
+  const content = await workflow();
+  const uploads = content.match(/uses: actions\/upload-artifact@v7/g) ?? [];
+
+  assert.equal(uploads.length, 2);
+  assert.doesNotMatch(content, /uses: actions\/upload-artifact@v4/);
+});
+
+test('updater socket polling uses its bounded arithmetic counter', async () => {
+  const installer = await readFile(installerUrl, 'utf8');
+
+  assert.match(
+    installer,
+    /for \(\( attempt = 0; attempt < 100; attempt\+\+ \)\); do/,
+  );
+  assert.doesNotMatch(installer, /for attempt in \{1\.\.100\}; do/);
 });
 
 test('installer verification runs inside acceptance before publication', async () => {

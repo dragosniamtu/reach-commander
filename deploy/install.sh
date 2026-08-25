@@ -648,7 +648,7 @@ updater_socket_is_ready() {
 
 wait_for_updater_socket() {
   local attempt
-  for attempt in {1..100}; do
+  for (( attempt = 0; attempt < 100; attempt++ )); do
     if updater_socket_is_ready; then
       return 0
     fi

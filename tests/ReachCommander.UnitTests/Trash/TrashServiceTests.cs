@@ -45,6 +45,7 @@ public sealed class TrashServiceTests : IDisposable
             _manifestStore,
             new JsonFileOperationPlanStore(paths),
             _repository,
+            new FileOperationQueue(),
             TimeProvider.System);
         _executor = new TrashOperationExecutor(
             security,

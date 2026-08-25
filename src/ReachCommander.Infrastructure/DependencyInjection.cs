@@ -19,12 +19,21 @@ using ReachCommander.Infrastructure.SystemMetrics.Windows;
 using ReachCommander.Infrastructure.Mutations;
 using ReachCommander.Infrastructure.Uploads;
 using ReachCommander.Application.Archives;
+using ReachCommander.Application.Directories;
+using ReachCommander.Application.FileOperations;
+using ReachCommander.Application.Trash;
 using ReachCommander.Infrastructure.Archives;
 using ReachCommander.Infrastructure.Archives.Catalog;
 using ReachCommander.Infrastructure.Archives.Volumes;
 using ReachCommander.Infrastructure.Archives.Worker;
 using ReachCommander.Infrastructure.Archives.Extraction;
 using ReachCommander.Infrastructure.Authentication;
+using ReachCommander.Infrastructure.Directories;
+using ReachCommander.Infrastructure.FileOperations;
+using ReachCommander.Infrastructure.FileOperations.Execution;
+using ReachCommander.Infrastructure.FileOperations.Persistence;
+using ReachCommander.Infrastructure.FileOperations.Planning;
+using ReachCommander.Infrastructure.Trash;
 
 namespace ReachCommander.Infrastructure;
 
@@ -68,6 +77,32 @@ public static class DependencyInjection
         services.AddSingleton<BatchRenameRequestLock>();
         services.AddSingleton<BatchRenameExecutor>();
         services.AddSingleton<IBatchRenameService, BatchRenameService>();
+        services.AddSingleton(provider => FileOperationDataPaths.FromAuthenticationRoot(
+            provider.GetRequiredService<AuthenticationDataPaths>().RootPath));
+        services.AddSingleton<IFileOperationInspector, LocalFileOperationInspector>();
+        services.AddSingleton<IFileOperationPlanStore, JsonFileOperationPlanStore>();
+        services.AddSingleton<FileOperationPlanner>();
+        services.AddSingleton<FileOperationRepository>();
+        services.AddSingleton<FileOperationQueue>();
+        services.AddSingleton<LocalFileOperationFileSystem>();
+        services.AddSingleton<IFileOperationFileSystem>(provider =>
+            provider.GetRequiredService<LocalFileOperationFileSystem>());
+        services.AddSingleton<FileOperationExecutor>();
+        services.AddSingleton(provider => new InterruptedOperationCleaner(
+            provider.GetRequiredService<IPathSecurityService>(),
+            provider.GetRequiredService<IFileOperationFileSystem>(),
+            provider.GetRequiredService<FileOperationRepository>()));
+        services.AddSingleton<IFileOperationService, FileOperationService>();
+        services.AddSingleton<TrashManifestStore>();
+        services.AddSingleton<TrashOperationExecutor>();
+        services.AddSingleton<ITrashOperationExecutor>(provider =>
+            provider.GetRequiredService<TrashOperationExecutor>());
+        services.AddSingleton<ITrashService, TrashService>();
+        services.AddSingleton<IDirectoryMutationService, DirectoryMutationService>();
+        services.AddSingleton<FileOperationJobDispatcher>();
+        services.AddSingleton<FileOperationWorker>();
+        services.AddHostedService(provider =>
+            provider.GetRequiredService<FileOperationWorker>());
         services
             .AddOptions<HardwareMetricsOptions>()
             .Bind(configuration.GetSection(HardwareMetricsOptions.SectionName))

@@ -14,6 +14,7 @@ internal sealed class TrashService(
     TrashManifestStore manifestStore,
     IFileOperationPlanStore planStore,
     FileOperationRepository repository,
+    FileOperationQueue queue,
     TimeProvider clock) : ITrashService
 {
     private static readonly TimeSpan PlanLifetime = TimeSpan.FromMinutes(10);
@@ -106,7 +107,7 @@ internal sealed class TrashService(
             throw new PermanentDeleteConfirmationRequiredException();
         }
 
-        return await repository.EnqueueAsync(
+        return await EnqueueAsync(
             plan,
             new([], request.PermanentDeleteConfirmed),
             cancellationToken);
@@ -208,7 +209,7 @@ internal sealed class TrashService(
         }
 
         ValidateResolutions(plan, request.Resolutions);
-        return await repository.EnqueueAsync(
+        return await EnqueueAsync(
             plan,
             new(request.Resolutions, false),
             cancellationToken);
@@ -230,7 +231,7 @@ internal sealed class TrashService(
             records,
             null,
             cancellationToken);
-        return await repository.EnqueueAsync(plan, new([], true), cancellationToken);
+        return await EnqueueAsync(plan, new([], true), cancellationToken);
     }
 
     public async Task<FileOperationStatus> EmptyAsync(
@@ -249,7 +250,17 @@ internal sealed class TrashService(
             records,
             request.SourceId,
             cancellationToken);
-        return await repository.EnqueueAsync(plan, new([], true), cancellationToken);
+        return await EnqueueAsync(plan, new([], true), cancellationToken);
+    }
+
+    private async Task<FileOperationStatus> EnqueueAsync(
+        FileOperationPlan plan,
+        FileOperationSubmissionApproval approval,
+        CancellationToken cancellationToken)
+    {
+        var status = await repository.EnqueueAsync(plan, approval, cancellationToken);
+        queue.Signal();
+        return status;
     }
 
     private async Task<IReadOnlyList<PlannedFileOperationEntry>> InspectSelectionAsync(

@@ -4,12 +4,58 @@ using ReachCommander.Infrastructure.FileOperations.Persistence;
 
 namespace ReachCommander.Infrastructure.FileOperations.Execution;
 
-internal sealed class InterruptedOperationCleaner(
-    IPathSecurityService pathSecurity,
-    IFileOperationFileSystem fileSystem)
+internal sealed class InterruptedOperationCleaner
 {
     private const string CleanupWarning =
         "An interrupted operation entry could not be cleaned safely.";
+    private readonly IPathSecurityService _pathSecurity;
+    private readonly IFileOperationFileSystem _fileSystem;
+    private readonly FileOperationRepository? _repository;
+
+    internal InterruptedOperationCleaner(
+        IPathSecurityService pathSecurity,
+        IFileOperationFileSystem fileSystem)
+        : this(pathSecurity, fileSystem, null)
+    {
+    }
+
+    internal InterruptedOperationCleaner(
+        IPathSecurityService pathSecurity,
+        IFileOperationFileSystem fileSystem,
+        FileOperationRepository? repository)
+    {
+        _pathSecurity = pathSecurity;
+        _fileSystem = fileSystem;
+        _repository = repository;
+    }
+
+    internal async Task CleanRecoveredOperationsAsync(CancellationToken cancellationToken)
+    {
+        if (_repository is null)
+        {
+            throw new InvalidOperationException("Recovery cleanup requires the operation repository.");
+        }
+
+        var interrupted = (await _repository.ListAsync(cancellationToken))
+            .Where(status => status.Phase == FileOperationPhase.Interrupted)
+            .ToArray();
+        foreach (var status in interrupted)
+        {
+            var document = await _repository.GetDocumentAsync(status.OperationId, cancellationToken);
+            var warnings = await CleanupAsync(document, cancellationToken);
+            await _repository.UpdateAsync(
+                status.OperationId,
+                current => current with
+                {
+                    Status = current.Status with
+                    {
+                        Warnings = current.Status.Warnings.Concat(warnings).ToArray(),
+                    },
+                    Journal = null,
+                },
+                cancellationToken);
+        }
+    }
 
     internal async Task<IReadOnlyList<string>> CleanupAsync(
         PersistedFileOperationDocument operation,
@@ -53,17 +99,17 @@ internal sealed class InterruptedOperationCleaner(
         CancellationToken cancellationToken)
     {
         ValidateOwnedName(operationId, entry.OwnedName);
-        var parent = await pathSecurity.ResolveAsync(
+        var parent = await _pathSecurity.ResolveAsync(
             entry.SourceId,
             entry.ParentLogicalPath,
             cancellationToken);
         var ownedPath = Path.Combine(parent.PhysicalPath, entry.OwnedName);
-        if (!fileSystem.Exists(ownedPath))
+        if (!_fileSystem.Exists(ownedPath))
         {
             return;
         }
 
-        var attributes = fileSystem.GetAttributes(ownedPath);
+        var attributes = _fileSystem.GetAttributes(ownedPath);
         if (attributes.HasFlag(FileAttributes.ReparsePoint))
         {
             throw new IOException("Recovery never follows links.");
@@ -83,18 +129,18 @@ internal sealed class InterruptedOperationCleaner(
             throw new ArgumentException("The recovery destination is invalid.");
         }
 
-        var destination = await pathSecurity.ResolveChildAsync(
+        var destination = await _pathSecurity.ResolveChildAsync(
             entry.SourceId,
             entry.ParentLogicalPath,
             Name(entry.PublicDestinationLogicalPath),
             cancellationToken);
-        if (fileSystem.Exists(destination.PhysicalPath))
+        if (_fileSystem.Exists(destination.PhysicalPath))
         {
             DeleteExact(ownedPath, attributes);
             return;
         }
 
-        if (fileSystem.TryMove(ownedPath, destination.PhysicalPath) != MoveAttempt.Moved)
+        if (_fileSystem.TryMove(ownedPath, destination.PhysicalPath) != MoveAttempt.Moved)
         {
             throw new IOException("Recovery quarantine unexpectedly crossed filesystems.");
         }
@@ -117,11 +163,11 @@ internal sealed class InterruptedOperationCleaner(
     {
         if (attributes.HasFlag(FileAttributes.Directory))
         {
-            fileSystem.DeleteDirectory(physicalPath, recursive: false);
+            _fileSystem.DeleteDirectory(physicalPath, recursive: false);
         }
         else
         {
-            fileSystem.DeleteFile(physicalPath);
+            _fileSystem.DeleteFile(physicalPath);
         }
     }
 

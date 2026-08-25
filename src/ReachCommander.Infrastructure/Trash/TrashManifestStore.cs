@@ -109,7 +109,16 @@ internal sealed class TrashManifestStore(
         foreach (var source in sources)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var root = await pathSecurity.ResolveAsync(source.Id, "/", cancellationToken);
+            ResolvedSourcePath root;
+            try
+            {
+                root = await pathSecurity.ResolveAsync(source.Id, "/", cancellationToken);
+            }
+            catch (SourceUnavailableException) when (sourceId is null)
+            {
+                continue;
+            }
+
             var trashRoot = Path.Combine(root.PhysicalPath, TrashLayout.Root);
             if (!Directory.Exists(trashRoot) ||
                 !await IsOwnedRootAsync(trashRoot, cancellationToken))

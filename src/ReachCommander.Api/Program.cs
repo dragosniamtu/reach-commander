@@ -16,6 +16,7 @@ builder.Services
             new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<AuthenticationExceptionHandler>();
+builder.Services.AddExceptionHandler<FileOperationExceptionHandler>();
 builder.Services.AddExceptionHandler<FileAccessExceptionHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();

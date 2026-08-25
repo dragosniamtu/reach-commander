@@ -62,8 +62,10 @@ class RendererTestCase(unittest.TestCase):
         request = renderer.load_request(FIXTURE_PATH)
 
         self.assertIsInstance(request, renderer.DeploymentRequest)
+        self.assertEqual("secure-https", request.access_mode)
         self.assertEqual("127.0.0.1", request.bind_address)
         self.assertEqual(8092, request.port)
+        self.assertFalse(request.allow_insecure_http)
         self.assertEqual(1000, request.uid)
         self.assertEqual(1000, request.gid)
         self.assertEqual(IMAGE_DIGEST, request.image)
@@ -256,6 +258,50 @@ class RendererTestCase(unittest.TestCase):
             self.assertNotIn("source-mounts.json", compose)
             self.assertNotIn("# installer-source-mounts", compose)
 
+    def test_trusted_lan_policy_renders_wildcard_http_configuration(self) -> None:
+        renderer = self.require_renderer()
+        payload = self.valid_payload()
+        payload["accessMode"] = "trusted-lan-http"
+        payload["bindAddress"] = "0.0.0.0"
+        payload["allowInsecureHttp"] = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request_path = root / "request.json"
+            output_path = root / "output"
+            request_path.write_text(json.dumps(payload), encoding="utf-8")
+            renderer.render_deployment(
+                renderer.load_request(request_path), TEMPLATE_PATH, output_path
+            )
+            environment = (output_path / ".env").read_text(encoding="utf-8")
+            compose = (output_path / "compose.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("REACHCOMMANDER_ACCESS_MODE=trusted-lan-http\n", environment)
+        self.assertIn("REACHCOMMANDER_BIND_ADDRESS=0.0.0.0\n", environment)
+        self.assertIn("REACHCOMMANDER_PORT=8092\n", environment)
+        self.assertIn("REACHCOMMANDER_ALLOW_INSECURE_HTTP=true\n", environment)
+        self.assertIn(
+            'Authentication__AllowInsecureHttp: "${REACHCOMMANDER_ALLOW_INSECURE_HTTP}"',
+            compose,
+        )
+
+    def test_rejects_contradictory_access_policy(self) -> None:
+        cases = (
+            ("secure-https", "0.0.0.0", False),
+            ("secure-https", "127.0.0.1", True),
+            ("trusted-lan-http", "127.0.0.1", True),
+            ("trusted-lan-http", "0.0.0.0", False),
+            ("unsupported", "127.0.0.1", False),
+        )
+        for access_mode, bind_address, allow_insecure_http in cases:
+            with self.subTest(access_mode=access_mode, bind_address=bind_address):
+                payload = self.valid_payload()
+                payload["accessMode"] = access_mode
+                payload["bindAddress"] = bind_address
+                payload["allowInsecureHttp"] = allow_insecure_http
+                with self.assertRaisesRegex(ValueError, "accessMode"):
+                    self.load_payload(payload)
+
     def test_yaml_scalar_quotes_apostrophes(self) -> None:
         renderer = self.require_renderer()
         self.assertEqual("'Media''s #1'", renderer.yaml_scalar("Media's #1"))
@@ -265,8 +311,10 @@ class RendererTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env_path = Path(directory) / ".env"
             env_path.write_text(
+                "REACHCOMMANDER_ACCESS_MODE=secure-https\n"
                 "REACHCOMMANDER_BIND_ADDRESS=127.0.0.1\n"
                 "REACHCOMMANDER_PORT=8092\n"
+                "REACHCOMMANDER_ALLOW_INSECURE_HTTP=false\n"
                 "REACHCOMMANDER_UID=1000\n"
                 "REACHCOMMANDER_GID=1000\n"
                 "REACHCOMMANDER_IMAGE=ghcr.io/dragosniamtu/reach-commander:stable\n",
@@ -276,9 +324,9 @@ class RendererTestCase(unittest.TestCase):
             renderer.set_env_image(env_path, new_image)
             lines = env_path.read_text(encoding="utf-8").splitlines()
 
-            self.assertEqual(5, len(lines))
+            self.assertEqual(7, len(lines))
             self.assertEqual(f"REACHCOMMANDER_IMAGE={new_image}", lines[-1])
-            self.assertEqual("REACHCOMMANDER_PORT=8092", lines[1])
+            self.assertEqual("REACHCOMMANDER_PORT=8092", lines[2])
 
     def test_source_paths_cli_emits_nul_delimited_host_paths(self) -> None:
         self.require_renderer()

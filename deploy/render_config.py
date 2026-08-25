@@ -20,7 +20,20 @@ IMAGE_PATTERN = re.compile(
     rf"^{re.escape(REPOSITORY)}(?::(?:stable|edge|{VERSION_PATTERN})|@sha256:[0-9a-f]{{64}})$"
 )
 DANGEROUS_ROOTS = ("/", "/proc", "/sys", "/dev", "/run", "/var/run")
-REQUEST_KEYS = {"bindAddress", "port", "uid", "gid", "image", "sources"}
+ACCESS_POLICIES = {
+    "secure-https": ("127.0.0.1", False),
+    "trusted-lan-http": ("0.0.0.0", True),
+}
+REQUEST_KEYS = {
+    "accessMode",
+    "bindAddress",
+    "port",
+    "allowInsecureHttp",
+    "uid",
+    "gid",
+    "image",
+    "sources",
+}
 SOURCE_KEYS = {
     "id",
     "name",
@@ -30,8 +43,10 @@ SOURCE_KEYS = {
     "defaultRight",
 }
 ENV_KEYS = (
+    "REACHCOMMANDER_ACCESS_MODE",
     "REACHCOMMANDER_BIND_ADDRESS",
     "REACHCOMMANDER_PORT",
+    "REACHCOMMANDER_ALLOW_INSECURE_HTTP",
     "REACHCOMMANDER_UID",
     "REACHCOMMANDER_GID",
     "REACHCOMMANDER_IMAGE",
@@ -68,6 +83,22 @@ def _validate_bind_address(value: object) -> str:
     ):
         raise ValueError("bindAddress: invalid address")
     return value
+
+
+def _validate_access_mode(value: object) -> str:
+    if type(value) is not str or value not in ACCESS_POLICIES:
+        raise ValueError("accessMode: invalid value")
+    return value
+
+
+def _validate_access_policy(
+    access_mode: str,
+    bind_address: str,
+    allow_insecure_http: bool,
+) -> None:
+    expected_bind, expected_insecure = ACCESS_POLICIES[access_mode]
+    if bind_address != expected_bind or allow_insecure_http is not expected_insecure:
+        raise ValueError("accessMode: inconsistent network policy")
 
 
 def validate_image(value: object) -> str:
@@ -154,8 +185,10 @@ class SourceRequest:
 
 @dataclasses.dataclass(frozen=True)
 class DeploymentRequest:
+    access_mode: str
     bind_address: str
     port: int
+    allow_insecure_http: bool
     uid: int
     gid: int
     image: str
@@ -180,10 +213,18 @@ class DeploymentRequest:
         return cls(*common, sources=sources)
 
 
-def _validate_common(mapping: dict) -> tuple[str, int, int, int, str]:
+def _validate_common(mapping: dict) -> tuple[str, str, int, bool, int, int, str]:
+    access_mode = _validate_access_mode(mapping["accessMode"])
+    bind_address = _validate_bind_address(mapping["bindAddress"])
+    allow_insecure_http = _require_boolean(
+        mapping["allowInsecureHttp"], "allowInsecureHttp"
+    )
+    _validate_access_policy(access_mode, bind_address, allow_insecure_http)
     return (
-        _validate_bind_address(mapping["bindAddress"]),
+        access_mode,
+        bind_address,
         _require_integer(mapping["port"], 1, 65535, "port"),
+        allow_insecure_http,
         _require_integer(mapping["uid"], 1, 2147483647, "uid"),
         _require_integer(mapping["gid"], 1, 2147483647, "gid"),
         validate_image(mapping["image"]),
@@ -289,8 +330,10 @@ def render_deployment(
     compose = template.replace("      " + marker, "\n".join(mount_blocks))
 
     environment = (
+        f"REACHCOMMANDER_ACCESS_MODE={request.access_mode}\n"
         f"REACHCOMMANDER_BIND_ADDRESS={request.bind_address}\n"
         f"REACHCOMMANDER_PORT={request.port}\n"
+        f"REACHCOMMANDER_ALLOW_INSECURE_HTTP={'true' if request.allow_insecure_http else 'false'}\n"
         f"REACHCOMMANDER_UID={request.uid}\n"
         f"REACHCOMMANDER_GID={request.gid}\n"
         f"REACHCOMMANDER_IMAGE={request.image}\n"
@@ -341,10 +384,17 @@ def create_request(
     uid: int,
     gid: int,
     image: str,
+    access_mode: str = "secure-https",
 ) -> None:
+    validated_mode = _validate_access_mode(access_mode)
+    expected_bind, allow_insecure_http = ACCESS_POLICIES[validated_mode]
+    if bind_address != expected_bind:
+        raise ValueError("accessMode: inconsistent network policy")
     mapping = {
+        "accessMode": validated_mode,
         "bindAddress": bind_address,
         "port": port,
+        "allowInsecureHttp": allow_insecure_http,
         "uid": uid,
         "gid": gid,
         "image": image,
@@ -402,7 +452,16 @@ def _read_env(path: pathlib.Path) -> dict[str, str]:
         values[key] = value
     if tuple(values) != ENV_KEYS:
         raise ValueError("env: missing or reordered keys")
-    _validate_bind_address(values["REACHCOMMANDER_BIND_ADDRESS"])
+    access_mode = _validate_access_mode(values["REACHCOMMANDER_ACCESS_MODE"])
+    bind_address = _validate_bind_address(values["REACHCOMMANDER_BIND_ADDRESS"])
+    allow_insecure_value = values["REACHCOMMANDER_ALLOW_INSECURE_HTTP"]
+    if allow_insecure_value not in ("true", "false"):
+        raise ValueError("env: invalid boolean")
+    _validate_access_policy(
+        access_mode,
+        bind_address,
+        allow_insecure_value == "true",
+    )
     try:
         port = int(values["REACHCOMMANDER_PORT"])
         uid = int(values["REACHCOMMANDER_UID"])
@@ -471,6 +530,11 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--uid", required=True, type=int)
     create.add_argument("--gid", required=True, type=int)
     create.add_argument("--image", required=True)
+    create.add_argument(
+        "--access-mode",
+        choices=tuple(ACCESS_POLICIES),
+        default="secure-https",
+    )
 
     add = subparsers.add_parser("add-source")
     add.add_argument("--request", required=True, type=pathlib.Path)
@@ -506,6 +570,7 @@ def main(arguments: list[str] | None = None) -> int:
                 args.uid,
                 args.gid,
                 args.image,
+                args.access_mode,
             )
         elif args.command == "add-source":
             add_source(

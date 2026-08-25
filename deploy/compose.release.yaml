@@ -7,6 +7,7 @@ services:
       - "${REACHCOMMANDER_BIND_ADDRESS}:${REACHCOMMANDER_PORT}:8080"
     environment:
       ReverseProxy__TrustNetworkGateways: "true"
+      Authentication__AllowInsecureHttp: "${REACHCOMMANDER_ALLOW_INSECURE_HTTP}"
     volumes:
       - type: bind
         source: ./config

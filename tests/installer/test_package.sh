@@ -72,6 +72,7 @@ expected_entries=(
   'reachcommander-installer/compose.release.yaml'
   'reachcommander-installer/compose.updater.yaml'
   'reachcommander-installer/install.sh'
+  'reachcommander-installer/lan_address.py'
   'reachcommander-installer/lib/common.sh'
   'reachcommander-installer/reachcommander'
   'reachcommander-installer/render_config.py'
@@ -113,7 +114,7 @@ archive_permissions() {
 assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/install.sh')" "installer mode"
 assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/reachcommander')" "command mode"
 assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/updater_service.py')" "updater service mode"
-for data_file in LICENSE VERSION compose.release.yaml compose.updater.yaml render_config.py updater_protocol.py lib/common.sh systemd/reachcommander-updater.service; do
+for data_file in LICENSE VERSION compose.release.yaml compose.updater.yaml lan_address.py render_config.py updater_protocol.py lib/common.sh systemd/reachcommander-updater.service; do
   assert_equal "-rw-r--r--" "$(archive_permissions "reachcommander-installer/$data_file")" "$data_file mode"
 done
 pass "package normalizes executable and data file modes"

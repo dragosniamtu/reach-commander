@@ -80,6 +80,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes shellcheck
 
+      - name: Test installer LAN address discovery
+        run: python3 tools/run_with_annotations.py "Installer LAN address discovery failed" python3 -m unittest tests/installer/test_lan_address.py -v
+
       - name: Test installer render configuration
         run: python3 tools/run_with_annotations.py "Installer render configuration failed" python3 -m unittest tests/installer/test_render_config.py -v
 

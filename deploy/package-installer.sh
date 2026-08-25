@@ -45,6 +45,7 @@ required_sources=(
   "$SCRIPT_DIRECTORY/compose.release.yaml"
   "$SCRIPT_DIRECTORY/compose.updater.yaml"
   "$SCRIPT_DIRECTORY/install.sh"
+  "$SCRIPT_DIRECTORY/lan_address.py"
   "$SCRIPT_DIRECTORY/reachcommander"
   "$SCRIPT_DIRECTORY/render_config.py"
   "$SCRIPT_DIRECTORY/updater_protocol.py"
@@ -66,6 +67,7 @@ chmod 0644 -- "$PACKAGE_ROOT/VERSION"
 install -m 0644 -- "$SCRIPT_DIRECTORY/compose.release.yaml" "$PACKAGE_ROOT/compose.release.yaml"
 install -m 0644 -- "$SCRIPT_DIRECTORY/compose.updater.yaml" "$PACKAGE_ROOT/compose.updater.yaml"
 install -m 0755 -- "$SCRIPT_DIRECTORY/install.sh" "$PACKAGE_ROOT/install.sh"
+install -m 0644 -- "$SCRIPT_DIRECTORY/lan_address.py" "$PACKAGE_ROOT/lan_address.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/reachcommander" "$PACKAGE_ROOT/reachcommander"
 install -m 0644 -- "$SCRIPT_DIRECTORY/render_config.py" "$PACKAGE_ROOT/render_config.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/updater_protocol.py" "$PACKAGE_ROOT/updater_protocol.py"
@@ -78,6 +80,7 @@ chmod 0644 -- \
   "$PACKAGE_ROOT/VERSION" \
   "$PACKAGE_ROOT/compose.release.yaml" \
   "$PACKAGE_ROOT/compose.updater.yaml" \
+  "$PACKAGE_ROOT/lan_address.py" \
   "$PACKAGE_ROOT/render_config.py" \
   "$PACKAGE_ROOT/updater_protocol.py" \
   "$PACKAGE_ROOT/lib/common.sh" \
@@ -103,6 +106,7 @@ tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installe
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.release.yaml
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.updater.yaml
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/install.sh
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/lan_address.py
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/lib
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/lib/common.sh
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/reachcommander

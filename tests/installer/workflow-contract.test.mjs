@@ -47,6 +47,7 @@ test('installer verification runs inside acceptance before publication', async (
   assert.notEqual(smokeStart, -1);
   const acceptance = content.slice(acceptanceStart, smokeStart);
   for (const command of [
+    'python3 -m unittest tests/installer/test_lan_address.py -v',
     'python3 -m unittest tests/installer/test_render_config.py -v',
     'python3 -m unittest tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py -v',
     'systemd-analyze verify deploy/systemd/reachcommander-updater.service',
@@ -76,6 +77,11 @@ test('installer verification runs inside acceptance before publication', async (
   assert.match(content, /sudo apt-get install[^\n]*shellcheck/);
   assert.ok(
     content.includes(
+      'python3 tools/run_with_annotations.py "Installer LAN address discovery failed" python3 -m unittest tests/installer/test_lan_address.py -v',
+    ),
+  );
+  assert.ok(
+    content.includes(
       'python3 tools/run_with_annotations.py "Installer render configuration failed" python3 -m unittest tests/installer/test_render_config.py -v',
     ),
   );
@@ -97,6 +103,7 @@ test('installer verification runs inside acceptance before publication', async (
     );
   }
   const orderedSteps = [
+    'name: Test installer LAN address discovery',
     'name: Test installer render configuration',
     'name: Test CI diagnostic reporter',
     'name: Test installer common contracts',

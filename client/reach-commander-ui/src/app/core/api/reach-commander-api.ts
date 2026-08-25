@@ -19,13 +19,27 @@ import {
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
+  CreateDirectoryRequestDto,
+  DeletePreviewDto,
+  DeletePreviewRequestDto,
+  DeleteSubmissionDto,
+  EmptyTrashRequestDto,
   FileEntryDto,
+  FileOperationPreviewDto,
+  FileOperationPreviewRequestDto,
+  FileOperationStatusDto,
+  FileOperationSubmissionDto,
+  RestorePreviewDto,
+  RestorePreviewRequestDto,
+  RestoreSubmissionDto,
   SourceDto,
   SystemMetricsDto,
   UploadEvent,
   UploadLimitsDto,
   UploadResultDto,
   UploadTarget,
+  TrashEntryDto,
+  TrashPermanentDeleteRequestDto,
 } from './api.models';
 
 @Injectable({ providedIn: 'root' })
@@ -177,6 +191,100 @@ export class ReachCommanderApi extends CommanderApiPort {
         `/api/archive-extractions/${encodeURIComponent(operationId)}/cancel`,
         null,
       ),
+    );
+  }
+
+  previewFileOperation(
+    request: FileOperationPreviewRequestDto,
+  ): Promise<FileOperationPreviewDto> {
+    return firstValueFrom(
+      this.http.post<FileOperationPreviewDto>('/api/file-operations/preview', request),
+    );
+  }
+
+  submitFileOperation(request: FileOperationSubmissionDto): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.post<FileOperationStatusDto>('/api/file-operations', request),
+    );
+  }
+
+  listFileOperations(): Promise<readonly FileOperationStatusDto[]> {
+    return firstValueFrom(
+      this.http.get<readonly FileOperationStatusDto[]>('/api/file-operations'),
+    );
+  }
+
+  getFileOperation(operationId: string): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.get<FileOperationStatusDto>(
+        `/api/file-operations/${encodeURIComponent(operationId)}`,
+      ),
+    );
+  }
+
+  cancelFileOperation(operationId: string): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.post<FileOperationStatusDto>(
+        `/api/file-operations/${encodeURIComponent(operationId)}/cancel`,
+        null,
+      ),
+    );
+  }
+
+  acknowledgeFileOperation(operationId: string): Promise<void> {
+    return firstValueFrom(
+      this.http
+        .delete<void>(`/api/file-operations/${encodeURIComponent(operationId)}`)
+        .pipe(map(() => undefined)),
+    );
+  }
+
+  createDirectory(request: CreateDirectoryRequestDto): Promise<FileEntryDto> {
+    return firstValueFrom(this.http.post<FileEntryDto>('/api/directories', request));
+  }
+
+  previewDelete(request: DeletePreviewRequestDto): Promise<DeletePreviewDto> {
+    return firstValueFrom(this.http.post<DeletePreviewDto>('/api/trash/preview-delete', request));
+  }
+
+  submitDelete(request: DeleteSubmissionDto): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.post<FileOperationStatusDto>('/api/trash/delete', request),
+    );
+  }
+
+  listTrash(sourceId?: string): Promise<readonly TrashEntryDto[]> {
+    const options = sourceId === undefined
+      ? {}
+      : { params: new HttpParams().set('sourceId', sourceId) };
+    return firstValueFrom(
+      this.http.get<readonly TrashEntryDto[]>('/api/trash', options),
+    );
+  }
+
+  previewRestore(request: RestorePreviewRequestDto): Promise<RestorePreviewDto> {
+    return firstValueFrom(
+      this.http.post<RestorePreviewDto>('/api/trash/preview-restore', request),
+    );
+  }
+
+  submitRestore(request: RestoreSubmissionDto): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.post<FileOperationStatusDto>('/api/trash/restore', request),
+    );
+  }
+
+  permanentlyDeleteTrash(
+    request: TrashPermanentDeleteRequestDto,
+  ): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.delete<FileOperationStatusDto>('/api/trash/items', { body: request }),
+    );
+  }
+
+  emptyTrash(request: EmptyTrashRequestDto): Promise<FileOperationStatusDto> {
+    return firstValueFrom(
+      this.http.delete<FileOperationStatusDto>('/api/trash', { body: request }),
     );
   }
 }

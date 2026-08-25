@@ -3,7 +3,6 @@ import { HttpErrorResponse } from '@angular/common/http';
 import {
   ArchiveExtractionOperationDto,
   ArchiveExtractionPreviewDto,
-  CommanderApiPort,
   FileEntryDto,
   SourceDto,
 } from '../api/api.models';
@@ -16,6 +15,7 @@ import {
   ArchiveExtractionContext,
 } from './archive-extraction.models';
 import { PanelState } from './commander.models';
+import { CommanderApiTestBase } from '../../testing/commander-api-test-base';
 
 describe('archive extraction context', () => {
   it('captures archive selection and the opposite destination once', () => {
@@ -383,7 +383,7 @@ class FakeScheduler implements ArchiveExtractionScheduler {
   async runNext(): Promise<void> { await this.callbacks.shift()?.(); }
 }
 
-class FakeArchiveExtractionApi extends CommanderApiPort {
+class FakeArchiveExtractionApi extends CommanderApiTestBase {
   previewRequests: any[] = [];
   statusRequests: string[] = [];
   cancelRequests: string[] = [];

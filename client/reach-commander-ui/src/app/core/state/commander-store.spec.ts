@@ -1,6 +1,5 @@
 import {
   ArchiveDirectoryDto,
-  CommanderApiPort,
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
@@ -9,6 +8,7 @@ import {
 } from '../api/api.models';
 import { EMPTY, Observable } from 'rxjs';
 import { CommanderStore } from './commander-store';
+import { CommanderApiTestBase } from '../../testing/commander-api-test-base';
 
 describe('CommanderStore', () => {
   beforeEach(() => localStorage.clear());
@@ -577,7 +577,7 @@ function archiveDirectory(
   };
 }
 
-class FakeCommanderApi extends CommanderApiPort {
+class FakeCommanderApi extends CommanderApiTestBase {
   readonly entries = new Map<string, readonly FileEntryDto[]>();
   readonly listRequests: { sourceId: string; path: string }[] = [];
   readonly archives = new Map<string, ArchiveDirectoryDto>();

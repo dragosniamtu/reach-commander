@@ -4,7 +4,6 @@ import {
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
-  CommanderApiPort,
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
@@ -13,6 +12,7 @@ import {
 } from '../api/api.models';
 import { MultiRenameContext } from './multi-rename.models';
 import { MultiRenameStore } from './multi-rename-store';
+import { CommanderApiTestBase } from '../../testing/commander-api-test-base';
 
 describe('MultiRenameStore', () => {
   let api: FakeMultiRenameApi;
@@ -111,7 +111,7 @@ describe('MultiRenameStore', () => {
   });
 });
 
-class FakeMultiRenameApi extends CommanderApiPort {
+class FakeMultiRenameApi extends CommanderApiTestBase {
   async listArchive(): Promise<never> {
     throw new Error('Not used by these tests');
   }

@@ -12,6 +12,10 @@ import {
   BatchRenameOperationDto,
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
+  DeletePreviewRequestDto,
+  FileOperationPreviewRequestDto,
+  FileOperationStatusDto,
+  RestorePreviewRequestDto,
   SystemMetricsDto,
   UploadLimitsDto,
   UploadResultDto,
@@ -261,7 +265,186 @@ describe('ReachCommanderApi', () => {
     cancelRequest.flush(expected);
     await expect(cancel).resolves.toEqual(expected);
   });
+
+  it('uses logical-only queued file operation routes', async () => {
+    const previewBody: FileOperationPreviewRequestDto = {
+      kind: 'copy',
+      sourceId: 'media',
+      logicalPaths: ['/Movies/movie.mkv'],
+      destinationSourceId: 'downloads',
+      destinationLogicalDirectory: '/Complete',
+    };
+    const preview = api.previewFileOperation(previewBody);
+    const previewRequest = http.expectOne('/api/file-operations/preview');
+    expect(previewRequest.request.method).toBe('POST');
+    expect(previewRequest.request.body).toEqual(previewBody);
+    previewRequest.flush({
+      planId: 'plan-id',
+      expiresAt: '2026-08-25T12:10:00Z',
+      ...previewBody,
+      totalItems: 1,
+      totalBytes: 9,
+      conflicts: [],
+      warnings: [],
+    });
+    await preview;
+
+    const submission = { planId: 'plan-id', resolutions: [] } as const;
+    const submit = api.submitFileOperation(submission);
+    const submitRequest = http.expectOne('/api/file-operations');
+    expect(submitRequest.request.method).toBe('POST');
+    expect(submitRequest.request.body).toEqual(submission);
+    submitRequest.flush(fileOperationStatus());
+    await expect(submit).resolves.toEqual(fileOperationStatus());
+
+    const list = api.listFileOperations();
+    const listRequest = http.expectOne('/api/file-operations');
+    expect(listRequest.request.method).toBe('GET');
+    listRequest.flush([fileOperationStatus()]);
+    await expect(list).resolves.toEqual([fileOperationStatus()]);
+
+    const operationId = 'operation/with spaces';
+    const status = api.getFileOperation(operationId);
+    const statusRequest = http.expectOne('/api/file-operations/operation%2Fwith%20spaces');
+    expect(statusRequest.request.method).toBe('GET');
+    statusRequest.flush(fileOperationStatus());
+    await status;
+
+    const cancel = api.cancelFileOperation(operationId);
+    const cancelRequest = http.expectOne(
+      '/api/file-operations/operation%2Fwith%20spaces/cancel',
+    );
+    expect(cancelRequest.request.method).toBe('POST');
+    expect(cancelRequest.request.body).toBeNull();
+    cancelRequest.flush(fileOperationStatus({ phase: 'cancelled' }));
+    await cancel;
+
+    const acknowledge = api.acknowledgeFileOperation(operationId);
+    const acknowledgeRequest = http.expectOne('/api/file-operations/operation%2Fwith%20spaces');
+    expect(acknowledgeRequest.request.method).toBe('DELETE');
+    expect(acknowledgeRequest.request.body).toBeNull();
+    acknowledgeRequest.flush(null, { status: 204, statusText: 'No Content' });
+    await expect(acknowledge).resolves.toBeUndefined();
+  });
+
+  it('uses the directory and managed Trash lifecycle routes', async () => {
+    const createBody = { sourceId: 'media', parentLogicalPath: '/Photos', name: 'Family' };
+    const create = api.createDirectory(createBody);
+    const createRequest = http.expectOne('/api/directories');
+    expect(createRequest.request.method).toBe('POST');
+    expect(createRequest.request.body).toEqual(createBody);
+    createRequest.flush({ name: 'Family', relativePath: '/Photos/Family' });
+    await create;
+
+    const deleteBody: DeletePreviewRequestDto = {
+      sourceId: 'media',
+      logicalPaths: ['/Photos/photo.jpg'],
+      mode: 'trash',
+    };
+    const deletePreview = api.previewDelete(deleteBody);
+    const deletePreviewRequest = http.expectOne('/api/trash/preview-delete');
+    expect(deletePreviewRequest.request.method).toBe('POST');
+    expect(deletePreviewRequest.request.body).toEqual(deleteBody);
+    deletePreviewRequest.flush({
+      planId: 'delete-plan',
+      expiresAt: '2026-08-25T12:10:00Z',
+      mode: 'trash',
+      trashAvailable: true,
+      trashUnavailableReason: null,
+      totalItems: 1,
+      totalBytes: 5,
+    });
+    await deletePreview;
+
+    const submitDelete = api.submitDelete({
+      planId: 'delete-plan',
+      permanentDeleteConfirmed: false,
+    });
+    const submitDeleteRequest = http.expectOne('/api/trash/delete');
+    expect(submitDeleteRequest.request.method).toBe('POST');
+    submitDeleteRequest.flush(fileOperationStatus({ kind: 'trash' }));
+    await submitDelete;
+
+    const list = api.listTrash('media library');
+    const listRequest = http.expectOne(
+      (candidate) =>
+        candidate.url === '/api/trash' && candidate.params.get('sourceId') === 'media library',
+    );
+    expect(listRequest.request.method).toBe('GET');
+    listRequest.flush([]);
+    await expect(list).resolves.toEqual([]);
+
+    const restoreBody: RestorePreviewRequestDto = { trashIds: ['trash-id'] };
+    const restorePreview = api.previewRestore(restoreBody);
+    const restorePreviewRequest = http.expectOne('/api/trash/preview-restore');
+    expect(restorePreviewRequest.request.body).toEqual(restoreBody);
+    restorePreviewRequest.flush({
+      planId: 'restore-plan',
+      expiresAt: '2026-08-25T12:10:00Z',
+      entries: [],
+      conflicts: [],
+      parentsToCreate: [],
+    });
+    await restorePreview;
+
+    const restore = api.submitRestore({ planId: 'restore-plan', resolutions: [] });
+    const restoreRequest = http.expectOne('/api/trash/restore');
+    expect(restoreRequest.request.method).toBe('POST');
+    restoreRequest.flush(fileOperationStatus({ kind: 'restore' }));
+    await restore;
+
+    const permanent = api.permanentlyDeleteTrash({
+      trashIds: ['trash-id'],
+      permanentDeleteConfirmed: true,
+    });
+    const permanentRequest = http.expectOne('/api/trash/items');
+    expect(permanentRequest.request.method).toBe('DELETE');
+    expect(permanentRequest.request.body).toEqual({
+      trashIds: ['trash-id'],
+      permanentDeleteConfirmed: true,
+    });
+    permanentRequest.flush(fileOperationStatus({ kind: 'permanentDelete' }));
+    await permanent;
+
+    const empty = api.emptyTrash({ sourceId: 'media', permanentDeleteConfirmed: true });
+    const emptyRequest = http.expectOne('/api/trash');
+    expect(emptyRequest.request.method).toBe('DELETE');
+    expect(emptyRequest.request.body).toEqual({
+      sourceId: 'media',
+      permanentDeleteConfirmed: true,
+    });
+    emptyRequest.flush(fileOperationStatus({ kind: 'emptyTrash' }));
+    await empty;
+  });
 });
+
+function fileOperationStatus(
+  overrides: Partial<FileOperationStatusDto> = {},
+): FileOperationStatusDto {
+  return {
+    operationId: 'operation-id',
+    kind: 'copy',
+    phase: 'queued',
+    queuePosition: 1,
+    createdAt: '2026-08-25T12:00:00Z',
+    updatedAt: '2026-08-25T12:00:00Z',
+    progress: {
+      currentLogicalName: null,
+      completedItems: 0,
+      totalItems: 1,
+      completedBytes: 0,
+      totalBytes: 9,
+      percentage: 0,
+      bytesPerSecond: null,
+      elapsed: '00:00:00',
+      estimatedRemaining: null,
+    },
+    outcomes: [],
+    warnings: [],
+    acknowledged: false,
+    ...overrides,
+  };
+}
 
 function archivePreviewResponse(): ArchiveExtractionPreviewDto {
   return {

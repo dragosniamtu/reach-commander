@@ -198,6 +198,150 @@ export interface ArchiveExtractionOperationDto {
   readonly errorDetail: string | null;
 }
 
+export type FileOperationKind =
+  'copy' | 'move' | 'permanentDelete' | 'trash' | 'restore' | 'emptyTrash';
+export type FileOperationConflictDecision = 'overwrite' | 'skip' | 'createUniqueName';
+export type FileOperationPhase =
+  'queued' | 'validating' | 'running' | 'cancelling' | 'completed' |
+  'completedWithErrors' | 'cancelled' | 'failed' | 'interrupted';
+export type FileOperationItemResult =
+  'completed' | 'skipped' | 'failed' | 'copiedButNotRemoved' | 'notStarted';
+
+export interface FileOperationPreviewRequestDto {
+  readonly kind: 'copy' | 'move';
+  readonly sourceId: string;
+  readonly logicalPaths: readonly string[];
+  readonly destinationSourceId: string;
+  readonly destinationLogicalDirectory: string;
+}
+
+export interface FileOperationConflictDto {
+  readonly conflictId: string;
+  readonly sourceLogicalPath: string;
+  readonly destinationLogicalPath: string;
+  readonly sourceType: FileEntryType;
+  readonly destinationType: FileEntryType;
+  readonly allowedDecisions: readonly FileOperationConflictDecision[];
+}
+
+export interface FileOperationPreviewDto extends FileOperationPreviewRequestDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly totalItems: number;
+  readonly totalBytes: number | null;
+  readonly conflicts: readonly FileOperationConflictDto[];
+  readonly warnings: readonly string[];
+}
+
+export interface FileOperationConflictResolutionDto {
+  readonly conflictId: string;
+  readonly decision: FileOperationConflictDecision;
+}
+
+export interface FileOperationSubmissionDto {
+  readonly planId: string;
+  readonly resolutions: readonly FileOperationConflictResolutionDto[];
+}
+
+export interface FileOperationProgressDto {
+  readonly currentLogicalName: string | null;
+  readonly completedItems: number;
+  readonly totalItems: number;
+  readonly completedBytes: number;
+  readonly totalBytes: number | null;
+  readonly percentage: number | null;
+  readonly bytesPerSecond: number | null;
+  readonly elapsed: string;
+  readonly estimatedRemaining: string | null;
+}
+
+export interface FileOperationItemOutcomeDto {
+  readonly sourceId: string;
+  readonly sourceLogicalPath: string;
+  readonly destinationSourceId: string | null;
+  readonly destinationLogicalPath: string | null;
+  readonly result: FileOperationItemResult;
+  readonly errorCode: string | null;
+  readonly detail: string | null;
+}
+
+export interface FileOperationStatusDto {
+  readonly operationId: string;
+  readonly kind: FileOperationKind;
+  readonly phase: FileOperationPhase;
+  readonly queuePosition: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly progress: FileOperationProgressDto;
+  readonly outcomes: readonly FileOperationItemOutcomeDto[];
+  readonly warnings: readonly string[];
+  readonly acknowledged: boolean;
+}
+
+export interface CreateDirectoryRequestDto {
+  readonly sourceId: string;
+  readonly parentLogicalPath: string;
+  readonly name: string;
+}
+
+export interface DeletePreviewRequestDto {
+  readonly sourceId: string;
+  readonly logicalPaths: readonly string[];
+  readonly mode: 'trash' | 'permanent';
+}
+
+export interface DeletePreviewDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly mode: 'trash' | 'permanent';
+  readonly trashAvailable: boolean;
+  readonly trashUnavailableReason: string | null;
+  readonly totalItems: number;
+  readonly totalBytes: number | null;
+}
+
+export interface DeleteSubmissionDto {
+  readonly planId: string;
+  readonly permanentDeleteConfirmed: boolean;
+}
+
+export interface TrashEntryDto {
+  readonly trashId: string;
+  readonly sourceId: string;
+  readonly originalLogicalPath: string;
+  readonly name: string;
+  readonly type: FileEntryType;
+  readonly size: number | null;
+  readonly deletedAt: string;
+}
+
+export interface RestorePreviewRequestDto {
+  readonly trashIds: readonly string[];
+}
+
+export interface RestorePreviewDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly entries: readonly TrashEntryDto[];
+  readonly conflicts: readonly FileOperationConflictDto[];
+  readonly parentsToCreate: readonly string[];
+}
+
+export interface RestoreSubmissionDto {
+  readonly planId: string;
+  readonly resolutions: readonly FileOperationConflictResolutionDto[];
+}
+
+export interface TrashPermanentDeleteRequestDto {
+  readonly trashIds: readonly string[];
+  readonly permanentDeleteConfirmed: boolean;
+}
+
+export interface EmptyTrashRequestDto {
+  readonly sourceId: string | null;
+  readonly permanentDeleteConfirmed: boolean;
+}
+
 export type UploadEvent =
   | {
       readonly kind: 'progress';
@@ -321,4 +465,38 @@ export abstract class CommanderApiPort {
   abstract getArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto>;
 
   abstract cancelArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto>;
+
+  abstract previewFileOperation(
+    request: FileOperationPreviewRequestDto,
+  ): Promise<FileOperationPreviewDto>;
+
+  abstract submitFileOperation(
+    request: FileOperationSubmissionDto,
+  ): Promise<FileOperationStatusDto>;
+
+  abstract listFileOperations(): Promise<readonly FileOperationStatusDto[]>;
+
+  abstract getFileOperation(operationId: string): Promise<FileOperationStatusDto>;
+
+  abstract cancelFileOperation(operationId: string): Promise<FileOperationStatusDto>;
+
+  abstract acknowledgeFileOperation(operationId: string): Promise<void>;
+
+  abstract createDirectory(request: CreateDirectoryRequestDto): Promise<FileEntryDto>;
+
+  abstract previewDelete(request: DeletePreviewRequestDto): Promise<DeletePreviewDto>;
+
+  abstract submitDelete(request: DeleteSubmissionDto): Promise<FileOperationStatusDto>;
+
+  abstract listTrash(sourceId?: string): Promise<readonly TrashEntryDto[]>;
+
+  abstract previewRestore(request: RestorePreviewRequestDto): Promise<RestorePreviewDto>;
+
+  abstract submitRestore(request: RestoreSubmissionDto): Promise<FileOperationStatusDto>;
+
+  abstract permanentlyDeleteTrash(
+    request: TrashPermanentDeleteRequestDto,
+  ): Promise<FileOperationStatusDto>;
+
+  abstract emptyTrash(request: EmptyTrashRequestDto): Promise<FileOperationStatusDto>;
 }

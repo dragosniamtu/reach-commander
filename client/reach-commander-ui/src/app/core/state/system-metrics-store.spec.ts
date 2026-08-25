@@ -1,7 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { EMPTY, Observable } from 'rxjs';
 import {
-  CommanderApiPort,
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
@@ -9,6 +8,7 @@ import {
   UploadLimitsDto,
 } from '../api/api.models';
 import { SystemMetricsStore } from './system-metrics-store';
+import { CommanderApiTestBase } from '../../testing/commander-api-test-base';
 
 describe('SystemMetricsStore', () => {
   let api: FakeMetricsApi;
@@ -129,7 +129,7 @@ describe('SystemMetricsStore', () => {
   });
 });
 
-class FakeMetricsApi extends CommanderApiPort {
+class FakeMetricsApi extends CommanderApiTestBase {
   async listArchive(): Promise<never> {
     throw new Error('Not used by these tests');
   }

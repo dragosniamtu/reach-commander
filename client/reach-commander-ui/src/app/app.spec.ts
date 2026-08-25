@@ -13,6 +13,7 @@ import {
   UploadEvent,
   UploadLimitsDto,
 } from './core/api/api.models';
+import { CommanderApiTestBase } from './testing/commander-api-test-base';
 
 describe('App', () => {
   let api: AppTestApi;
@@ -103,7 +104,7 @@ function authState(overrides: Partial<AuthenticationViewState>): AuthenticationV
   };
 }
 
-class AppTestApi extends CommanderApiPort {
+class AppTestApi extends CommanderApiTestBase {
   async listArchive(): Promise<never> {
     throw new Error('Not used by this test.');
   }

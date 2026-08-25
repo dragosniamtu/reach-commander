@@ -1,7 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Observable, Subject } from 'rxjs';
 import {
-  CommanderApiPort,
   FileEntryDto,
   SourceDto,
   SystemMetricsDto,
@@ -12,6 +11,7 @@ import {
 } from '../api/api.models';
 import { UploadContext } from './upload.models';
 import { UploadStore } from './upload-store';
+import { CommanderApiTestBase } from '../../testing/commander-api-test-base';
 
 describe('UploadStore', () => {
   let api: FakeUploadApi;
@@ -216,7 +216,7 @@ describe('UploadStore', () => {
   });
 });
 
-class FakeUploadApi extends CommanderApiPort {
+class FakeUploadApi extends CommanderApiTestBase {
   async listArchive(): Promise<never> {
     throw new Error('Not used by these tests');
   }

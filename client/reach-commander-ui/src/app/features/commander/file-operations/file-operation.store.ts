@@ -285,13 +285,14 @@ export class FileOperationStore {
   }
 
   closeConfirmation(): void {
-    if (this.dialog() === 'confirm' && !this.busy()) {
+    if (this.dialog() === 'confirm') {
       this.previewSequence += 1;
       this.dialogState.set('closed');
       this.contextState.set(null);
       this.previewState.set(null);
       this.conflictDecisionState.set(new Map());
       this.errorState.set(null);
+      this.busyState.set(false);
     }
   }
 

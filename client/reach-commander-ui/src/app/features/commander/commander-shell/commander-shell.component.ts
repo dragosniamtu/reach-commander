@@ -39,6 +39,24 @@ import { PwaStatusComponent } from '../../pwa/pwa-status.component';
 import { AccountMenuComponent } from '../../auth/account-menu.component';
 import { ProtectedStateResetService } from '../../../core/auth/protected-state-reset.service';
 import { ThemeService } from '../../../core/theme/theme.service';
+import { FileOperationStore } from '../file-operations/file-operation.store';
+import { TrashStore } from '../trash/trash.store';
+import { CopyMoveDialogComponent } from '../file-operations/copy-move-dialog.component';
+import { TransferProgressDialogComponent } from '../file-operations/transfer-progress-dialog.component';
+import { TransferTaskIndicatorComponent } from '../file-operations/transfer-task-indicator.component';
+import { DeleteDialogComponent } from '../trash/delete-dialog.component';
+import { TrashDialogComponent } from '../trash/trash-dialog.component';
+import { CreateDirectoryDialogComponent } from '../create-directory/create-directory-dialog.component';
+import { FileCommandAvailability } from '../command-bar/command-bar.component';
+import { FileOperationStatusDto } from '../../../core/api/api.models';
+import { CapturedFileOperationContext, TransferOperationKind } from '../../../core/state/file-operation.models';
+
+export interface CreateDirectoryDialogContext {
+  readonly sourceId: string;
+  readonly sourceName: string;
+  readonly parentLogicalPath: string;
+  readonly panelSide: PanelSide;
+}
 
 @Component({
   selector: 'app-commander-shell',
@@ -53,6 +71,12 @@ import { ThemeService } from '../../../core/theme/theme.service';
     ArchiveExtractionDialogComponent,
     PwaStatusComponent,
     AccountMenuComponent,
+    CopyMoveDialogComponent,
+    TransferProgressDialogComponent,
+    TransferTaskIndicatorComponent,
+    DeleteDialogComponent,
+    TrashDialogComponent,
+    CreateDirectoryDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -64,6 +88,8 @@ export class CommanderShellComponent implements OnInit {
   readonly uploadStore = inject(UploadStore);
   readonly multiRename = inject(MultiRenameStore);
   readonly archiveExtraction = inject(ArchiveExtractionStore);
+  readonly fileOperations = inject(FileOperationStore);
+  readonly trash = inject(TrashStore);
   readonly pwa = inject(PwaService);
   readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
@@ -72,6 +98,9 @@ export class CommanderShellComponent implements OnInit {
   readonly metricsOpen = signal(false);
   readonly uploadOpener = signal<HTMLElement | null>(null);
   readonly extractionOpener = signal<HTMLElement | null>(null);
+  readonly fileOperationOpener = signal<HTMLElement | null>(null);
+  readonly trashOpen = signal(false);
+  readonly createDirectoryContext = signal<CreateDirectoryDialogContext | null>(null);
   readonly activeState = computed(() =>
     this.store.activePanel() === 'left' ? this.store.leftPanel() : this.store.rightPanel(),
   );
@@ -104,12 +133,49 @@ export class CommanderShellComponent implements OnInit {
     extractAvailable: this.extractionContext().context !== null,
     extractDisabledReason: this.extractionContext().error,
   }));
+  readonly fileCommandAvailability = computed<FileCommandAvailability>(() => {
+    const extraction = this.extractionContext();
+    const extractionIntent = extraction.context !== null || this.hasArchiveExtractionIntent();
+    const copyContext = extractionIntent ? null : this.store.captureFileOperationContext('copy');
+    const moveContext = this.store.captureFileOperationContext('move');
+    const selection = this.store.createMultiRenameContext(this.store.activePanel());
+    const tab = this.activeTab();
+    const source = this.activeSource();
+    const createReason = !tab || !source
+      ? 'Choose a filesystem folder.'
+      : tab.location.kind === 'archive'
+        ? 'Directories cannot be created inside a read-only archive.'
+        : !source.isAvailable
+          ? `${source.name} is unavailable.`
+          : source.isReadOnly
+            ? `${source.name} is read-only.`
+            : null;
+    const deleteReason = !selection
+      ? tab?.location.kind === 'archive'
+        ? 'Archive entries are read-only.'
+        : 'Select or focus an item.'
+      : !selection.isAvailable
+        ? `${selection.sourceName} is unavailable.`
+        : selection.isReadOnly
+          ? `${selection.sourceName} is read-only.`
+          : null;
+    return {
+      copy: extractionIntent
+        ? { enabled: extraction.context !== null, reason: extraction.error, label: 'Extract' }
+        : { enabled: copyContext !== null, reason: copyContext ? null : this.transferDisabledReason('copy'), label: 'Copy' },
+      move: { enabled: moveContext !== null, reason: moveContext ? null : this.transferDisabledReason('move') },
+      createDirectory: { enabled: createReason === null, reason: createReason },
+      delete: { enabled: deleteReason === null, reason: deleteReason },
+    };
+  });
 
   @ViewChild('leftPanel') private leftPanel?: CommanderPanelComponent;
   @ViewChild('rightPanel') private rightPanel?: CommanderPanelComponent;
   @ViewChild(SystemMetricsWidgetComponent) metricsWidget?: SystemMetricsWidgetComponent;
   @ViewChild(ActivePanelToolbarComponent)
   private activeToolbar?: ActivePanelToolbarComponent;
+  @ViewChild(TransferTaskIndicatorComponent)
+  private transferIndicator?: TransferTaskIndicatorComponent;
 
   private readonly keyboard = inject(CommanderKeyboardService);
   private readonly destroyRef = inject(DestroyRef);
@@ -127,14 +193,21 @@ export class CommanderShellComponent implements OnInit {
       this.uploadStore.reset();
       this.multiRename.close();
       this.archiveExtraction.close();
+      this.fileOperations.resetProtectedState();
+      this.trash.resetProtectedState();
       this.commandStatus.set(null);
       this.initializationError.set(null);
       this.menuOpen.set(false);
       this.metricsOpen.set(false);
+      this.trashOpen.set(false);
+      this.createDirectoryContext.set(null);
     });
     this.destroyRef.onDestroy(unregisterProtectedState);
     this.archiveExtraction.setCompletionHandler((source, destination) => {
       void Promise.all([this.store.refresh(source), this.store.refresh(destination)]);
+    });
+    this.fileOperations.setTerminalHandler((status, context) => {
+      void this.refreshOperationPanels(status, context);
     });
   }
 
@@ -148,12 +221,16 @@ export class CommanderShellComponent implements OnInit {
     this.initializationError.set(null);
     try {
       await this.store.initialize();
+      await this.fileOperations.restoreTasks();
     } catch {
       this.initializationError.set('The ReachCommander server is unavailable.');
     }
   }
 
   execute(command: CommanderCommand): void {
+    if (this.hasBlockingFileModal()) {
+      return;
+    }
     if (this.archiveExtraction.state().phase !== 'closed') {
       if (command.type === 'escape') {
         this.handleExtractionEscape();
@@ -398,12 +475,184 @@ export class CommanderShellComponent implements OnInit {
       if (this.extractionContext().context || this.hasArchiveExtractionIntent()) {
         this.openArchiveExtraction();
       } else {
-        this.commandStatus.set('F5 is reserved for a future copy operation.');
+        this.openCopyMove('copy');
       }
       return;
     }
 
-    this.commandStatus.set(`${key} is reserved for Milestone 2.`);
+    if (key === 'F6') {
+      this.openCopyMove('move');
+      return;
+    }
+
+    if (key === 'F7') {
+      this.openCreateDirectory();
+      return;
+    }
+
+    if (key === 'F8') {
+      this.openDelete();
+      return;
+    }
+
+    this.commandStatus.set(`${key} is unavailable.`);
+  }
+
+  openCopyMove(kind: TransferOperationKind): void {
+    const context = this.store.captureFileOperationContext(kind);
+    if (!context) {
+      const command = kind === 'copy'
+        ? this.fileCommandAvailability().copy
+        : this.fileCommandAvailability().move;
+      this.commandStatus.set(command.reason ?? `The ${kind} operation is unavailable.`);
+      return;
+    }
+    this.captureFileOperationOpener();
+    this.commandStatus.set(null);
+    this.menuOpen.set(false);
+    void this.fileOperations.open(kind, context);
+  }
+
+  openCreateDirectory(): void {
+    const availability = this.fileCommandAvailability().createDirectory;
+    const tab = this.activeTab();
+    const source = this.activeSource();
+    if (!availability.enabled || !tab || tab.location.kind !== 'filesystem' || !source) {
+      this.commandStatus.set(availability.reason);
+      return;
+    }
+    this.captureFileOperationOpener();
+    this.createDirectoryContext.set({
+      sourceId: source.id,
+      sourceName: source.name,
+      parentLogicalPath: tab.location.path,
+      panelSide: this.store.activePanel(),
+    });
+    this.commandStatus.set(null);
+    this.menuOpen.set(false);
+  }
+
+  closeCreateDirectory(refresh = false): void {
+    const context = this.createDirectoryContext();
+    this.createDirectoryContext.set(null);
+    if (refresh && context) {
+      void this.store.refresh(context.panelSide);
+    }
+    this.restoreFileOperationFocus(context?.panelSide);
+  }
+
+  openDelete(): void {
+    const availability = this.fileCommandAvailability().delete;
+    const selection = this.store.createMultiRenameContext(this.store.activePanel());
+    if (!availability.enabled || !selection) {
+      this.commandStatus.set(availability.reason);
+      return;
+    }
+    this.captureFileOperationOpener();
+    this.commandStatus.set(null);
+    this.menuOpen.set(false);
+    void this.trash.previewDelete({
+      sourceId: selection.sourceId,
+      logicalPaths: selection.entries.map((entry) => entry.relativePath),
+      mode: 'trash',
+    });
+  }
+
+  openTrash(): void {
+    this.captureFileOperationOpener();
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.trashOpen.set(true);
+  }
+
+  closeTrash(): void {
+    this.trashOpen.set(false);
+    this.restoreFileOperationFocus();
+  }
+
+  restoreFileOperationFocus(side: PanelSide = this.store.activePanel()): void {
+    const opener = this.fileOperationOpener();
+    this.fileOperationOpener.set(null);
+    queueMicrotask(() => opener?.isConnected
+      ? opener.focus()
+      : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+  }
+
+  handleTransferDismissed(reason: 'background' | 'closed'): void {
+    if (reason === 'background') {
+      queueMicrotask(() => this.transferIndicator?.focus());
+    } else {
+      this.restoreFileOperationFocus();
+    }
+  }
+
+  private captureFileOperationOpener(): void {
+    this.fileOperationOpener.set(
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+  }
+
+  private hasBlockingFileModal(): boolean {
+    const operationDialogBlocks = this.fileOperations.dialog() !== 'closed' &&
+      this.fileOperations.presentation() === 'modal';
+    return operationDialogBlocks || this.trash.deleteRequest() !== null || this.trashOpen() ||
+      this.createDirectoryContext() !== null;
+  }
+
+  private transferDisabledReason(kind: TransferOperationKind): string {
+    const activeTab = this.activeTab();
+    const activeSource = this.activeSource();
+    if (!activeTab || !activeSource) return 'Choose an available source.';
+    if (activeTab.location.kind === 'archive') return 'Archive entries are read-only.';
+    if (!activeSource.isAvailable) return `${activeSource.name} is unavailable.`;
+    const selection = this.store.createMultiRenameContext(this.store.activePanel());
+    if (!selection) return 'Select or focus an item.';
+    if (kind === 'move' && activeSource.isReadOnly) return `${activeSource.name} is read-only.`;
+
+    const oppositePanel = this.store.activePanel() === 'left'
+      ? this.store.rightPanel()
+      : this.store.leftPanel();
+    const destinationTab = oppositePanel.tabs.find(
+      (tab) => tab.id === oppositePanel.activeTabId,
+    );
+    if (!destinationTab || destinationTab.location.kind !== 'filesystem') {
+      return 'Choose a filesystem destination in the opposite panel.';
+    }
+    const destination = this.store.sources().find(
+      (source) => source.id === destinationTab.location.sourceId,
+    );
+    if (!destination?.isAvailable) return `${destination?.name ?? 'The destination'} is unavailable.`;
+    if (destination.isReadOnly) return `${destination.name} is read-only.`;
+    return `The ${kind} operation is unavailable.`;
+  }
+
+  private async refreshOperationPanels(
+    status: FileOperationStatusDto,
+    context: CapturedFileOperationContext | null,
+  ): Promise<void> {
+    const affectedSourceIds = new Set<string>();
+    if (context) {
+      affectedSourceIds.add(context.sourceId);
+      affectedSourceIds.add(context.destinationSourceId);
+    }
+    for (const outcome of status.outcomes) {
+      affectedSourceIds.add(outcome.sourceId);
+      if (outcome.destinationSourceId) affectedSourceIds.add(outcome.destinationSourceId);
+    }
+
+    const sides: PanelSide[] = [];
+    for (const side of ['left', 'right'] as const) {
+      const panel = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
+      const sourceId = panel.tabs.find((tab) => tab.id === panel.activeTabId)?.location.sourceId;
+      if (affectedSourceIds.size === 0 || (sourceId && affectedSourceIds.has(sourceId))) {
+        sides.push(side);
+      }
+    }
+    await Promise.all(sides.map((side) => this.store.refresh(side)));
+    if (this.trashOpen() || status.kind === 'trash' || status.kind === 'restore' ||
+        status.kind === 'permanentDelete' || status.kind === 'emptyTrash') {
+      await this.trash.load();
+    }
   }
 
   private handleExtractionEscape(): void {

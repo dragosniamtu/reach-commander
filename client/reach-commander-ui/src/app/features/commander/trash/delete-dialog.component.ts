@@ -1,5 +1,5 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, output, signal } from '@angular/core';
 import { FileSizePipe } from '../../../shared/pipes/file-size.pipe';
 import { TrashStore } from './trash.store';
 
@@ -15,6 +15,7 @@ export const PERMANENT_DELETE_WARNING =
 })
 export class DeleteDialogComponent {
   readonly store = inject(TrashStore);
+  readonly closed = output<void>();
   readonly permanentDelete = signal(false);
   readonly warning = PERMANENT_DELETE_WARNING;
   readonly visibleNames = computed(() =>
@@ -45,7 +46,7 @@ export class DeleteDialogComponent {
     void this.store.changeDeleteMode(permanent ? 'permanent' : 'trash');
   }
 
-  confirm(): void {
+  async confirm(): Promise<void> {
     const preview = this.store.deletePreview();
     if (!preview) {
       return;
@@ -53,12 +54,16 @@ export class DeleteDialogComponent {
     if (preview.mode === 'permanent' && !this.confirmationReady()) {
       return;
     }
-    void this.store.submitDelete(preview.mode === 'permanent');
+    await this.store.submitDelete(preview.mode === 'permanent');
+    if (this.store.deleteRequest() === null) {
+      this.closed.emit();
+    }
   }
 
   cancel(): void {
-    if (!this.store.busy()) {
+    if (!this.store.busy() || this.store.deletePreview() === null) {
       this.store.clearDeletePreview();
+      this.closed.emit();
     }
   }
 

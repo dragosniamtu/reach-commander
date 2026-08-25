@@ -1,5 +1,5 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, output, signal } from '@angular/core';
 import { FileOperationKind, FileOperationStatusDto } from '../../../core/api/api.models';
 import { FileSizePipe } from '../../../shared/pipes/file-size.pipe';
 import { FileOperationStore } from './file-operation.store';
@@ -13,6 +13,7 @@ import { FileOperationStore } from './file-operation.store';
 })
 export class TransferProgressDialogComponent {
   readonly store = inject(FileOperationStore);
+  readonly dismissed = output<'background' | 'closed'>();
   readonly terminal = computed(() => {
     const phase = this.store.activeTask()?.phase;
     return phase === 'completed' || phase === 'completedWithErrors' || phase === 'cancelled' ||
@@ -69,6 +70,7 @@ export class TransferProgressDialogComponent {
 
   background(): void {
     this.store.background();
+    this.dismissed.emit('background');
   }
 
   cancel(): void {
@@ -78,10 +80,13 @@ export class TransferProgressDialogComponent {
     }
   }
 
-  close(): void {
+  async close(): Promise<void> {
     const operationId = this.store.activeTask()?.operationId;
     if (operationId && this.terminal()) {
-      void this.store.acknowledge(operationId);
+      await this.store.acknowledge(operationId);
+      if (this.store.activeTask()?.operationId !== operationId) {
+        this.dismissed.emit('closed');
+      }
     }
   }
 

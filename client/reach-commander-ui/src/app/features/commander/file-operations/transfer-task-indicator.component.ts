@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, ViewChild, computed, inject } from '@angular/core';
 import { FileOperationKind, FileOperationStatusDto } from '../../../core/api/api.models';
 import { FileOperationStore } from './file-operation.store';
 
@@ -12,6 +12,9 @@ export class TransferTaskIndicatorComponent {
   readonly store = inject(FileOperationStore);
   readonly task = computed(() => this.store.activeTask() ??
     this.store.tasks().find((task) => !task.acknowledged) ?? null);
+
+  @ViewChild('taskButton', { read: ElementRef })
+  private taskButton?: ElementRef<HTMLButtonElement>;
 
   kindLabel(kind: FileOperationKind): string {
     switch (kind) {
@@ -44,5 +47,9 @@ export class TransferTaskIndicatorComponent {
     if (operationId) {
       this.store.restoreProgress(operationId);
     }
+  }
+
+  focus(): void {
+    this.taskButton?.nativeElement.focus();
   }
 }

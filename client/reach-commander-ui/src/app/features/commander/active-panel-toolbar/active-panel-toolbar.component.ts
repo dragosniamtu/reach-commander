@@ -33,6 +33,7 @@ export class ActivePanelToolbarComponent {
   readonly renameRequested = output<void>();
   readonly filesSelected = output<readonly File[]>();
   readonly extractRequested = output<void>();
+  readonly trashRequested = output<void>();
   readonly filterChanged = output<string>();
 
   @ViewChild('searchInput', { read: ElementRef })

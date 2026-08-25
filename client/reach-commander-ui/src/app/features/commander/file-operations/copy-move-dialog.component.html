@@ -18,7 +18,7 @@
             · {{ context.knownTotalBytes === null ? 'size unknown' : (context.knownTotalBytes | fileSize) }}
           </p>
         </div>
-        <button type="button" aria-label="Close copy or move confirmation" [disabled]="store.busy()" (click)="cancel()">×</button>
+        <button type="button" aria-label="Close copy or move confirmation" (click)="cancel()">×</button>
       </header>
 
       <section class="route-summary" aria-label="Operation route">
@@ -97,7 +97,7 @@
       <footer>
         <span aria-live="polite">{{ store.canSubmit() ? 'Ready to start' : 'Review the destination and conflicts' }}</span>
         <div>
-          <button type="button" [disabled]="store.busy()" (click)="cancel()">Cancel</button>
+          <button type="button" (click)="cancel()">Cancel</button>
           <button type="button" class="primary" [disabled]="!store.canSubmit()" (click)="start()">Start</button>
         </div>
       </footer>

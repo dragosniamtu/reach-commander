@@ -1,11 +1,11 @@
-<span id="future-command-description" class="sr-only">Available in a future ReachCommander milestone</span>
 <nav class="command-bar" aria-label="Function key commands">
   @for (action of actions(); track action.key) {
     <button
       type="button"
       [attr.data-key]="action.key"
       [disabled]="!action.enabled"
-      [attr.aria-describedby]="!action.enabled ? 'future-command-description' : null"
+      [title]="action.reason ?? action.label"
+      [attr.aria-label]="action.enabled ? action.key + ' ' + action.label : action.key + ' ' + action.label + ', unavailable: ' + action.reason"
       (click)="commandSelected.emit(action.key)"
     >
       <kbd>{{ action.key }}</kbd><span>{{ action.label }}</span>

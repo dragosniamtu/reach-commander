@@ -10,6 +10,7 @@
       (filterChanged)="setActiveFilter($event)"
       (renameRequested)="openMultiRename()"
       (extractRequested)="openArchiveExtraction()"
+      (trashRequested)="openTrash()"
       (filesSelected)="reviewUpload($event)"
     />
     <div class="top-actions">
@@ -25,7 +26,7 @@
           {{ pwa.installing() ? 'Installing…' : 'Install app' }}
         </button>
       }
-      <button type="button" disabled title="Transfers arrive in Milestone 3">Transfers</button>
+      <app-transfer-task-indicator />
       <button
         type="button"
         disabled
@@ -88,6 +89,32 @@
     <app-archive-extraction-dialog (closeRequested)="closeArchiveExtraction()" />
   }
 
+  @if (fileOperations.dialog() === 'confirm') {
+    <app-copy-move-dialog (closed)="restoreFileOperationFocus()" />
+  }
+
+  @if (fileOperations.dialog() === 'progress' && fileOperations.presentation() === 'modal') {
+    <app-transfer-progress-dialog (dismissed)="handleTransferDismissed($event)" />
+  }
+
+  @if (trash.deleteRequest()) {
+    <app-delete-dialog (closed)="restoreFileOperationFocus()" />
+  }
+
+  @if (trashOpen()) {
+    <app-trash-dialog [sources]="store.sources()" (closeRequested)="closeTrash()" />
+  }
+
+  @if (createDirectoryContext(); as context) {
+    <app-create-directory-dialog
+      [sourceId]="context.sourceId"
+      [sourceName]="context.sourceName"
+      [parentLogicalPath]="context.parentLogicalPath"
+      (created)="closeCreateDirectory(true)"
+      (closeRequested)="closeCreateDirectory()"
+    />
+  }
+
   <section class="panes" aria-label="Dual-pane file manager">
     <app-commander-panel
       #leftPanel
@@ -133,14 +160,14 @@
         ><kbd>Ctrl+M</kbd>
       </div>
       <p>
-        Multi-Rename is available with Ctrl+M. F5 extracts an eligible archive or selected archive
-        entries into the opposite panel; the other file-operation keys remain reserved.
+        Multi-Rename is available with Ctrl+M. F5 extracts eligible archives or copies filesystem
+        items; F6 moves, F7 creates a directory, and F8 opens safe deletion.
       </p>
     </section>
   }
 
   <app-command-bar
-    [extractEnabled]="extractionContext().context !== null"
+    [availability]="fileCommandAvailability()"
     (commandSelected)="handleFunctionKey($event)"
   />
 </main>

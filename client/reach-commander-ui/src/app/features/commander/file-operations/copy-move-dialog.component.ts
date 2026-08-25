@@ -7,6 +7,7 @@ import {
   HostListener,
   ViewChild,
   inject,
+  output,
   signal,
 } from '@angular/core';
 import { FileOperationConflictDecision } from '../../../core/api/api.models';
@@ -23,6 +24,7 @@ import { FileOperationStore } from './file-operation.store';
 export class CopyMoveDialogComponent implements AfterViewInit {
   readonly store = inject(FileOperationStore);
   readonly lastDecision = signal<FileOperationConflictDecision | null>(null);
+  readonly closed = output<void>();
 
   @ViewChild('destinationInput', { read: ElementRef })
   private destinationInput?: ElementRef<HTMLInputElement>;
@@ -60,6 +62,7 @@ export class CopyMoveDialogComponent implements AfterViewInit {
 
   cancel(): void {
     this.store.closeConfirmation();
+    this.closed.emit();
   }
 
   basename(path: string): string {

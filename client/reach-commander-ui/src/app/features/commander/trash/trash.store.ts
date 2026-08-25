@@ -185,7 +185,6 @@ export class TrashStore {
     const generation = this.lifecycleGeneration;
     this.busyState.set(true);
     this.errorState.set(null);
-    this.deletePreviewState.set(null);
     try {
       const preview = await this.api.previewDelete(capturedRequest);
       if (sequence === this.requestSequence && generation === this.lifecycleGeneration) {

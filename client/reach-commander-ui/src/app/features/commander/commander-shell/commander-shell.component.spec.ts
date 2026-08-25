@@ -17,6 +17,8 @@ import {
 import { PwaService } from '../../../core/pwa/pwa.service';
 import { AuthenticationStore } from '../../../core/auth/authentication-store';
 import { ProtectedStateResetService } from '../../../core/auth/protected-state-reset.service';
+import { FileOperationStore } from '../file-operations/file-operation.store';
+import { TrashStore } from '../trash/trash.store';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -49,7 +51,8 @@ describe('CommanderShellComponent system metrics integration', () => {
     reset: vi.fn(),
     refresh: vi.fn(() => Promise.resolve()),
     clearSelection: vi.fn(),
-    createMultiRenameContext: vi.fn(() => null),
+    createMultiRenameContext: vi.fn((_side?: 'left' | 'right'): any => null),
+    captureFileOperationContext: vi.fn((_kind: 'copy' | 'move'): any => null),
     activatePanel: vi.fn(),
     setFilter: vi.fn(),
     openEntry: vi.fn(() => Promise.resolve()),
@@ -81,6 +84,30 @@ describe('CommanderShellComponent system metrics integration', () => {
     close: vi.fn(),
     cancel: vi.fn(() => Promise.resolve()),
     setCompletionHandler: vi.fn(),
+  };
+  const fileOperations = {
+    context: signal(null), destination: signal('/'), dialog: signal<'closed' | 'confirm' | 'progress'>('closed'),
+    presentation: signal<'modal' | 'background'>('modal'), preview: signal(null),
+    tasks: signal<readonly any[]>([]), conflictDecisions: signal(new Map()), busy: signal(false),
+    error: signal<string | null>(null), activeOperationId: signal<string | null>(null),
+    activeTask: signal(null), queuedCount: signal(0), canSubmit: signal(false),
+    open: vi.fn(() => Promise.resolve()), restoreTasks: vi.fn(() => Promise.resolve()),
+    setTerminalHandler: vi.fn(), resetProtectedState: vi.fn(), background: vi.fn(),
+    restoreProgress: vi.fn(), cancel: vi.fn(), acknowledge: vi.fn(), setDestination: vi.fn(),
+    setConflictDecision: vi.fn(), applyDecisionToRemaining: vi.fn(), submit: vi.fn(),
+    closeConfirmation: vi.fn(),
+  };
+  const trash = {
+    sourceFilter: signal<string | null>(null), entries: signal<readonly any[]>([]),
+    selection: signal<ReadonlySet<string>>(new Set()), restorePreview: signal(null),
+    restoreConflictDecisions: signal(new Map()), deletePreview: signal(null),
+    deleteRequest: signal(null), busy: signal(false), error: signal<string | null>(null),
+    canSubmitRestore: signal(false), load: vi.fn(), setSourceFilter: vi.fn(),
+    toggleSelection: vi.fn(), selectAll: vi.fn(), clearSelection: vi.fn(),
+    previewSelectedRestore: vi.fn(), setRestoreConflictDecision: vi.fn(), submitRestore: vi.fn(),
+    previewDelete: vi.fn(() => Promise.resolve()), changeDeleteMode: vi.fn(), submitDelete: vi.fn(),
+    permanentlyDeleteSelected: vi.fn(), emptyTrash: vi.fn(), clearDeletePreview: vi.fn(),
+    resetProtectedState: vi.fn(),
   };
   const pwa = {
     canInstall: signal(false),
@@ -115,6 +142,12 @@ describe('CommanderShellComponent system metrics integration', () => {
     upload.state.set(closedUploadState());
     multiRename.state.set(closedMultiRenameState());
     archiveExtraction.state.set(closedArchiveExtractionState());
+    fileOperations.dialog.set('closed');
+    fileOperations.presentation.set('modal');
+    fileOperations.tasks.set([]);
+    fileOperations.activeTask.set(null);
+    trash.deletePreview.set(null);
+    store.captureFileOperationContext.mockReturnValue(null);
     pwa.canInstall.set(false);
     pwa.online.set(true);
     pwa.updateReady.set(false);
@@ -129,6 +162,8 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: UploadStore, useValue: upload },
         { provide: MultiRenameStore, useValue: multiRename },
         { provide: ArchiveExtractionStore, useValue: archiveExtraction },
+        { provide: FileOperationStore, useValue: fileOperations },
+        { provide: TrashStore, useValue: trash },
         { provide: PwaService, useValue: pwa },
         { provide: AuthenticationStore, useValue: authentication },
       ],
@@ -188,6 +223,8 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(upload.reset).toHaveBeenCalledOnce();
     expect(multiRename.close).toHaveBeenCalledOnce();
     expect(archiveExtraction.close).toHaveBeenCalledOnce();
+    expect(fileOperations.resetProtectedState).toHaveBeenCalledOnce();
+    expect(trash.resetProtectedState).toHaveBeenCalledOnce();
   });
 
   it('handles Escape by closing metrics before commander state changes', () => {
@@ -470,7 +507,115 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.componentInstance.handleFunctionKey('F5');
 
     expect(archiveExtraction.open).not.toHaveBeenCalled();
-    expect(fixture.componentInstance.commandStatus()).toContain('F5 is reserved');
+    expect(fixture.componentInstance.commandStatus()).toContain('Select or focus');
+  });
+
+  it('maps filesystem F5 through F8 to Copy, Move, MkDir, and Delete', () => {
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: 'Files', location: { kind: 'filesystem', sourceId: 'downloads', path: '/Files' } }],
+      activeTabId: 'left', entries: [{
+        name: 'one.txt', relativePath: '/Files/one.txt', type: 'file', size: 1,
+        modifiedAt: null, extension: 'txt', isReadOnly: false, isSymbolicLink: false,
+        attributes: '', archiveFormatHint: null, archiveRole: null,
+      }], cursorIndex: 0,
+    }));
+    store.rightPanel.set(panel({
+      tabs: [{ id: 'right', label: 'Target', location: { kind: 'filesystem', sourceId: 'media', path: '/Target' } }],
+      activeTabId: 'right',
+    }));
+    store.captureFileOperationContext.mockImplementation((kind: 'copy' | 'move') => ({
+      kind, sourceId: 'downloads', logicalPaths: ['/Files/one.txt'], destinationSourceId: 'media',
+      destinationLogicalDirectory: '/Target', selectedNames: ['one.txt'], knownTotalBytes: 1,
+    }));
+    store.createMultiRenameContext.mockReturnValue({
+      panelSide: 'left', sourceId: 'downloads', sourceName: 'Downloads', directoryPath: '/Files',
+      entries: store.leftPanel().entries, isAvailable: true, isReadOnly: false,
+    });
+
+    fixture.componentInstance.handleFunctionKey('F5');
+    fixture.componentInstance.handleFunctionKey('F6');
+    fixture.componentInstance.handleFunctionKey('F7');
+    fixture.componentInstance.handleFunctionKey('F8');
+
+    expect(fileOperations.open).toHaveBeenNthCalledWith(1, 'copy', expect.any(Object));
+    expect(fileOperations.open).toHaveBeenNthCalledWith(2, 'move', expect.any(Object));
+    expect(fixture.componentInstance.createDirectoryContext()).toEqual(expect.objectContaining({ parentLogicalPath: '/Files' }));
+    expect(trash.previewDelete).toHaveBeenCalledWith({
+      sourceId: 'downloads', logicalPaths: ['/Files/one.txt'], mode: 'trash',
+    });
+  });
+
+  it('keeps archive extraction ahead of Copy and blocks commander movement under file modals', () => {
+    fileOperations.dialog.set('confirm');
+    fixture.componentInstance.execute({ type: 'switch-panel' });
+    expect(store.activatePanel).not.toHaveBeenCalled();
+
+    fileOperations.dialog.set('progress');
+    fileOperations.presentation.set('background');
+    fixture.componentInstance.execute({ type: 'switch-panel' });
+    expect(store.activatePanel).toHaveBeenCalledOnce();
+  });
+
+  it('allows Copy from read-only sources while disabling Move, MkDir, and Delete', () => {
+    store.sources.set([source('archive', 'Archive', { isReadOnly: true }), source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: '/', location: { kind: 'filesystem', sourceId: 'archive', path: '/' } }],
+      activeTabId: 'left', entries: [{
+        name: 'one.iso', relativePath: '/one.iso', type: 'file', size: 1, modifiedAt: null,
+        extension: 'iso', isReadOnly: true, isSymbolicLink: false, attributes: '',
+        archiveFormatHint: null, archiveRole: null,
+      }], cursorIndex: 0,
+    }));
+    store.rightPanel.set(panel({
+      tabs: [{ id: 'right', label: '/', location: { kind: 'filesystem', sourceId: 'media', path: '/' } }],
+      activeTabId: 'right',
+    }));
+    store.createMultiRenameContext.mockReturnValue({
+      panelSide: 'left', sourceId: 'archive', sourceName: 'Archive', directoryPath: '/',
+      entries: store.leftPanel().entries, isAvailable: true, isReadOnly: true,
+    });
+    store.captureFileOperationContext.mockImplementation((kind: 'copy' | 'move') =>
+      kind === 'copy' ? {
+        kind, sourceId: 'archive', logicalPaths: ['/one.iso'], destinationSourceId: 'media',
+        destinationLogicalDirectory: '/', selectedNames: ['one.iso'], knownTotalBytes: 1,
+      } : null,
+    );
+
+    const availability = fixture.componentInstance.fileCommandAvailability();
+
+    expect(availability.copy.enabled).toBe(true);
+    expect(availability.move.reason).toContain('read-only');
+    expect(availability.createDirectory.enabled).toBe(false);
+    expect(availability.delete.enabled).toBe(false);
+  });
+
+  it('refreshes affected visible panels from a terminal file-operation outcome', async () => {
+    store.sources.set([source('downloads', 'Downloads'), source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: '/', location: { kind: 'filesystem', sourceId: 'downloads', path: '/' } }],
+      activeTabId: 'left',
+    }));
+    store.rightPanel.set(panel({
+      tabs: [{ id: 'right', label: '/', location: { kind: 'filesystem', sourceId: 'media', path: '/' } }],
+      activeTabId: 'right',
+    }));
+    const handler = fileOperations.setTerminalHandler.mock.calls.at(-1)?.[0];
+
+    await handler({
+      operationId: 'copy', kind: 'copy', phase: 'completed', queuePosition: 0,
+      createdAt: '', updatedAt: '', progress: {
+        currentLogicalName: null, completedItems: 1, totalItems: 1, completedBytes: 1,
+        totalBytes: 1, percentage: 100, bytesPerSecond: null, elapsed: '00:00:01',
+        estimatedRemaining: null,
+      }, warnings: [], acknowledged: false, outcomes: [{
+        sourceId: 'downloads', sourceLogicalPath: '/one.txt', destinationSourceId: 'media',
+        destinationLogicalPath: '/one.txt', result: 'completed', errorCode: null, detail: null,
+      }],
+    }, null);
+
+    expect(store.refresh).toHaveBeenCalledWith('left');
+    expect(store.refresh).toHaveBeenCalledWith('right');
   });
 
   it('restores focus to the F5 opener after the extraction dialog closes', async () => {

@@ -95,6 +95,15 @@
   </span>
   <input #fileInput type="file" multiple hidden (change)="handleFiles($event)" />
 
+  <span class="action-wrapper" role="group" title="Open managed Trash">
+    <button type="button" data-testid="toolbar-trash" (click)="trashRequested.emit()">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
+        <path d="M5 6h10m-8 0 .6 10h4.8L13 6M8 6V4h4v2" vector-effect="non-scaling-stroke" />
+      </svg>
+      <span class="action-text">Trash</span>
+    </button>
+  </span>
+
   <label class="search-box">
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
       <circle cx="8.5" cy="8.5" r="4.5" vector-effect="non-scaling-stroke" />

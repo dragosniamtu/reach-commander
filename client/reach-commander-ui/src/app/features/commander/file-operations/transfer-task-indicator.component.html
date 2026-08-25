@@ -1,5 +1,5 @@
 @if (task(); as task) {
-  <button type="button" class="task-indicator" [attr.aria-label]="accessibleLabel(task)" (click)="restore()">
+  <button #taskButton type="button" class="task-indicator" [attr.aria-label]="accessibleLabel(task)" (click)="restore()">
     <span class="task-icon" aria-hidden="true">⇄</span>
     <span class="task-kind">{{ kindLabel(task.kind) }}</span>
     <strong>{{ progressLabel(task) }}</strong>

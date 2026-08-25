@@ -115,6 +115,16 @@ describe('ActivePanelToolbarComponent', () => {
       .toContain('writable destination');
   });
 
+  it('opens managed Trash from the active-panel toolbar', () => {
+    const requested = vi.fn();
+    fixture.componentInstance.trashRequested.subscribe(requested);
+    fixture.detectChanges();
+
+    button('toolbar-trash').click();
+
+    expect(requested).toHaveBeenCalledOnce();
+  });
+
   function setInputs(toolbarContext: ActivePanelToolbarContext, filter: string): void {
     fixture.componentRef.setInput('context', toolbarContext);
     fixture.componentRef.setInput('filter', filter);

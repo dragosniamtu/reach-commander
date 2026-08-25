@@ -17,16 +17,48 @@ describe('CommandBarComponent', () => {
 
     expect(rename.disabled).toBe(true);
     expect(copy.disabled).toBe(true);
-    expect(copy.getAttribute('aria-describedby')).toBeTruthy();
+    expect(copy.getAttribute('aria-label')).toContain('unavailable');
     expect(menu.disabled).toBe(false);
   });
 
   it('changes F5 to Extract only when the shell has an extraction context', () => {
-    fixture.componentRef.setInput('extractEnabled', true);
+    fixture.componentRef.setInput('availability', availability({
+      copy: { enabled: true, reason: null, label: 'Extract' },
+    }));
     fixture.detectChanges();
     const extract: HTMLButtonElement = fixture.nativeElement.querySelector('[data-key="F5"]');
 
     expect(extract.disabled).toBe(false);
     expect(extract.textContent).toContain('Extract');
   });
+
+  it('enables F5 through F8 independently and exposes exact disabled reasons', () => {
+    fixture.componentRef.setInput('availability', availability({
+      copy: { enabled: true, reason: null, label: 'Copy' },
+      move: { enabled: false, reason: 'The source is read-only.' },
+      createDirectory: { enabled: true, reason: null },
+      delete: { enabled: true, reason: null },
+    }));
+    fixture.detectChanges();
+
+    expect(button('F5').disabled).toBe(false);
+    expect(button('F6').disabled).toBe(true);
+    expect(button('F6').title).toBe('The source is read-only.');
+    expect(button('F7').disabled).toBe(false);
+    expect(button('F8').disabled).toBe(false);
+  });
+
+  function button(key: string): HTMLButtonElement {
+    return fixture.nativeElement.querySelector(`[data-key="${key}"]`);
+  }
 });
+
+function availability(overrides: any = {}) {
+  return {
+    copy: { enabled: false, reason: 'Select or focus an item.', label: 'Copy' },
+    move: { enabled: false, reason: 'Select or focus an item.' },
+    createDirectory: { enabled: false, reason: 'Choose a writable folder.' },
+    delete: { enabled: false, reason: 'Select or focus an item.' },
+    ...overrides,
+  };
+}

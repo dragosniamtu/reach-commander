@@ -4,18 +4,18 @@ export type ProtectedStateResetHandler = () => void;
 
 @Injectable({ providedIn: 'root' })
 export class ProtectedStateResetService {
-  private handler: ProtectedStateResetHandler | null = null;
+  private readonly handlers = new Set<ProtectedStateResetHandler>();
 
   register(handler: ProtectedStateResetHandler): () => void {
-    this.handler = handler;
+    this.handlers.add(handler);
     return () => {
-      if (this.handler === handler) {
-        this.handler = null;
-      }
+      this.handlers.delete(handler);
     };
   }
 
   reset(): void {
-    this.handler?.();
+    for (const handler of [...this.handlers]) {
+      handler();
+    }
   }
 }

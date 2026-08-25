@@ -17,6 +17,7 @@ import {
   FileOperationStatusDto,
   RestorePreviewRequestDto,
   SystemMetricsDto,
+  SystemUpdateStatusDto,
   UploadLimitsDto,
   UploadResultDto,
 } from './api.models';
@@ -127,6 +128,42 @@ describe('ReachCommanderApi', () => {
     request.flush(expected);
 
     await expect(result).resolves.toEqual(expected);
+  });
+
+  it('uses target-free system update status, check, and apply requests', async () => {
+    const current = systemUpdateStatus({ phase: 'current' });
+    const available = systemUpdateStatus({
+      phase: 'available',
+      updateAvailable: true,
+      canApply: true,
+      targetVersion: 'v1.4.0',
+    });
+    const applying = systemUpdateStatus({
+      phase: 'applying',
+      updateAvailable: true,
+      operationId: 'operation-1',
+      targetVersion: 'v1.4.0',
+    });
+
+    const get = api.getSystemUpdate();
+    const getRequest = http.expectOne('/api/system-update');
+    expect(getRequest.request.method).toBe('GET');
+    getRequest.flush(current);
+    await expect(get).resolves.toEqual(current);
+
+    const check = api.checkSystemUpdate();
+    const checkRequest = http.expectOne('/api/system-update/check');
+    expect(checkRequest.request.method).toBe('POST');
+    expect(checkRequest.request.body).toBeNull();
+    checkRequest.flush(available);
+    await expect(check).resolves.toEqual(available);
+
+    const apply = api.applySystemUpdate();
+    const applyRequest = http.expectOne('/api/system-update/apply');
+    expect(applyRequest.request.method).toBe('POST');
+    expect(applyRequest.request.body).toBeNull();
+    applyRequest.flush(applying);
+    await expect(apply).resolves.toEqual(applying);
   });
 
   it('requests effective upload limits from the stable API route', async () => {
@@ -569,5 +606,26 @@ function systemMetricsResponse(): SystemMetricsDto {
     fans: [],
     network: null,
     collectors: [],
+  };
+}
+
+function systemUpdateStatus(
+  overrides: Partial<SystemUpdateStatusDto> = {},
+): SystemUpdateStatusDto {
+  return {
+    protocolVersion: 1,
+    supported: true,
+    channel: 'stable',
+    currentVersion: 'v1.3.0',
+    targetVersion: null,
+    phase: 'current',
+    updateAvailable: false,
+    canApply: false,
+    reasonCode: 'up_to_date',
+    detail: 'ReachCommander is up to date.',
+    operationId: null,
+    lastCheckedAt: '2026-08-25T10:00:00Z',
+    updatedAt: '2026-08-25T10:00:00Z',
+    ...overrides,
   };
 }

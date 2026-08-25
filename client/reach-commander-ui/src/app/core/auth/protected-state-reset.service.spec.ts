@@ -21,4 +21,17 @@ describe('ProtectedStateResetService', () => {
 
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('invokes every independently registered protected store reset', () => {
+    const workspace = vi.fn();
+    const systemUpdate = vi.fn();
+    const service = new ProtectedStateResetService();
+    service.register(workspace);
+    service.register(systemUpdate);
+
+    service.reset();
+
+    expect(workspace).toHaveBeenCalledOnce();
+    expect(systemUpdate).toHaveBeenCalledOnce();
+  });
 });

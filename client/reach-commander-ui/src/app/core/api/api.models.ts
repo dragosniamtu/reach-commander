@@ -429,8 +429,41 @@ export interface SystemMetricsDto {
   readonly collectors: readonly HardwareCollectorStatusDto[];
 }
 
+export type SystemUpdatePhase =
+  | 'unavailable'
+  | 'checking'
+  | 'current'
+  | 'available'
+  | 'blocked'
+  | 'applying'
+  | 'completed'
+  | 'rolledBack'
+  | 'failed';
+
+export interface SystemUpdateStatusDto {
+  readonly protocolVersion: number;
+  readonly supported: boolean;
+  readonly channel: string | null;
+  readonly currentVersion: string | null;
+  readonly targetVersion: string | null;
+  readonly phase: SystemUpdatePhase;
+  readonly updateAvailable: boolean;
+  readonly canApply: boolean;
+  readonly reasonCode: string | null;
+  readonly detail: string | null;
+  readonly operationId: string | null;
+  readonly lastCheckedAt: string | null;
+  readonly updatedAt: string;
+}
+
 export abstract class CommanderApiPort {
   abstract getSystemMetrics(): Promise<SystemMetricsDto>;
+
+  abstract getSystemUpdate(): Promise<SystemUpdateStatusDto>;
+
+  abstract checkSystemUpdate(): Promise<SystemUpdateStatusDto>;
+
+  abstract applySystemUpdate(): Promise<SystemUpdateStatusDto>;
 
   abstract getSources(): Promise<readonly SourceDto[]>;
 

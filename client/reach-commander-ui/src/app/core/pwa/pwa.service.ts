@@ -30,6 +30,7 @@ export class PwaService {
   private readonly reload = inject(PWA_RELOAD);
   private readonly destroyRef = inject(DestroyRef);
   private readonly installPrompt = signal<BeforeInstallPromptEvent | null>(null);
+  private systemUpdateRefresh: Promise<void> | null = null;
 
   readonly online = signal(true);
   readonly updateReady = signal(false);
@@ -116,5 +117,27 @@ export class PwaService {
 
   dismissUpdate(): void {
     this.updateReady.set(false);
+  }
+
+  refreshAfterSystemUpdate(): Promise<void> {
+    if (this.systemUpdateRefresh) {
+      return this.systemUpdateRefresh;
+    }
+
+    this.systemUpdateRefresh = this.activateLatestShellAndReload();
+    return this.systemUpdateRefresh;
+  }
+
+  private async activateLatestShellAndReload(): Promise<void> {
+    try {
+      if (this.updates.isEnabled) {
+        await this.updates.checkForUpdate();
+        await this.updates.activateUpdate();
+      }
+    } catch {
+      this.error.set('The new application shell could not be activated before reload.');
+    } finally {
+      this.reload();
+    }
   }
 }

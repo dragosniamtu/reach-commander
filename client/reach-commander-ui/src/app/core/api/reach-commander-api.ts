@@ -34,6 +34,7 @@ import {
   RestoreSubmissionDto,
   SourceDto,
   SystemMetricsDto,
+  SystemUpdateStatusDto,
   UploadEvent,
   UploadLimitsDto,
   UploadResultDto,
@@ -50,6 +51,22 @@ export class ReachCommanderApi extends CommanderApiPort {
 
   getSystemMetrics(): Promise<SystemMetricsDto> {
     return firstValueFrom(this.http.get<SystemMetricsDto>('/api/system-metrics'));
+  }
+
+  getSystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return firstValueFrom(this.http.get<SystemUpdateStatusDto>('/api/system-update'));
+  }
+
+  checkSystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return firstValueFrom(
+      this.http.post<SystemUpdateStatusDto>('/api/system-update/check', null),
+    );
+  }
+
+  applySystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return firstValueFrom(
+      this.http.post<SystemUpdateStatusDto>('/api/system-update/apply', null),
+    );
   }
 
   getSources(): Promise<readonly SourceDto[]> {

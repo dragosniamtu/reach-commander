@@ -13,11 +13,24 @@ import {
   RestorePreviewDto,
   RestorePreviewRequestDto,
   RestoreSubmissionDto,
+  SystemUpdateStatusDto,
   TrashEntryDto,
   TrashPermanentDeleteRequestDto,
 } from '../core/api/api.models';
 
 export abstract class CommanderApiTestBase extends CommanderApiPort {
+  override getSystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return unsupported();
+  }
+
+  override checkSystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return unsupported();
+  }
+
+  override applySystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return unsupported();
+  }
+
   override previewFileOperation(
     _request: FileOperationPreviewRequestDto,
   ): Promise<FileOperationPreviewDto> {

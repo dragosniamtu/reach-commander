@@ -36,7 +36,17 @@ case "${1:-}" in
       printf 'fake docker: unsupported image command\n' >&2
       exit 97
     fi
-    printf '%s\n' "${FAKE_DOCKER_DIGESTS:-}"
+    case "${4:-}" in
+      *org.opencontainers.image.version*)
+        printf '%s\n' "${FAKE_DOCKER_VERSION_LABEL:-}"
+        ;;
+      *org.opencontainers.image.revision*)
+        printf '%s\n' "${FAKE_DOCKER_REVISION_LABEL:-}"
+        ;;
+      *)
+        printf '%s\n' "${FAKE_DOCKER_DIGESTS:-}"
+        ;;
+    esac
     exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
     ;;
   inspect)

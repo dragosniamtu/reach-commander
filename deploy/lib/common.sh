@@ -150,6 +150,18 @@ rc_validate_channel() {
   return 1
 }
 
+rc_validate_display_version() {
+  local version="${1:-}"
+  local number='(0|[1-9][0-9]*)'
+  local identifier='(0|[1-9][0-9]*|[A-Za-z-][0-9A-Za-z-]*)'
+  local version_pattern="^v${number}\\.${number}\\.${number}(-${identifier}(\\.${identifier})*)?$"
+  if [[ "$version" == 'unknown' || "$version" =~ $version_pattern || "$version" =~ ^edge@[0-9a-f]{12}$ ]]; then
+    return 0
+  fi
+  rc_die 'display version state is invalid'
+  return 1
+}
+
 rc_acquire_lock() {
   local lock_directory
   lock_directory="$(dirname -- "$RC_LOCK_PATH")"
@@ -213,6 +225,61 @@ rc_pull_digest() {
     return 1
   fi
   printf '%s\n' "$selected"
+}
+
+rc_image_display_version() {
+  local image="${1:-}"
+  local channel="${2:-}"
+  local number='(0|[1-9][0-9]*)'
+  local stable_pattern
+  local version
+  local revision
+  stable_pattern="^v${number}\\.${number}\\.${number}$"
+  if [[ ! "$image" =~ ^ghcr\.io/dragosniamtu/reach-commander@sha256:[0-9a-f]{64}$ ]]; then
+    rc_die 'image digest is not trusted'
+    return 1
+  fi
+  rc_validate_channel "$channel" >/dev/null 2>&1 || {
+    rc_die 'image channel is invalid'
+    return 1
+  }
+  if [[ "$channel" == 'edge' ]]; then
+    if ! revision="$(
+      docker image inspect \
+        --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+        "$image"
+    )"; then
+      rc_die 'edge image revision inspection failed'
+      return 1
+    fi
+    if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+      rc_die 'edge image revision is invalid'
+      return 1
+    fi
+    printf 'edge@%.12s\n' "$revision"
+    return 0
+  fi
+  if ! version="$(
+    docker image inspect \
+      --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+      "$image"
+  )"; then
+    rc_die 'image version label inspection failed'
+    return 1
+  fi
+  if ! rc_validate_display_version "$version" >/dev/null 2>&1 || [[ "$version" == 'unknown' || "$version" == edge@* ]]; then
+    rc_die 'image version label is invalid'
+    return 1
+  fi
+  if [[ "$channel" == 'stable' && ! "$version" =~ $stable_pattern ]]; then
+    rc_die 'image version label is invalid'
+    return 1
+  fi
+  if [[ "$channel" == v* && "$version" != "$channel" ]]; then
+    rc_die 'image version label does not match the pinned channel'
+    return 1
+  fi
+  printf '%s\n' "$version"
 }
 
 rc_wait_healthy() {

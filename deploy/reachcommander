@@ -83,9 +83,12 @@ read_state_line() {
 command_status() {
   local channel
   local image
+  local version
   channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel")"
   image="$(read_state_line "$RC_INSTALL_ROOT/state/current-image")"
+  version="$(read_state_line "$RC_INSTALL_ROOT/state/current-version")"
   printf 'Channel: %s\n' "$channel"
+  printf 'Version: %s\n' "$version"
   printf 'Image: %s\n' "$image"
   rc_compose ps
 }
@@ -147,6 +150,8 @@ UPDATE_BACKUP_FILES=(
   'state/channel'
   'state/current-image'
   'state/previous-image'
+  'state/current-version'
+  'state/previous-version'
 )
 
 create_update_backup() {
@@ -234,6 +239,8 @@ verify_update_state() {
   local current_image
   local environment_image
   local previous_image=''
+  local current_version
+  local previous_version=''
   if [[ -e "$RC_INSTALL_ROOT/state/update-transaction" ]]; then
     printf 'ReachCommander: an incomplete update transaction exists; run reachcommander doctor before retrying.\n' >&2
     return 1
@@ -260,13 +267,31 @@ verify_update_state() {
       return 1
     fi
   fi
+  if ! current_version="$(read_state_line "$RC_INSTALL_ROOT/state/current-version")" ||
+    ! rc_validate_display_version "$current_version" >/dev/null 2>&1; then
+    rc_die 'current display version state is invalid'
+    return 1
+  fi
+  if [[ -s "$RC_INSTALL_ROOT/state/previous-version" ]]; then
+    previous_version="$(read_state_line "$RC_INSTALL_ROOT/state/previous-version")"
+    if ! rc_validate_display_version "$previous_version" >/dev/null 2>&1; then
+      rc_die 'previous display version state is invalid'
+      return 1
+    fi
+  fi
+  if [[ -n "$previous_image" && -z "$previous_version" || -z "$previous_image" && -n "$previous_version" ]]; then
+    rc_die 'previous image and display version state are inconsistent'
+    return 1
+  fi
 }
 
 command_update() {
   local requested_channel="${1:-}"
   local saved_channel
   local current_image
+  local current_version
   local resolved_image
+  local resolved_version
   local backup_directory
   local marker="$RC_INSTALL_ROOT/state/update-transaction"
 
@@ -278,6 +303,7 @@ command_update() {
   fi
   saved_channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel")"
   current_image="$(read_state_line "$RC_INSTALL_ROOT/state/current-image")"
+  current_version="$(read_state_line "$RC_INSTALL_ROOT/state/current-version")"
   requested_channel="${requested_channel:-$saved_channel}"
   if ! rc_validate_channel "$requested_channel" >/dev/null 2>&1; then
     rc_die 'requested update channel is invalid'
@@ -290,25 +316,32 @@ command_update() {
     printf 'ReachCommander is already running %s.\n' "$resolved_image"
     return 0
   fi
+  if ! resolved_version="$(rc_image_display_version "$resolved_image" "$requested_channel")"; then
+    return 1
+  fi
 
   if ! backup_directory="$(create_update_backup)"; then
     return 1
   fi
   rc_atomic_write "$marker" "$backup_directory"$'\n'
   rc_atomic_write "$RC_INSTALL_ROOT/state/previous-image" "$current_image"$'\n'
+  rc_atomic_write "$RC_INSTALL_ROOT/state/previous-version" "$current_version"$'\n'
+  maybe_interrupt_update previous-version
   python3 "$RC_INSTALL_ROOT/bin/render_config.py" set-image \
     --env "$RC_INSTALL_ROOT/.env" \
     --image "$resolved_image"
   maybe_interrupt_update environment
   rc_atomic_write "$RC_INSTALL_ROOT/state/current-image" "$resolved_image"$'\n'
   maybe_interrupt_update current-image
+  rc_atomic_write "$RC_INSTALL_ROOT/state/current-version" "$resolved_version"$'\n'
+  maybe_interrupt_update current-version
   rc_atomic_write "$RC_INSTALL_ROOT/state/channel" "$requested_channel"$'\n'
   maybe_interrupt_update channel
 
   if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
     rm -f -- "$marker"
     remove_update_backup "$backup_directory"
-    printf 'ReachCommander updated successfully to %s.\n' "$resolved_image"
+    printf 'ReachCommander updated successfully to %s (%s).\n' "$resolved_version" "$resolved_image"
     return 0
   fi
 
@@ -388,6 +421,8 @@ UNINSTALL_FILES=(
   'state/channel'
   'state/current-image'
   'state/previous-image'
+  'state/current-version'
+  'state/previous-version'
   'state/command.lock'
   'bin/render_config.py'
   'lib/common.sh'
@@ -431,6 +466,8 @@ validate_uninstall_tree() {
       state/channel|\
       state/current-image|\
       state/previous-image|\
+      state/current-version|\
+      state/previous-version|\
       state/failed-image|\
       state/command.lock|\
       bin/render_config.py|\
@@ -752,6 +789,8 @@ doctor_required_files() {
     'state/channel' \
     'state/current-image' \
     'state/previous-image' \
+    'state/current-version' \
+    'state/previous-version' \
     'bin/render_config.py' \
     'lib/common.sh'; do
     if [[ ! -f "$RC_INSTALL_ROOT/$required" || -L "$RC_INSTALL_ROOT/$required" ]]; then
@@ -868,6 +907,8 @@ command_doctor() {
   local runtime_gid=''
   local environment_image=''
   local current_image=''
+  local current_version=''
+  local previous_version=''
   local channel=''
   local health=''
   DOCTOR_FAILURES=0
@@ -951,6 +992,21 @@ command_doctor() {
     fi
   else
     doctor_fail 'Immutable image state is missing'
+  fi
+
+  if current_version="$(read_state_line "$RC_INSTALL_ROOT/state/current-version" 2>/dev/null)" &&
+    rc_validate_display_version "$current_version" >/dev/null 2>&1; then
+    doctor_pass 'Current display version state is valid'
+  else
+    doctor_fail 'Current display version state is invalid'
+  fi
+  if [[ ! -s "$RC_INSTALL_ROOT/state/previous-version" ]]; then
+    doctor_pass 'Previous display version state is valid'
+  elif previous_version="$(read_state_line "$RC_INSTALL_ROOT/state/previous-version" 2>/dev/null)" &&
+    rc_validate_display_version "$previous_version" >/dev/null 2>&1; then
+    doctor_pass 'Previous display version state is valid'
+  else
+    doctor_fail 'Previous display version state is invalid'
   fi
 
   if health="$(

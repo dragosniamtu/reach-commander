@@ -60,6 +60,8 @@ python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output 
 printf 'stable\n' >"$INSTALL_ROOT/state/channel"
 grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
 : >"$INSTALL_ROOT/state/previous-image"
+printf 'v1.3.0\n' >"$INSTALL_ROOT/state/current-version"
+: >"$INSTALL_ROOT/state/previous-version"
 printf '{"username":"command-test","passwordHash":"fixture","securityStamp":"fixture"}\n' \
   >"$INSTALL_ROOT/data/auth/account.json"
 printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
@@ -87,6 +89,8 @@ export FAKE_DOCKER_CONFIG_EXIT=0
 export FAKE_DOCKER_VERSION_EXIT=0
 export FAKE_DOCKER_INSPECT_EXIT=0
 export FAKE_FLOCK_EXIT=0
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+export FAKE_DOCKER_REVISION_LABEL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 tests_run=0
 last_status=0
@@ -141,10 +145,11 @@ pass "command dispatcher rejects unknown commands and extra arguments"
 run_command status
 assert_equal "0" "$last_status" "status command"
 [[ "$last_output" == *'Channel: stable'* ]] || fail "status channel missing"
+[[ "$last_output" == *'Version: v1.3.0'* ]] || fail "status version missing"
 [[ "$last_output" == *'Image: ghcr.io/dragosniamtu/reach-commander@sha256:'* ]] || fail "status image missing"
 mapfile -d '' status_args <"$FAKE_DOCKER_LOG"
 printf '%s\n' "${status_args[@]}" | grep -q '^ps$' || fail "status did not call Compose ps"
-pass "status reports immutable image, channel, and Compose state"
+pass "status reports display version, immutable image, channel, and Compose state"
 
 : >"$FAKE_DOCKER_LOG"
 run_command logs
@@ -245,6 +250,28 @@ assert_equal "1" "$last_status" "doctor image mismatch status"
 cp -- "$TEST_ROOT/current-image.backup" "$INSTALL_ROOT/state/current-image"
 pass "doctor fails on inconsistent immutable image state"
 
+mv -- "$INSTALL_ROOT/state/current-version" "$TEST_ROOT/current-version.backup"
+run_command doctor
+assert_equal "1" "$last_status" "doctor missing current version status"
+[[ "$last_output" == *'[FAIL] Required deployment file is missing or symlinked: state/current-version'* ]] ||
+  fail "doctor missing current version failure missing"
+mv -- "$TEST_ROOT/current-version.backup" "$INSTALL_ROOT/state/current-version"
+
+printf 'latest\n' >"$INSTALL_ROOT/state/current-version"
+run_command doctor
+assert_equal "1" "$last_status" "doctor invalid current version status"
+[[ "$last_output" == *'[FAIL] Current display version state is invalid'* ]] ||
+  fail "doctor invalid current version failure missing"
+printf 'v1.3.0\n' >"$INSTALL_ROOT/state/current-version"
+
+printf 'not-a-version\n' >"$INSTALL_ROOT/state/previous-version"
+run_command doctor
+assert_equal "1" "$last_status" "doctor invalid previous version status"
+[[ "$last_output" == *'[FAIL] Previous display version state is invalid'* ]] ||
+  fail "doctor invalid previous version failure missing"
+: >"$INSTALL_ROOT/state/previous-version"
+pass "doctor requires and validates display version state"
+
 mv -- "$SOURCE_PATH" "$TEST_ROOT/source-away"
 run_command doctor
 assert_equal "1" "$last_status" "doctor missing source status"
@@ -276,10 +303,13 @@ digest_e="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'e%.0s' {1..64})"
 reset_update_baseline() {
   local image="$digest_a"
   local channel='stable'
+  local version='v1.3.0'
   python3 "$INSTALL_ROOT/bin/render_config.py" set-image --env "$INSTALL_ROOT/.env" --image "$image"
   printf '%s\n' "$channel" >"$INSTALL_ROOT/state/channel"
   printf '%s\n' "$image" >"$INSTALL_ROOT/state/current-image"
   : >"$INSTALL_ROOT/state/previous-image"
+  printf '%s\n' "$version" >"$INSTALL_ROOT/state/current-version"
+  : >"$INSTALL_ROOT/state/previous-version"
   rm -f -- "$INSTALL_ROOT/state/failed-image" "$INSTALL_ROOT/state/update-transaction"
   rm -rf -- "$INSTALL_ROOT/backups"
   mkdir -p "$INSTALL_ROOT/backups"
@@ -287,6 +317,8 @@ reset_update_baseline() {
   export FAKE_DOCKER_HEALTH=healthy
   export FAKE_DOCKER_PULL_EXIT=0
   export FAKE_FLOCK_EXIT=0
+  export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+  export FAKE_DOCKER_REVISION_LABEL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 }
 
 reset_update_baseline
@@ -313,26 +345,56 @@ assert_equal "0" "$last_status" "successful explicit update status"
 assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "successful update channel"
 assert_equal "$digest_b" "$(cat -- "$INSTALL_ROOT/state/current-image")" "successful current image"
 assert_equal "$digest_a" "$(cat -- "$INSTALL_ROOT/state/previous-image")" "successful previous image"
+assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/current-version")" "successful current version"
+assert_equal "v1.3.0" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "successful previous version"
 grep -Fxq "REACHCOMMANDER_IMAGE=$digest_b" "$INSTALL_ROOT/.env" || fail "successful environment image missing"
 [[ ! -e "$INSTALL_ROOT/state/update-transaction" ]] || fail "successful update marker leaked"
-pass "successful update atomically advances image and channel state"
+pass "successful update atomically advances image, version, and channel state"
 
 export FAKE_DOCKER_DIGESTS="$digest_c"
+export FAKE_DOCKER_REVISION_LABEL=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 run_command update
 assert_equal "0" "$last_status" "saved-channel update status"
 assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "saved update channel"
 assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "saved-channel image"
 assert_equal "$digest_b" "$(cat -- "$INSTALL_ROOT/state/previous-image")" "saved-channel previous image"
+assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$INSTALL_ROOT/state/current-version")" "saved-channel version"
+assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "saved-channel previous version"
 pass "update without an argument discovers from the saved channel"
 
-state_before="$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image")"
+state_before="$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image" "$INSTALL_ROOT/state/current-version" "$INSTALL_ROOT/state/previous-version")"
 export FAKE_DOCKER_PULL_EXIT=1
 export FAKE_DOCKER_DIGESTS="$digest_d"
 run_command update stable
 (( last_status != 0 )) || fail "pull failure must fail update"
-assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image")" "pull failure state"
+assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image" "$INSTALL_ROOT/state/current-version" "$INSTALL_ROOT/state/previous-version")" "pull failure state"
 export FAKE_DOCKER_PULL_EXIT=0
 pass "pull failure leaves all deployed state unchanged"
+
+export FAKE_DOCKER_DIGESTS="$digest_d"
+for invalid_version_label in '' 'invalid label' 'v1.4.0-beta.1'; do
+  export FAKE_DOCKER_VERSION_LABEL="$invalid_version_label"
+  run_command update stable
+  assert_equal "1" "$last_status" "invalid image version label status"
+  [[ "$last_output" == *'image version label is invalid'* ]] || fail "invalid version label message missing"
+  assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image" "$INSTALL_ROOT/state/current-version" "$INSTALL_ROOT/state/previous-version")" "invalid version label state"
+done
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+
+export FAKE_DOCKER_VERSION_LABEL=v1.5.0
+run_command update v1.4.0
+assert_equal "1" "$last_status" "mismatched pinned image label status"
+[[ "$last_output" == *'does not match the pinned channel'* ]] || fail "pinned label mismatch message missing"
+assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image" "$INSTALL_ROOT/state/current-version" "$INSTALL_ROOT/state/previous-version")" "pinned label mismatch state"
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+
+export FAKE_DOCKER_REVISION_LABEL='invalid revision'
+run_command update edge
+assert_equal "1" "$last_status" "invalid edge revision status"
+[[ "$last_output" == *'edge image revision is invalid'* ]] || fail "invalid edge revision message missing"
+assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image" "$INSTALL_ROOT/state/current-version" "$INSTALL_ROOT/state/previous-version")" "invalid edge revision state"
+export FAKE_DOCKER_REVISION_LABEL=cccccccccccccccccccccccccccccccccccccccc
+pass "invalid OCI display labels fail before deployment state changes"
 
 printf '1\n0\n' >"$TEST_ROOT/update-compose-sequence"
 export FAKE_DOCKER_COMPOSE_SEQUENCE_FILE="$TEST_ROOT/update-compose-sequence"
@@ -341,8 +403,10 @@ run_command update stable
 assert_equal "2" "$last_status" "Compose failure rollback status"
 assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "Compose rollback channel"
 assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "Compose rollback current image"
+assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$INSTALL_ROOT/state/current-version")" "Compose rollback current version"
+assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "Compose rollback previous version"
 unset FAKE_DOCKER_COMPOSE_SEQUENCE_FILE
-pass "Compose recreation failure restores the previous healthy deployment"
+pass "Compose recreation failure restores image and version state"
 
 printf 'unhealthy\nhealthy\n' >"$TEST_ROOT/update-health-sequence"
 export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/update-health-sequence"
@@ -352,6 +416,8 @@ assert_equal "2" "$last_status" "automatic rollback status"
 [[ "$last_output" == *'previous deployment was restored'* ]] || fail "rollback success message missing"
 assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "rollback channel"
 assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "rollback current image"
+assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$INSTALL_ROOT/state/current-version")" "rollback current version"
+assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "rollback previous version"
 grep -Fxq "REACHCOMMANDER_IMAGE=$digest_c" "$INSTALL_ROOT/.env" || fail "rollback environment image missing"
 assert_equal "$digest_d" "$(cat -- "$INSTALL_ROOT/state/failed-image")" "failed digest record"
 pass "unhealthy update restores the previous healthy deployment"
@@ -363,6 +429,7 @@ run_command update stable
 assert_equal "3" "$last_status" "failed rollback status"
 [[ "$last_output" == *'manual recovery'* ]] || fail "failed rollback recovery message missing"
 assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "failed rollback restored state"
+assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$INSTALL_ROOT/state/current-version")" "failed rollback restored version"
 assert_equal "$digest_e" "$(cat -- "$INSTALL_ROOT/state/failed-image")" "failed rollback digest record"
 unset FAKE_DOCKER_HEALTH_FILE
 export FAKE_DOCKER_HEALTH=healthy
@@ -378,7 +445,7 @@ run_command update edge
 export FAKE_FLOCK_EXIT=0
 pass "concurrent update is rejected before registry access"
 
-for interrupt_phase in environment current-image channel; do
+for interrupt_phase in previous-version environment current-image current-version channel; do
   reset_update_baseline
   export FAKE_DOCKER_DIGESTS="$digest_b"
   export REACHCOMMANDER_TEST_INTERRUPT_AFTER="$interrupt_phase"
@@ -393,6 +460,15 @@ for interrupt_phase in environment current-image channel; do
   [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "incomplete transaction accessed Docker after $interrupt_phase"
 done
 pass "interrupted state writes block later updates until diagnosis"
+
+reset_update_baseline
+export FAKE_DOCKER_DIGESTS="$digest_b"
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0-beta.1
+run_command update v1.4.0-beta.1
+assert_equal "0" "$last_status" "pinned prerelease update status"
+assert_equal "v1.4.0-beta.1" "$(cat -- "$INSTALL_ROOT/state/channel")" "pinned prerelease channel"
+assert_equal "v1.4.0-beta.1" "$(cat -- "$INSTALL_ROOT/state/current-version")" "pinned prerelease display version"
+pass "pinned prerelease display versions are preserved"
 
 reset_update_baseline
 printf 'ancestor canary\n' >"$TEST_ROOT/ancestor-canary.txt"
@@ -501,6 +577,8 @@ python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output 
 printf 'stable\n' >"$INSTALL_ROOT/state/channel"
 grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
 : >"$INSTALL_ROOT/state/previous-image"
+printf 'v1.3.0\n' >"$INSTALL_ROOT/state/current-version"
+: >"$INSTALL_ROOT/state/previous-version"
 cp -- "$TEST_ROOT/account-valid.json" "$INSTALL_ROOT/data/auth/account.json"
 printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
 printf '<key id="command-fixture" />\n' >"$INSTALL_ROOT/data/keys/key-command.xml"

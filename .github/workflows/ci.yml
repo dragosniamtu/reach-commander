@@ -309,6 +309,7 @@ jobs:
           sudo chown -R 1000:1000 "$smoke_root/data" "$smoke_root/source-a" "$smoke_root/source-b"
           python3 deploy/render_config.py create-request \
             --output "$smoke_root/request.json" \
+            --access-mode secure-https \
             --bind-address 127.0.0.1 \
             --port 38092 \
             --uid 1000 \
@@ -334,6 +335,38 @@ jobs:
             --request "$smoke_root/request.json" \
             --template deploy/compose.release.yaml \
             --output "$smoke_root/deployment"
+          python3 deploy/render_config.py create-request \
+            --output "$smoke_root/lan-request.json" \
+            --access-mode trusted-lan-http \
+            --bind-address 0.0.0.0 \
+            --port 8092 \
+            --uid 1000 \
+            --gid 1000 \
+            --image ghcr.io/dragosniamtu/reach-commander:stable
+          python3 deploy/render_config.py add-source \
+            --request "$smoke_root/lan-request.json" \
+            --id source-a \
+            --name 'Source A' \
+            --host-path "$smoke_root/source-a" \
+            --access rw \
+            --default-left true \
+            --default-right false
+          python3 deploy/render_config.py add-source \
+            --request "$smoke_root/lan-request.json" \
+            --id source-b \
+            --name 'Source B' \
+            --host-path "$smoke_root/source-b" \
+            --access rw \
+            --default-left false \
+            --default-right true
+          python3 deploy/render_config.py render \
+            --request "$smoke_root/lan-request.json" \
+            --template deploy/compose.release.yaml \
+            --output "$smoke_root/lan-deployment"
+          grep -Fx 'REACHCOMMANDER_BIND_ADDRESS=0.0.0.0' "$smoke_root/lan-deployment/.env"
+          grep -Fx 'REACHCOMMANDER_ALLOW_INSECURE_HTTP=true' "$smoke_root/lan-deployment/.env"
+          grep -F 'Authentication__AllowInsecureHttp' "$smoke_root/lan-deployment/compose.yaml"
+          docker compose --project-directory "$smoke_root/lan-deployment" config --quiet
           if ! failure_context="$(docker compose --project-directory "$smoke_root/deployment" config --quiet 2>&1)"; then
             diagnose 1 'docker compose config'
           fi

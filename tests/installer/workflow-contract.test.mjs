@@ -297,6 +297,11 @@ test('container smoke uses the real rendered non-root configuration', async () =
   assert.match(smoke, /render_config\.py[\s\S]*create-request/);
   assert.match(smoke, /render_config\.py[\s\S]*add-source/);
   assert.match(smoke, /render_config\.py[\s\S]*render/);
+  assert.match(smoke, /--access-mode[\s\\]+secure-https/);
+  assert.match(smoke, /--access-mode[\s\\]+trusted-lan-http/);
+  assert.match(smoke, /REACHCOMMANDER_BIND_ADDRESS=0\.0\.0\.0/);
+  assert.match(smoke, /REACHCOMMANDER_ALLOW_INSECURE_HTTP=true/);
+  assert.match(smoke, /Authentication__AllowInsecureHttp/);
   assert.match(smoke, /--user 1000:1000/);
   assert.match(smoke, /mkdir -p "\$smoke_root\/data\/auth" "\$smoke_root\/data\/keys"/);
   assert.match(smoke, /chown -R 1000:1000 "\$smoke_root\/data"/);

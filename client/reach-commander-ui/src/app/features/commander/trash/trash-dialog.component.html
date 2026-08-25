@@ -1,0 +1,67 @@
+<div class="trash-backdrop">
+  <dialog open class="trash-dialog" aria-modal="true" aria-labelledby="trash-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+    <header>
+      <div><span class="eyebrow">Managed recovery area</span><h2 id="trash-title">Trash</h2></div>
+      <button type="button" aria-label="Close Trash" [disabled]="store.busy()" (click)="requestClose()">×</button>
+    </header>
+
+    <section class="trash-toolbar">
+      <label for="trash-source-filter">Source
+        <select id="trash-source-filter" [value]="store.sourceFilter() ?? ''" [disabled]="store.busy()" (change)="filterChanged($event)">
+          <option value="">All sources</option>
+          @for (source of sources(); track source.id) { <option [value]="source.id">{{ source.name }}</option> }
+        </select>
+      </label>
+      <span>{{ store.entries().length }} items · {{ selectedCount() }} selected</span>
+      <div><button type="button" [disabled]="store.entries().length === 0" (click)="store.selectAll()">Select all</button><button type="button" [disabled]="selectedCount() === 0" (click)="store.clearSelection()">Clear</button></div>
+    </section>
+
+    <div class="dialog-body">
+      @if (store.busy() && store.entries().length === 0) {
+        <p class="empty-state" role="status">Loading Trash…</p>
+      } @else if (store.entries().length === 0) {
+        <p class="empty-state">Trash is empty for this scope.</p>
+      } @else {
+        <div class="trash-table" role="table" aria-label="Deleted items">
+          <div class="table-head" role="row"><span>Select</span><span>Name</span><span>Original location</span><span>Deleted</span><span>Size</span></div>
+          @for (entry of store.entries(); track entry.trashId) {
+            <label class="trash-row" role="row">
+              <span><input type="checkbox" [attr.data-trash-id]="entry.trashId" [checked]="store.selection().has(entry.trashId)" (change)="toggle(entry.trashId)" /></span>
+              <strong>{{ entry.name }}</strong><code>{{ sourceName(entry.sourceId) }}:{{ entry.originalLogicalPath }}</code>
+              <time>{{ entry.deletedAt | date:'short' }}</time><span>{{ entry.size | fileSize }}</span>
+            </label>
+          }
+        </div>
+      }
+
+      @if (store.restorePreview(); as preview) {
+        <section class="restore-review">
+          <h3>Restore {{ preview.entries.length }} {{ preview.entries.length === 1 ? 'item' : 'items' }}</h3>
+          @if (preview.parentsToCreate.length > 0) { <p>Missing parent folders will be created:</p><ul>@for (parent of preview.parentsToCreate; track parent) { <li><code>{{ parent }}</code></li> }</ul> }
+          @if (preview.conflicts.length > 0) {
+            <div class="restore-conflicts">
+              <label class="apply"><input type="checkbox" [disabled]="lastRestoreDecision() === null" (change)="applyRestoreRemaining($event)" />Apply to remaining conflicts</label>
+              @for (conflict of preview.conflicts; track conflict.conflictId) {
+                <label><span>Conflict action for {{ conflict.destinationLogicalPath }}</span><select [value]="store.restoreConflictDecisions().get(conflict.conflictId) ?? ''" (change)="restoreDecisionChanged(conflict.conflictId, $event)"><option value="">Choose an action</option>@if (conflict.allowedDecisions.includes('overwrite')) { <option value="overwrite">Overwrite</option> }@if (conflict.allowedDecisions.includes('skip')) { <option value="skip">Skip</option> }@if (conflict.allowedDecisions.includes('createUniqueName')) { <option value="createUniqueName">Create Unique Name</option> }</select></label>
+              }
+            </div>
+          }
+          <button type="button" class="primary" [disabled]="!store.canSubmitRestore()" (click)="restore()">Restore now</button>
+        </section>
+      }
+
+      @if (permanentDeleteConfirmation()) {
+        <section class="danger-confirm" role="alert"><strong>Delete selected Trash items forever?</strong><p>{{ warning }}</p><label><input type="checkbox" [checked]="permanentDeleteConfirmed()" (change)="permanentDeleteConfirmed.set($any($event.target).checked)" />I understand this cannot be recovered</label><button type="button" class="danger" [disabled]="!permanentDeleteConfirmed()" (click)="confirmPermanentDelete()">Delete permanently</button></section>
+      }
+      @if (emptyConfirmation()) {
+        <section class="danger-confirm" role="alert"><strong>{{ emptyLabel() }}?</strong><p>{{ warning }}</p><label for="confirm-empty-trash"><input id="confirm-empty-trash" type="checkbox" [checked]="emptyConfirmed()" (change)="emptyConfirmed.set($any($event.target).checked)" />I understand every item in this scope will be unrecoverable</label><div><button type="button" (click)="cancelEmptyConfirmation()">Cancel empty</button><button type="button" class="danger" [disabled]="!emptyConfirmed()" (click)="confirmEmpty()">Empty permanently</button></div></section>
+      }
+      @if (store.error(); as error) { <p class="error" role="alert">{{ error }}</p> }
+    </div>
+
+    <footer>
+      <div><button type="button" [disabled]="selectedCount() === 0 || store.busy()" (click)="previewRestore()">Restore selected</button><button type="button" class="danger-quiet" [disabled]="selectedCount() === 0 || store.busy()" (click)="showPermanentDeleteConfirmation()">Delete selected permanently</button></div>
+      <div><button type="button" class="danger-quiet" [disabled]="store.entries().length === 0 || store.busy()" (click)="showEmptyConfirmation()">{{ emptyLabel() }}</button><button type="button" [disabled]="store.busy()" (click)="requestClose()">Close</button></div>
+    </footer>
+  </dialog>
+</div>

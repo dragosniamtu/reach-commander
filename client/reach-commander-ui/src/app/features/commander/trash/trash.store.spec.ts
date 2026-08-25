@@ -74,6 +74,21 @@ describe('TrashStore', () => {
     );
   });
 
+  it('re-previews the captured deletion safely when permanent mode changes', async () => {
+    await store.previewDelete({
+      sourceId: 'media', logicalPaths: ['/Movies/one.mkv'], mode: 'trash',
+    });
+    await store.changeDeleteMode('permanent');
+
+    expect(api.deletePreviewRequests).toEqual([
+      { sourceId: 'media', logicalPaths: ['/Movies/one.mkv'], mode: 'trash' },
+      { sourceId: 'media', logicalPaths: ['/Movies/one.mkv'], mode: 'permanent' },
+    ]);
+    store.clearDeletePreview();
+    expect(store.deletePreview()).toBeNull();
+    expect(store.deleteRequest()).toBeNull();
+  });
+
   it('requires explicit confirmation data for permanent item deletion and Empty Trash', async () => {
     api.trash = [trashEntry('one', 'downloads')];
     await store.load();
@@ -162,6 +177,7 @@ class FakeTrashApi extends CommanderApiTestBase {
   readonly restorePreviewRequests: any[] = [];
   readonly restoreSubmissions: any[] = [];
   readonly deleteSubmissions: any[] = [];
+  readonly deletePreviewRequests: any[] = [];
   readonly permanentDeleteRequests: any[] = [];
   readonly emptyRequests: any[] = [];
 
@@ -179,7 +195,8 @@ class FakeTrashApi extends CommanderApiTestBase {
     this.restoreSubmissions.push(request);
     return Promise.resolve(operation('restore-operation', 'restore'));
   }
-  override previewDelete(): Promise<DeletePreviewDto> {
+  override previewDelete(request: any): Promise<DeletePreviewDto> {
+    this.deletePreviewRequests.push(request);
     return Promise.resolve(this.deletePreview);
   }
   override submitDelete(request: any): Promise<FileOperationStatusDto> {

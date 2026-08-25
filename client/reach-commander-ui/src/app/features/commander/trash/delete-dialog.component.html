@@ -1,0 +1,53 @@
+<div class="delete-backdrop">
+  <dialog open class="delete-dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+    @if (store.deletePreview(); as preview) {
+      <header>
+        <div><span class="eyebrow">Delete selected items</span><h2 id="delete-title">{{ preview.mode === 'permanent' ? 'Delete forever' : 'Move to Trash' }}</h2></div>
+        <button type="button" aria-label="Close delete confirmation" [disabled]="store.busy()" (click)="cancel()">×</button>
+      </header>
+
+      <div class="dialog-body">
+        <p id="delete-description">
+          {{ preview.totalItems }} {{ preview.totalItems === 1 ? 'item' : 'items' }}
+          · {{ preview.totalBytes === null ? 'size unknown' : (preview.totalBytes | fileSize) }}
+        </p>
+        <ul class="captured-names">
+          @for (name of visibleNames(); track $index) { <li><code>{{ name }}</code></li> }
+          @if (hiddenNameCount() > 0) { <li class="remaining">and {{ hiddenNameCount() }} more</li> }
+        </ul>
+
+        @if (!preview.trashAvailable && preview.trashUnavailableReason) {
+          <p class="unavailable" role="status">{{ preview.trashUnavailableReason }}</p>
+        }
+
+        <label class="permanent-choice" for="permanent-delete">
+          <input
+            id="permanent-delete"
+            type="checkbox"
+            [checked]="permanentDelete()"
+            [disabled]="store.busy() || !preview.trashAvailable"
+            (change)="permanentChanged($event)"
+          />
+          <span><strong>Permanent delete</strong><small>Bypass ReachCommander’s managed Trash.</small></span>
+        </label>
+
+        @if (permanentDelete() || !preview.trashAvailable) {
+          <p class="permanent-warning" role="alert">{{ warning }}</p>
+        } @else {
+          <p class="recoverable">Items can be restored later from Trash.</p>
+        }
+
+        @if (store.error(); as error) { <p class="error" role="alert">{{ error }}</p> }
+      </div>
+
+      <footer>
+        <button type="button" [disabled]="store.busy()" (click)="cancel()">Cancel</button>
+        @if (preview.mode === 'permanent') {
+          <button type="button" class="danger" [disabled]="!confirmationReady()" (click)="confirm()">Delete forever</button>
+        } @else {
+          <button type="button" class="primary" [disabled]="store.busy()" (click)="confirm()">Move to Trash</button>
+        }
+      </footer>
+    }
+  </dialog>
+</div>

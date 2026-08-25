@@ -1,0 +1,13 @@
+<div class="directory-backdrop">
+  <dialog open class="directory-dialog" aria-modal="true" aria-labelledby="create-directory-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+    <header><div><span class="eyebrow">Create one folder</span><h2 id="create-directory-title">New directory</h2></div><button type="button" aria-label="Close new directory" [disabled]="busy()" (click)="requestClose()">×</button></header>
+    <div class="dialog-body">
+      <section class="destination"><span>Destination</span><code>{{ sourceName() }}:{{ parentLogicalPath() }}</code></section>
+      <label for="directory-name">Directory name<input id="directory-name" type="text" autocomplete="off" autofocus [value]="name()" [disabled]="busy()" (input)="nameChanged($event)" /></label>
+      @if (name().length > 0 && validationError(); as validation) { <p class="validation" role="alert">{{ validation }}</p> }
+      @if (error(); as apiError) { <p class="error" role="alert">{{ apiError }}</p> }
+      <p class="hint">Use a single portable name. Path separators and system-reserved names are not allowed.</p>
+    </div>
+    <footer><button type="button" [disabled]="busy()" (click)="requestClose()">Cancel</button><button type="button" class="primary" [disabled]="!canSubmit()" (click)="submit()">Create directory</button></footer>
+  </dialog>
+</div>

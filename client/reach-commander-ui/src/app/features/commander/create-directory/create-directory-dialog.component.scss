@@ -1,0 +1,20 @@
+:host { position: fixed; z-index: 116; inset: 0; display: block; }
+.directory-backdrop { width: 100%; height: 100%; background: rgb(3 7 11 / .82); }
+.directory-dialog { position: fixed; inset: 50% auto auto 50%; display: flex; flex-direction: column; width: min(500px, calc(100vw - 28px)); margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text-2); background: var(--surface-2); box-shadow: 0 24px 80px rgb(0 0 0 / .58); transform: translate(-50%, -50%); }
+header, footer, .destination { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+header { min-height: 64px; padding: 11px 14px; border-bottom: 1px solid var(--line-strong); background: var(--surface-3); }
+h2, p { margin: 0; }
+h2 { margin-top: 4px; color: var(--text-1); font: 700 16px/1.2 var(--font-ui); }
+.eyebrow, .destination span, label { color: var(--text-4); font: 700 8px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
+.dialog-body { display: grid; gap: 12px; padding: 14px; }
+.destination { padding: 10px; border: 1px solid var(--line); background: var(--surface-1); }
+.destination code { overflow: hidden; color: var(--text-2); font: 10px/1 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+label { display: grid; gap: 7px; }
+input { min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-1); background: var(--surface-1); font: 11px/1 var(--font-mono); text-transform: none; }
+.validation, .error, .hint { padding: 9px; border: 1px solid var(--line); font-size: 9px; }
+.validation, .error { color: var(--danger-text); border-color: var(--danger); background: var(--danger-dim); }
+.hint { color: var(--text-4); background: var(--surface-1); }
+button { min-height: 31px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-2); background: var(--surface-2); font: 600 10px/1 var(--font-ui); cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .46; }
+button.primary { border-color: var(--accent); color: #061216; background: var(--accent); }
+footer { justify-content: flex-end; min-height: 49px; padding: 8px 12px; border-top: 1px solid var(--line-strong); background: var(--surface-3); }

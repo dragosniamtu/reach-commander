@@ -19,6 +19,7 @@ export class TrashStore {
     ReadonlyMap<string, FileOperationConflictDecision>
   >(new Map());
   private readonly deletePreviewState = signal<DeletePreviewDto | null>(null);
+  private readonly deleteRequestState = signal<DeletePreviewRequestDto | null>(null);
   private readonly busyState = signal(false);
   private readonly errorState = signal<string | null>(null);
   private requestSequence = 0;
@@ -30,6 +31,7 @@ export class TrashStore {
   readonly restorePreview = this.restorePreviewState.asReadonly();
   readonly restoreConflictDecisions = this.restoreDecisionState.asReadonly();
   readonly deletePreview = this.deletePreviewState.asReadonly();
+  readonly deleteRequest = this.deleteRequestState.asReadonly();
   readonly busy = this.busyState.asReadonly();
   readonly error = this.errorState.asReadonly();
   readonly canSubmitRestore = computed(() => {
@@ -174,16 +176,18 @@ export class TrashStore {
   }
 
   async previewDelete(request: DeletePreviewRequestDto): Promise<void> {
+    const capturedRequest: DeletePreviewRequestDto = Object.freeze({
+      ...request,
+      logicalPaths: Object.freeze([...request.logicalPaths]),
+    });
+    this.deleteRequestState.set(capturedRequest);
     const sequence = ++this.requestSequence;
     const generation = this.lifecycleGeneration;
     this.busyState.set(true);
     this.errorState.set(null);
     this.deletePreviewState.set(null);
     try {
-      const preview = await this.api.previewDelete({
-        ...request,
-        logicalPaths: Object.freeze([...request.logicalPaths]),
-      });
+      const preview = await this.api.previewDelete(capturedRequest);
       if (sequence === this.requestSequence && generation === this.lifecycleGeneration) {
         this.deletePreviewState.set(preview);
       }
@@ -196,6 +200,21 @@ export class TrashStore {
         this.busyState.set(false);
       }
     }
+  }
+
+  async changeDeleteMode(mode: DeletePreviewRequestDto['mode']): Promise<void> {
+    const request = this.deleteRequest();
+    if (request && request.mode !== mode) {
+      await this.previewDelete({ ...request, mode });
+    }
+  }
+
+  clearDeletePreview(): void {
+    this.requestSequence += 1;
+    this.deletePreviewState.set(null);
+    this.deleteRequestState.set(null);
+    this.errorState.set(null);
+    this.busyState.set(false);
   }
 
   async submitDelete(permanentDeleteConfirmed: boolean): Promise<void> {
@@ -212,6 +231,7 @@ export class TrashStore {
       });
       this.operations.track(operation);
       this.deletePreviewState.set(null);
+      this.deleteRequestState.set(null);
     } catch (error: unknown) {
       this.errorState.set(safeError(error));
     } finally {
@@ -249,6 +269,7 @@ export class TrashStore {
     this.restorePreviewState.set(null);
     this.restoreDecisionState.set(new Map());
     this.deletePreviewState.set(null);
+    this.deleteRequestState.set(null);
     this.busyState.set(false);
     this.errorState.set(null);
   }

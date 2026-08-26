@@ -16,6 +16,11 @@ internal sealed class BatchRenameService(
         CancellationToken cancellationToken) =>
         planner.PreviewAsync(command, cancellationToken);
 
+    public ValueTask<BatchRenamePreview> PreviewExactAsync(
+        ExactRenamePreviewCommand command,
+        CancellationToken cancellationToken) =>
+        planner.PreviewExactAsync(command, cancellationToken);
+
     public async ValueTask<BatchRenameOperationResult> ExecuteAsync(
         Guid planId,
         CancellationToken cancellationToken)

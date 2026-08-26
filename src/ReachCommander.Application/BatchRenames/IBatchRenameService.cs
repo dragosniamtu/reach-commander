@@ -6,6 +6,10 @@ public interface IBatchRenameService
         BatchRenamePreviewCommand command,
         CancellationToken cancellationToken);
 
+    ValueTask<BatchRenamePreview> PreviewExactAsync(
+        ExactRenamePreviewCommand command,
+        CancellationToken cancellationToken);
+
     ValueTask<BatchRenameOperationResult> ExecuteAsync(
         Guid planId,
         CancellationToken cancellationToken);

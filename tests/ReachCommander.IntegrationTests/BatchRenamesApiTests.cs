@@ -8,6 +8,50 @@ public sealed class BatchRenamesApiTests(ReachCommanderApiFactory factory)
     : IClassFixture<ReachCommanderApiFactory>
 {
     [Fact]
+    public async Task Exact_preview_and_existing_execute_rename_files_and_directories_literally()
+    {
+        var (logicalDirectory, physicalDirectory) = CreateCaseDirectory();
+        File.WriteAllText(Path.Combine(physicalDirectory, "alpha.txt"), "alpha");
+        Directory.CreateDirectory(Path.Combine(physicalDirectory, "Drafts"));
+        using var client = factory.CreateClient();
+
+        var fileResponse = await client.PostAsJsonAsync("/api/renames/preview", new
+        {
+            sourceId = "media",
+            directoryPath = logicalDirectory,
+            entryPath = $"{logicalDirectory}/alpha.txt",
+            newName = "[N]-literal.txt",
+        });
+        var fileBody = await fileResponse.Content.ReadAsStringAsync();
+        var filePreview = await fileResponse.Content.ReadFromJsonAsync<PreviewResponse>();
+        Assert.Equal(HttpStatusCode.OK, fileResponse.StatusCode);
+        Assert.Equal("[N]-literal.txt", Assert.Single(filePreview!.Rows).NewName);
+        Assert.DoesNotContain(factory.MediaRoot, fileBody, StringComparison.OrdinalIgnoreCase);
+
+        var fileExecute = await client.PostAsync(
+            $"/api/batch-renames/{filePreview.PlanId}/execute",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, fileExecute.StatusCode);
+        Assert.True(File.Exists(Path.Combine(physicalDirectory, "[N]-literal.txt")));
+
+        var folderResponse = await client.PostAsJsonAsync("/api/renames/preview", new
+        {
+            sourceId = "media",
+            directoryPath = logicalDirectory,
+            entryPath = $"{logicalDirectory}/Drafts",
+            newName = "Published",
+        });
+        var folderPreview = await folderResponse.Content.ReadFromJsonAsync<PreviewResponse>();
+        Assert.Equal(HttpStatusCode.OK, folderResponse.StatusCode);
+
+        var folderExecute = await client.PostAsync(
+            $"/api/batch-renames/{folderPreview!.PlanId}/execute",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, folderExecute.StatusCode);
+        Assert.True(Directory.Exists(Path.Combine(physicalDirectory, "Published")));
+    }
+
+    [Fact]
     public async Task Preview_execute_and_undo_return_only_logical_names()
     {
         var (logicalDirectory, physicalDirectory) = CreateCaseDirectory();

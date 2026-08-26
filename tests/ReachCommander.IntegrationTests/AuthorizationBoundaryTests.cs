@@ -23,6 +23,7 @@ public sealed class AuthorizationBoundaryTests
             (HttpMethod.Post, "/api/system-update/apply", false),
             (HttpMethod.Get, "/api/uploads/limits", false),
             (HttpMethod.Post, "/api/uploads?sourceId=downloads&path=/", false),
+            (HttpMethod.Post, "/api/renames/preview", true),
             (HttpMethod.Post, "/api/batch-renames/preview", true),
             (HttpMethod.Post, $"/api/batch-renames/{identifier}/execute", false),
             (HttpMethod.Post, $"/api/batch-renames/{identifier}/undo", false),
@@ -80,5 +81,22 @@ public sealed class AuthorizationBoundaryTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.False(Directory.Exists(Path.Combine(factory.MediaRoot, "Blocked")));
+
+        var originalName = $"rename-csrf-{Guid.NewGuid():N}.txt";
+        var renamedName = $"renamed-csrf-{Guid.NewGuid():N}.txt";
+        File.WriteAllText(Path.Combine(factory.MediaRoot, originalName), "protected");
+        var renameResponse = await client.PostAsJsonAsync(
+            "/api/renames/preview",
+            new
+            {
+                sourceId = "media",
+                directoryPath = "/",
+                entryPath = $"/{originalName}",
+                newName = renamedName,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, renameResponse.StatusCode);
+        Assert.True(File.Exists(Path.Combine(factory.MediaRoot, originalName)));
+        Assert.False(File.Exists(Path.Combine(factory.MediaRoot, renamedName)));
     }
 }

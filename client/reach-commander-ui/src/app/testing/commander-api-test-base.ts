@@ -5,6 +5,8 @@ import {
   DeletePreviewRequestDto,
   DeleteSubmissionDto,
   EmptyTrashRequestDto,
+  ExactRenamePreviewRequestDto,
+  BatchRenamePreviewDto,
   FileEntryDto,
   FileOperationPreviewDto,
   FileOperationPreviewRequestDto,
@@ -19,6 +21,12 @@ import {
 } from '../core/api/api.models';
 
 export abstract class CommanderApiTestBase extends CommanderApiPort {
+  override previewRename(
+    _request: ExactRenamePreviewRequestDto,
+  ): Promise<BatchRenamePreviewDto> {
+    return unsupported();
+  }
+
   override getSystemUpdate(): Promise<SystemUpdateStatusDto> {
     return unsupported();
   }

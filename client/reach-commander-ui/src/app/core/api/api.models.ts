@@ -100,6 +100,13 @@ export interface BatchRenamePreviewRequestDto {
   readonly rules: BatchRenameRulesDto;
 }
 
+export interface ExactRenamePreviewRequestDto {
+  readonly sourceId: string;
+  readonly directoryPath: string;
+  readonly entryPath: string;
+  readonly newName: string;
+}
+
 export interface BatchRenamePreviewRowDto {
   readonly sourcePath: string;
   readonly oldName: string;
@@ -483,6 +490,10 @@ export abstract class CommanderApiPort {
 
   abstract previewBatchRename(
     request: BatchRenamePreviewRequestDto,
+  ): Promise<BatchRenamePreviewDto>;
+
+  abstract previewRename(
+    request: ExactRenamePreviewRequestDto,
   ): Promise<BatchRenamePreviewDto>;
 
   abstract executeBatchRename(planId: string): Promise<BatchRenameOperationDto>;

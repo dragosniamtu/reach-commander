@@ -24,6 +24,7 @@ import {
   DeletePreviewRequestDto,
   DeleteSubmissionDto,
   EmptyTrashRequestDto,
+  ExactRenamePreviewRequestDto,
   FileEntryDto,
   FileOperationPreviewDto,
   FileOperationPreviewRequestDto,
@@ -156,6 +157,12 @@ export class ReachCommanderApi extends CommanderApiPort {
   previewBatchRename(request: BatchRenamePreviewRequestDto): Promise<BatchRenamePreviewDto> {
     return firstValueFrom(
       this.http.post<BatchRenamePreviewDto>('/api/batch-renames/preview', request),
+    );
+  }
+
+  previewRename(request: ExactRenamePreviewRequestDto): Promise<BatchRenamePreviewDto> {
+    return firstValueFrom(
+      this.http.post<BatchRenamePreviewDto>('/api/renames/preview', request),
     );
   }
 

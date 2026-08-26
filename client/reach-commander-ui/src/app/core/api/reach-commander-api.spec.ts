@@ -13,6 +13,7 @@ import {
   BatchRenamePreviewDto,
   BatchRenamePreviewRequestDto,
   DeletePreviewRequestDto,
+  ExactRenamePreviewRequestDto,
   FileOperationPreviewRequestDto,
   FileOperationStatusDto,
   RestorePreviewRequestDto,
@@ -225,6 +226,25 @@ describe('ReachCommanderApi', () => {
     const expected = previewResponse();
     const result = api.previewBatchRename(body);
     const request = http.expectOne('/api/batch-renames/preview');
+
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual(body);
+    expect(JSON.stringify(request.request.body)).not.toContain('physical');
+    request.flush(expected);
+
+    await expect(result).resolves.toEqual(expected);
+  });
+
+  it('posts only literal logical values when previewing one rename', async () => {
+    const body: ExactRenamePreviewRequestDto = {
+      sourceId: 'media library',
+      directoryPath: '/Movies & TV',
+      entryPath: '/Movies & TV/[old].mkv',
+      newName: '[N]-literal.mkv',
+    };
+    const expected = previewResponse();
+    const result = api.previewRename(body);
+    const request = http.expectOne('/api/renames/preview');
 
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual(body);

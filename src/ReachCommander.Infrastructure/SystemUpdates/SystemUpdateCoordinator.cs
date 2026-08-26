@@ -20,6 +20,7 @@ internal sealed class SystemUpdateCoordinator(
     ISystemUpdateDelay delay,
     ISystemMutationGate mutationGate,
     ISystemUpdateOperationProbe operationProbe,
+    ISystemUpdateOperationMonitor operationMonitor,
     TimeProvider clock,
     ILogger<SystemUpdateCoordinator> logger) : BackgroundService, ISystemUpdateService
 {
@@ -29,18 +30,33 @@ internal sealed class SystemUpdateCoordinator(
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(30);
 
     private readonly object _checkLock = new();
+    private readonly object _stateLock = new();
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private readonly CancellationTokenSource _monitorLifetime = new();
     private Task<SystemUpdateStatus>? _activeCheck;
+    private Task? _activeMonitor;
+    private string? _activeMonitorOperationId;
+    private bool _activeMonitorOwnsDrain;
+    private int _disposed;
     private DateTimeOffset? _lastManualCheckStartedAt;
-    private volatile SystemUpdateStatus _status = SystemUpdateStatusFactory.Checking(clock.GetUtcNow());
+    private SystemUpdateStatus _status = SystemUpdateStatusFactory.Checking(clock.GetUtcNow());
 
     public async Task<SystemUpdateStatus> GetAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var status = await WithOperationEligibilityAsync(_status, cancellationToken)
+        var observed = ReadStatus();
+        var eligible = await WithOperationEligibilityAsync(observed, cancellationToken)
             .ConfigureAwait(false);
-        _status = status;
-        return status;
+
+        lock (_stateLock)
+        {
+            if (ReferenceEquals(_status, observed))
+            {
+                _status = eligible;
+            }
+
+            return _status;
+        }
     }
 
     public Task<SystemUpdateStatus> CheckAsync(CancellationToken cancellationToken) =>
@@ -125,19 +141,25 @@ internal sealed class SystemUpdateCoordinator(
             if (await operationProbe.HasActiveOperationsAsync(cancellationToken)
                     .ConfigureAwait(false))
             {
-                _status = SystemUpdateStatusFactory.Blocked(
+                SetStatus(SystemUpdateStatusFactory.Blocked(
                     current.Channel!,
                     current.CurrentVersion!,
                     current.TargetVersion!,
                     current.LastCheckedAt,
-                    clock.GetUtcNow());
+                    clock.GetUtcNow()));
                 throw new SystemUpdateBlockedByOperationsException();
             }
 
             var snapshot = await gateway.ApplyAsync(cancellationToken).ConfigureAwait(false);
-            _status = Map(snapshot, clock.GetUtcNow());
-            keepDrain = _status.Phase == SystemUpdatePhase.Applying;
-            return _status;
+            var applied = Map(snapshot, clock.GetUtcNow());
+            SetStatus(applied);
+            keepDrain = applied.Phase == SystemUpdatePhase.Applying;
+            if (keepDrain)
+            {
+                StartOrJoinMonitor(snapshot, ownsDrain: true);
+            }
+
+            return applied;
         }
         catch (SystemUpdaterProtocolException)
         {
@@ -173,6 +195,36 @@ internal sealed class SystemUpdateCoordinator(
         }
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _monitorLifetime.Cancel();
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+
+        Task? monitor;
+        lock (_stateLock)
+        {
+            monitor = _activeMonitor;
+        }
+
+        if (monitor is not null)
+        {
+            await monitor.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public override void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _monitorLifetime.Cancel();
+        _monitorLifetime.Dispose();
+        _applyGate.Dispose();
+        base.Dispose();
+    }
+
     private async Task CompleteCheckAsync(
         TaskCompletionSource<SystemUpdateStatus> completion,
         CancellationToken cancellationToken)
@@ -184,8 +236,13 @@ internal sealed class SystemUpdateCoordinator(
                     Map(snapshot, clock.GetUtcNow()),
                     cancellationToken)
                 .ConfigureAwait(false);
-            _status = status;
-            completion.TrySetResult(status);
+            var published = PublishDiscoveredStatus(status);
+            if (published.Phase == SystemUpdatePhase.Applying)
+            {
+                StartOrJoinMonitor(snapshot, ownsDrain: false);
+            }
+
+            completion.TrySetResult(published);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -194,14 +251,12 @@ internal sealed class SystemUpdateCoordinator(
         catch (SystemUpdaterProtocolException)
         {
             var status = SystemUpdateStatusFactory.Incompatible(clock.GetUtcNow());
-            _status = status;
-            completion.TrySetResult(status);
+            completion.TrySetResult(PublishDiscoveryFailure(status));
         }
         catch (SystemUpdaterUnavailableException)
         {
             var status = SystemUpdateStatusFactory.Unavailable(clock.GetUtcNow());
-            _status = status;
-            completion.TrySetResult(status);
+            completion.TrySetResult(PublishDiscoveryFailure(status));
         }
         catch (Exception exception)
         {
@@ -209,8 +264,7 @@ internal sealed class SystemUpdateCoordinator(
                 "System update discovery failed with {ExceptionType}.",
                 exception.GetType().Name);
             var status = SystemUpdateStatusFactory.Unavailable(clock.GetUtcNow());
-            _status = status;
-            completion.TrySetResult(status);
+            completion.TrySetResult(PublishDiscoveryFailure(status));
         }
         finally
         {
@@ -222,6 +276,188 @@ internal sealed class SystemUpdateCoordinator(
                 }
             }
         }
+    }
+
+    private void StartOrJoinMonitor(UpdaterSnapshot snapshot, bool ownsDrain)
+    {
+        var operationId = Required(snapshot.OperationId);
+        TaskCompletionSource? owner = null;
+        lock (_stateLock)
+        {
+            if (_activeMonitor is { IsCompleted: false })
+            {
+                if (string.Equals(
+                        _activeMonitorOperationId,
+                        operationId,
+                        StringComparison.Ordinal))
+                {
+                    _activeMonitorOwnsDrain |= ownsDrain;
+                }
+
+                return;
+            }
+
+            owner = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _activeMonitor = owner.Task;
+            _activeMonitorOperationId = operationId;
+            _activeMonitorOwnsDrain = ownsDrain;
+        }
+
+        _ = CompleteMonitorAsync(snapshot, owner);
+    }
+
+    private async Task CompleteMonitorAsync(
+        UpdaterSnapshot applyingSnapshot,
+        TaskCompletionSource completion)
+    {
+        var releaseDrain = false;
+        try
+        {
+            var result = await operationMonitor.WaitForTerminalAsync(
+                    applyingSnapshot,
+                    _monitorLifetime.Token)
+                .ConfigureAwait(false);
+
+            lock (_stateLock)
+            {
+                if (!ReferenceEquals(_activeMonitor, completion.Task))
+                {
+                    return;
+                }
+
+                if (_status.Phase == SystemUpdatePhase.Applying &&
+                    string.Equals(
+                        _status.OperationId,
+                        _activeMonitorOperationId,
+                        StringComparison.Ordinal))
+                {
+                    _status = result.TerminalSnapshot is { } terminal
+                        ? Map(terminal, clock.GetUtcNow())
+                        : MonitorFailedStatus(_status);
+                }
+
+                releaseDrain = _activeMonitorOwnsDrain;
+                ClearMonitorLocked();
+            }
+        }
+        catch (OperationCanceledException) when (_monitorLifetime.IsCancellationRequested)
+        {
+            lock (_stateLock)
+            {
+                if (ReferenceEquals(_activeMonitor, completion.Task))
+                {
+                    ClearMonitorLocked();
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                "System update operation monitoring failed with {ExceptionType}.",
+                exception.GetType().Name);
+            lock (_stateLock)
+            {
+                if (ReferenceEquals(_activeMonitor, completion.Task))
+                {
+                    if (_status.Phase == SystemUpdatePhase.Applying &&
+                        string.Equals(
+                            _status.OperationId,
+                            _activeMonitorOperationId,
+                            StringComparison.Ordinal))
+                    {
+                        _status = MonitorFailedStatus(_status);
+                    }
+
+                    releaseDrain = _activeMonitorOwnsDrain;
+                    ClearMonitorLocked();
+                }
+            }
+        }
+        finally
+        {
+            if (releaseDrain)
+            {
+                mutationGate.CancelDrain();
+            }
+
+            completion.TrySetResult();
+        }
+    }
+
+    private SystemUpdateStatus ReadStatus()
+    {
+        lock (_stateLock)
+        {
+            return _status;
+        }
+    }
+
+    private SystemUpdateStatus PublishDiscoveredStatus(SystemUpdateStatus candidate)
+    {
+        lock (_stateLock)
+        {
+            var sameOperation = string.Equals(
+                _status.OperationId,
+                candidate.OperationId,
+                StringComparison.Ordinal);
+            var currentIsTerminal = _status.Phase is
+                SystemUpdatePhase.Completed or
+                SystemUpdatePhase.RolledBack or
+                SystemUpdatePhase.Failed;
+            if (sameOperation &&
+                currentIsTerminal &&
+                candidate.Phase == SystemUpdatePhase.Applying)
+            {
+                return _status;
+            }
+
+            _status = candidate;
+            return candidate;
+        }
+    }
+
+    private void SetStatus(SystemUpdateStatus status)
+    {
+        lock (_stateLock)
+        {
+            _status = status;
+        }
+    }
+
+    private SystemUpdateStatus PublishDiscoveryFailure(SystemUpdateStatus failure)
+    {
+        lock (_stateLock)
+        {
+            if (_status.Phase is
+                SystemUpdatePhase.Applying or
+                SystemUpdatePhase.Completed or
+                SystemUpdatePhase.RolledBack or
+                SystemUpdatePhase.Failed)
+            {
+                return _status;
+            }
+
+            _status = failure;
+            return failure;
+        }
+    }
+
+    private SystemUpdateStatus MonitorFailedStatus(SystemUpdateStatus current) =>
+        SystemUpdateStatusFactory.Failed(
+            current.Channel,
+            current.CurrentVersion,
+            current.TargetVersion,
+            current.OperationId,
+            current.LastCheckedAt,
+            clock.GetUtcNow(),
+            "The update status could not be recovered. Run reachcommander doctor on the host.");
+
+    private void ClearMonitorLocked()
+    {
+        _activeMonitor = null;
+        _activeMonitorOperationId = null;
+        _activeMonitorOwnsDrain = false;
     }
 
     private static SystemUpdateStatus Map(UpdaterSnapshot snapshot, DateTimeOffset now)

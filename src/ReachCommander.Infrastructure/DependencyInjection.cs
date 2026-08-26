@@ -181,6 +181,8 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(SystemUpdateOptions.SectionName));
         services.AddSingleton<ISystemUpdateRequestIdGenerator, SystemUpdateRequestIdGenerator>();
         services.AddSingleton<ISystemUpdateDelay, SystemUpdateDelay>();
+        services.AddSingleton<ISystemUpdateMonitorDelay, SystemUpdateMonitorDelay>();
+        services.AddSingleton<ISystemUpdateOperationMonitor, SystemUpdateOperationMonitor>();
         services.AddSingleton<ISystemMutationGate, SystemMutationGate>();
         services.AddSingleton<ISystemUpdateOperationProbe, SystemUpdateOperationProbe>();
         var systemUpdateOptions = configuration

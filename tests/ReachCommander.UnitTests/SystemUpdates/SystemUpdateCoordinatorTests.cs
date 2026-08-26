@@ -210,6 +210,166 @@ public sealed class SystemUpdateCoordinatorTests
         Assert.DoesNotContain("physical", result.Detail, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Accepted_apply_publishes_terminal_result_and_releases_drain_once()
+    {
+        var available = CurrentSnapshot with { Phase = "available", ReasonCode = "update_available" };
+        var applying = available with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+        };
+        var completed = applying with
+        {
+            Phase = "completed",
+            ReasonCode = "update_completed",
+        };
+        var gate = new RecordingMutationGate();
+        var monitor = new ControlledOperationMonitor();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available, applying),
+            mutationGate: gate,
+            monitor: monitor);
+        await coordinator.CheckAsync(default);
+
+        await coordinator.ApplyAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        monitor.Complete(new SystemUpdateMonitorResult(completed));
+        await WaitForPhaseAsync(coordinator, SystemUpdatePhase.Completed);
+
+        Assert.Equal(1, monitor.CallCount);
+        Assert.Equal(1, gate.CancelCount);
+    }
+
+    [Fact]
+    public async Task Applying_discovered_at_start_resumes_one_monitor_without_owning_a_drain()
+    {
+        var applying = CurrentSnapshot with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+        };
+        var monitor = new ControlledOperationMonitor();
+        var gate = new RecordingMutationGate();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(applying),
+            mutationGate: gate,
+            monitor: monitor);
+
+        await coordinator.StartAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        await coordinator.CheckAsync(default);
+
+        Assert.Equal(1, monitor.CallCount);
+        Assert.Equal(0, gate.CancelCount);
+        await coordinator.StopAsync(default);
+    }
+
+    [Fact]
+    public async Task Monitor_timeout_publishes_failed_and_releases_drain_once()
+    {
+        var available = CurrentSnapshot with { Phase = "available", ReasonCode = "update_available" };
+        var applying = available with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+        };
+        var monitor = new ControlledOperationMonitor();
+        var gate = new RecordingMutationGate();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available, applying),
+            mutationGate: gate,
+            monitor: monitor);
+        await coordinator.CheckAsync(default);
+
+        await coordinator.ApplyAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        monitor.Complete(new SystemUpdateMonitorResult(null));
+        var failed = await WaitForPhaseAsync(coordinator, SystemUpdatePhase.Failed);
+
+        Assert.Equal("update_failed", failed.ReasonCode);
+        Assert.Contains("reachcommander doctor", failed.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, gate.CancelCount);
+    }
+
+    [Fact]
+    public async Task Shutdown_cancels_monitor_without_publishing_a_result()
+    {
+        var applying = CurrentSnapshot with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+        };
+        var monitor = new ControlledOperationMonitor();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(applying),
+            monitor: monitor);
+
+        await coordinator.StartAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        await coordinator.StopAsync(default);
+
+        Assert.True(monitor.CancellationObserved);
+        Assert.Equal(SystemUpdatePhase.Applying, (await coordinator.GetAsync(default)).Phase);
+    }
+
+    [Fact]
+    public void Dispose_is_idempotent_for_aliased_singleton_registrations()
+    {
+        var coordinator = CreateCoordinator(new FakeUpdaterGateway(CurrentSnapshot));
+
+        coordinator.Dispose();
+        var exception = Record.Exception(coordinator.Dispose);
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task Transient_discovery_failure_does_not_replace_applying_status()
+    {
+        var applying = CurrentSnapshot with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+        };
+        var monitor = new ControlledOperationMonitor();
+        var coordinator = CreateCoordinator(
+            new ApplyingThenUnavailableGateway(applying),
+            monitor: monitor);
+
+        await coordinator.StartAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        var result = await coordinator.CheckAsync(default);
+
+        Assert.Equal(SystemUpdatePhase.Applying, result.Phase);
+        Assert.Equal(SystemUpdatePhase.Applying, (await coordinator.GetAsync(default)).Phase);
+        await coordinator.StopAsync(default);
+    }
+
+    private static async Task<SystemUpdateStatus> WaitForPhaseAsync(
+        SystemUpdateCoordinator coordinator,
+        SystemUpdatePhase phase)
+    {
+        var timeout = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < timeout)
+        {
+            var status = await coordinator.GetAsync(default);
+            if (status.Phase == phase)
+            {
+                return status;
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new Xunit.Sdk.XunitException($"Coordinator did not reach {phase}.");
+    }
+
     private static string ReasonFor(string phase) => phase switch
     {
         "current" => "up_to_date",
@@ -224,11 +384,13 @@ public sealed class SystemUpdateCoordinatorTests
         ISystemUpdaterGateway gateway,
         ISystemUpdateDelay? delay = null,
         ISystemMutationGate? mutationGate = null,
-        ISystemUpdateOperationProbe? operations = null) => new(
+        ISystemUpdateOperationProbe? operations = null,
+        ISystemUpdateOperationMonitor? monitor = null) => new(
             gateway,
             delay ?? new NeverSystemUpdateDelay(),
             mutationGate ?? new SystemMutationGate(),
             operations ?? new FakeOperationProbe(),
+            monitor ?? new ControlledOperationMonitor(),
             new FixedTimeProvider(Now),
             NullLogger<SystemUpdateCoordinator>.Instance);
 
@@ -308,6 +470,26 @@ public sealed class SystemUpdateCoordinatorTests
         public void Release() => _release.TrySetResult();
     }
 
+    private sealed class ApplyingThenUnavailableGateway(UpdaterSnapshot applying)
+        : ISystemUpdaterGateway
+    {
+        private int _checkCount;
+
+        public Task<UpdaterSnapshot> CheckAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _checkCount) == 1)
+            {
+                return Task.FromResult(applying);
+            }
+
+            return Task.FromException<UpdaterSnapshot>(
+                new SystemUpdaterUnavailableException("temporary"));
+        }
+
+        public Task<UpdaterSnapshot> ApplyAsync(CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class ManualSystemUpdateDelay : ISystemUpdateDelay
     {
         private TaskCompletionSource _advance = NewCompletion();
@@ -346,6 +528,41 @@ public sealed class SystemUpdateCoordinatorTests
     {
         public Task<bool> HasActiveOperationsAsync(CancellationToken cancellationToken) =>
             throw new IOException("physical /opt/reachcommander failure");
+    }
+
+    private sealed class ControlledOperationMonitor : ISystemUpdateOperationMonitor
+    {
+        private readonly TaskCompletionSource _called =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<SystemUpdateMonitorResult> _result =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int CallCount { get; private set; }
+
+        public bool CancellationObserved { get; private set; }
+
+        public async Task<SystemUpdateMonitorResult> WaitForTerminalAsync(
+            UpdaterSnapshot applyingSnapshot,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            _called.TrySetResult();
+            try
+            {
+                return await _result.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+        }
+
+        public Task WaitUntilCalledAsync() =>
+            _called.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        public void Complete(SystemUpdateMonitorResult result) =>
+            _result.TrySetResult(result);
     }
 
     private sealed class RecordingMutationGate : ISystemMutationGate

@@ -1,0 +1,84 @@
+<div class="single-rename-backdrop" data-testid="single-rename-dialog">
+  <dialog
+    open
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="single-rename-title"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+  >
+    <header>
+      <div>
+        <span class="eyebrow">Controlled file operation</span>
+        <h2 id="single-rename-title">
+          Rename {{ store.state().context?.entry?.type === 'directory' ? 'folder' : 'file' }}
+        </h2>
+      </div>
+      <button
+        type="button"
+        aria-label="Close Rename"
+        [disabled]="store.state().actionPending"
+        (click)="requestClose()"
+      >
+        ×
+      </button>
+    </header>
+
+    <div class="dialog-body">
+      <section class="destination">
+        <span>Location</span>
+        <code>{{ store.state().context?.sourceName }}:{{ store.state().context?.directoryPath }}</code>
+      </section>
+
+      <label for="single-rename-name">New name</label>
+      <input
+        #nameInput
+        id="single-rename-name"
+        type="text"
+        autocomplete="off"
+        [value]="store.state().newName"
+        [disabled]="store.state().actionPending"
+        aria-describedby="single-rename-status"
+        (input)="store.setName($any($event.target).value)"
+      />
+
+      <div id="single-rename-status" class="status-region" aria-live="polite">
+        @if (store.state().previewPending) {
+          <p class="pending" role="status">Checking name…</p>
+        }
+        @if (previewMessage(); as message) {
+          <p
+            [class.error]="previewBlocked()"
+            [attr.role]="previewBlocked() ? 'alert' : 'status'"
+          >
+            {{ message }}
+          </p>
+        }
+      </div>
+
+      <p class="hint">
+        Enter one complete literal name, including the extension. Existing names are never
+        overwritten.
+      </p>
+    </div>
+
+    <footer>
+      <button
+        type="button"
+        [disabled]="store.state().actionPending"
+        (click)="requestClose()"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        class="primary"
+        data-testid="single-rename-submit"
+        [disabled]="!store.canExecute()"
+        (click)="submit()"
+      >
+        {{ store.state().actionPending ? 'Renaming…' : 'Rename' }}
+      </button>
+    </footer>
+  </dialog>
+</div>

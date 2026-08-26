@@ -138,6 +138,7 @@ async function finishVisibleTask(page: Page) {
   const dialog = page.getByTestId('transfer-progress-dialog');
   await dialog.getByRole('button', { name: 'Close', exact: true }).waitFor({ timeout: 20_000 });
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toBeHidden();
 }
 
 async function finishBackgroundTask(page: Page, label: RegExp) {

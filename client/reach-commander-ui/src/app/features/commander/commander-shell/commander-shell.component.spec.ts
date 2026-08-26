@@ -10,6 +10,8 @@ import { UploadStore } from '../../../core/state/upload-store';
 import { UploadState } from '../../../core/state/upload.models';
 import { MultiRenameStore } from '../../../core/state/multi-rename-store';
 import { MultiRenameState } from '../../../core/state/multi-rename.models';
+import { SingleRenameStore } from '../../../core/state/single-rename-store';
+import { SingleRenameState } from '../../../core/state/single-rename.models';
 import {
   ArchiveExtractionState,
   ArchiveExtractionStore,
@@ -53,6 +55,8 @@ describe('CommanderShellComponent system metrics integration', () => {
     refresh: vi.fn(() => Promise.resolve()),
     clearSelection: vi.fn(),
     createMultiRenameContext: vi.fn((_side?: 'left' | 'right'): any => null),
+    createSingleRenameContext: vi.fn((_side?: 'left' | 'right'): any => null),
+    refreshAfterRename: vi.fn(() => Promise.resolve()),
     captureFileOperationContext: vi.fn((_kind: 'copy' | 'move'): any => null),
     activatePanel: vi.fn(),
     setFilter: vi.fn(),
@@ -76,6 +80,20 @@ describe('CommanderShellComponent system metrics integration', () => {
     updateRules: vi.fn(),
     execute: vi.fn(() => Promise.resolve(false)),
     undo: vi.fn(() => Promise.resolve(false)),
+  };
+  const singleRename = {
+    state: signal<SingleRenameState>(closedSingleRenameState()),
+    canExecute: signal(false),
+    open: vi.fn((context: any) => singleRename.state.set({
+      ...closedSingleRenameState(),
+      open: true,
+      context,
+      newName: context.entry.name,
+    })),
+    close: vi.fn(() => singleRename.state.set(closedSingleRenameState())),
+    setName: vi.fn(),
+    execute: vi.fn(() => Promise.resolve(false)),
+    setCompletionHandler: vi.fn(),
   };
   const archiveExtraction = {
     state: signal<ArchiveExtractionState>(closedArchiveExtractionState()),
@@ -153,6 +171,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     store.activePanel.set('left');
     upload.state.set(closedUploadState());
     multiRename.state.set(closedMultiRenameState());
+    singleRename.state.set(closedSingleRenameState());
     archiveExtraction.state.set(closedArchiveExtractionState());
     fileOperations.dialog.set('closed');
     fileOperations.presentation.set('modal');
@@ -160,6 +179,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     fileOperations.activeTask.set(null);
     trash.deletePreview.set(null);
     store.captureFileOperationContext.mockReturnValue(null);
+    store.createSingleRenameContext.mockReturnValue(null);
     pwa.canInstall.set(false);
     pwa.online.set(true);
     pwa.updateReady.set(false);
@@ -176,6 +196,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: SystemMetricsStore, useValue: metrics },
         { provide: UploadStore, useValue: upload },
         { provide: MultiRenameStore, useValue: multiRename },
+        { provide: SingleRenameStore, useValue: singleRename },
         { provide: ArchiveExtractionStore, useValue: archiveExtraction },
         { provide: FileOperationStore, useValue: fileOperations },
         { provide: TrashStore, useValue: trash },
@@ -603,6 +624,89 @@ describe('CommanderShellComponent system metrics integration', () => {
     });
   });
 
+  it('opens single rename with F4 for the focused row and blocks unrelated commands', () => {
+    const context = {
+      panelSide: 'left' as const,
+      sourceId: 'downloads',
+      sourceName: 'Downloads',
+      directoryPath: '/Files',
+      entry: {
+        name: 'one.txt', relativePath: '/Files/one.txt', type: 'file' as const, size: 1,
+        modifiedAt: null, extension: 'txt', isReadOnly: false, isSymbolicLink: false,
+        attributes: '', archiveFormatHint: null, archiveRole: null,
+      },
+      isAvailable: true,
+      isReadOnly: false,
+    };
+    store.sources.set([source('downloads', 'Downloads')]);
+    store.leftPanel.set(panel({
+      tabs: [{ id: 'left', label: 'Files', location: { kind: 'filesystem', sourceId: 'downloads', path: '/Files' } }],
+      activeTabId: 'left', entries: [context.entry], cursorIndex: 0,
+    }));
+    store.createSingleRenameContext.mockReturnValue(context);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement.querySelector('[data-key="F4"]') as HTMLButtonElement).disabled)
+      .toBe(false);
+    fixture.componentInstance.handleFunctionKey('F4');
+    fixture.detectChanges();
+
+    expect(singleRename.open).toHaveBeenCalledWith(context);
+    expect(fixture.nativeElement.querySelector('[data-testid="single-rename-dialog"]')).not.toBeNull();
+    fixture.componentInstance.execute({ type: 'switch-panel' });
+    expect(store.activatePanel).not.toHaveBeenCalled();
+  });
+
+  it('disables F4 for symbolic links with an exact reason', () => {
+    store.sources.set([source('downloads', 'Downloads')]);
+    store.createSingleRenameContext.mockReturnValue({
+      panelSide: 'left', sourceId: 'downloads', sourceName: 'Downloads', directoryPath: '/',
+      entry: {
+        name: 'shortcut', relativePath: '/shortcut', type: 'file', size: 1,
+        modifiedAt: null, extension: null, isReadOnly: false, isSymbolicLink: true,
+        attributes: '', archiveFormatHint: null, archiveRole: null,
+      },
+      isAvailable: true, isReadOnly: false,
+    });
+    fixture.detectChanges();
+
+    const rename = fixture.nativeElement.querySelector('[data-key="F4"]') as HTMLButtonElement;
+    expect(rename.disabled).toBe(true);
+    expect(rename.title).toBe('Symbolic links cannot be renamed.');
+  });
+
+  it('refreshes matching panels, closes rename, and restores its F4 opener after completion', async () => {
+    const context = {
+      panelSide: 'left' as const,
+      sourceId: 'downloads',
+      sourceName: 'Downloads',
+      directoryPath: '/',
+      entry: {
+        name: 'old.txt', relativePath: '/old.txt', type: 'file' as const, size: 1,
+        modifiedAt: null, extension: 'txt', isReadOnly: false, isSymbolicLink: false,
+        attributes: '', archiveFormatHint: null, archiveRole: null,
+      },
+      isAvailable: true,
+      isReadOnly: false,
+    };
+    store.sources.set([source('downloads', 'Downloads')]);
+    store.createSingleRenameContext.mockReturnValue(context);
+    fixture.detectChanges();
+    const opener = fixture.nativeElement.querySelector('[data-key="F4"]') as HTMLButtonElement;
+    opener.focus();
+    fixture.componentInstance.handleFunctionKey('F4');
+    const completion = { context, newLogicalPath: '/renamed.txt' };
+    const handler = singleRename.setCompletionHandler.mock.calls.at(-1)?.[0];
+
+    await handler(completion);
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    expect(store.refreshAfterRename).toHaveBeenCalledWith(completion);
+    expect(singleRename.close).toHaveBeenCalled();
+    expect(document.activeElement).toBe(opener);
+  });
+
   it('keeps archive extraction ahead of Copy and blocks commander movement under file modals', () => {
     fileOperations.dialog.set('confirm');
     fixture.componentInstance.execute({ type: 'switch-panel' });
@@ -867,6 +971,20 @@ function closedMultiRenameState(): MultiRenameState {
     previewPending: false,
     actionPending: false,
     disabledReason: null,
+    errorCode: null,
+    requestToken: 0,
+  };
+}
+
+function closedSingleRenameState(): SingleRenameState {
+  return {
+    open: false,
+    context: null,
+    newName: '',
+    preview: null,
+    operation: null,
+    previewPending: false,
+    actionPending: false,
     errorCode: null,
     requestToken: 0,
   };

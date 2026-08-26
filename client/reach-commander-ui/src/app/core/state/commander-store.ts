@@ -14,6 +14,7 @@ import { PanelPersistence, PersistedPanelState } from './panel-persistence';
 import { normalizeLogicalPath, parentLogicalPath } from './path-utils';
 import { buildVisibleRows } from './file-table.viewmodel';
 import { MultiRenameContext } from './multi-rename.models';
+import { SingleRenameCompletion, SingleRenameContext } from './single-rename.models';
 import {
   CapturedFileOperationContext,
   freezeFileOperationContext,
@@ -421,6 +422,57 @@ export class CommanderStore {
       isAvailable: source.isAvailable,
       isReadOnly: source.isReadOnly,
     };
+  }
+
+  createSingleRenameContext(side: PanelSide): SingleRenameContext | null {
+    const panel = this.panel(side)();
+    const tab = activeTab(panel);
+    if (!tab || tab.location.kind !== 'filesystem') {
+      return null;
+    }
+
+    const source = this.sourceState().find((candidate) => candidate.id === tab.location.sourceId);
+    const entry = buildVisibleRows(panel)[panel.cursorIndex];
+    if (!source || !entry || entry.isParent) {
+      return null;
+    }
+
+    return {
+      panelSide: side,
+      sourceId: source.id,
+      sourceName: source.name,
+      directoryPath: tab.location.path,
+      entry,
+      isAvailable: source.isAvailable,
+      isReadOnly: source.isReadOnly,
+    };
+  }
+
+  async refreshAfterRename(completion: SingleRenameCompletion): Promise<void> {
+    const { context, newLogicalPath } = completion;
+    const matchingSides = (['left', 'right'] as const).filter((side) => {
+      const tab = activeTab(this.panel(side)());
+      return tab?.location.kind === 'filesystem' &&
+        tab.location.sourceId === context.sourceId &&
+        tab.location.path === context.directoryPath;
+    });
+
+    for (const side of matchingSides) {
+      this.clearSelection(side);
+    }
+    await Promise.all(matchingSides.map((side) => this.loadPanel(side)));
+
+    if (!matchingSides.includes(context.panelSide)) {
+      return;
+    }
+
+    const origin = this.panel(context.panelSide)();
+    const cursorIndex = buildVisibleRows(origin).findIndex(
+      (row) => !row.isParent && row.relativePath === newLogicalPath,
+    );
+    if (cursorIndex >= 0) {
+      this.updatePanel(context.panelSide, { ...origin, cursorIndex });
+    }
   }
 
   captureFileOperationContext(

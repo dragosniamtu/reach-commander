@@ -332,6 +332,72 @@ describe('CommanderStore', () => {
     ]);
   });
 
+  it('creates a single-rename context from the cursor and ignores selected rows', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.selectWithPointer('left', 1, 'replace');
+    store.moveCursor('left', -1);
+
+    const context = store.createSingleRenameContext('left');
+
+    expect(context).toEqual({
+      panelSide: 'left',
+      sourceId: 'downloads',
+      sourceName: 'Downloads',
+      directoryPath: '/',
+      entry: expect.objectContaining({ name: 'alpha.txt', relativePath: '/alpha.txt' }),
+      isAvailable: true,
+      isReadOnly: false,
+    });
+  });
+
+  it('rejects parent rows and archive entries as single-rename targets', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/Folder', [entry('one.txt')]);
+    api.archives.set('downloads:/photos.7z:/', archiveDirectory('/'));
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    await store.navigateTo('left', '/Folder');
+    expect(store.createSingleRenameContext('left')).toBeNull();
+
+    await store.openArchive('left', '/photos.7z');
+    expect(store.createSingleRenameContext('left')).toBeNull();
+  });
+
+  it('refreshes every panel showing the renamed directory and restores the origin cursor', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('old.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.selectWithPointer('left', 0, 'replace');
+    store.selectWithPointer('right', 0, 'replace');
+    const context = store.createSingleRenameContext('left')!;
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('renamed.txt')]);
+
+    await store.refreshAfterRename({ context, newLogicalPath: '/renamed.txt' });
+
+    expect(store.leftPanel().entries.map((item) => item.name)).toEqual([
+      'alpha.txt',
+      'renamed.txt',
+    ]);
+    expect(store.rightPanel().entries.map((item) => item.name)).toEqual([
+      'alpha.txt',
+      'renamed.txt',
+    ]);
+    expect(store.leftPanel().selectedItems.size).toBe(0);
+    expect(store.rightPanel().selectedItems.size).toBe(0);
+    expect(store.leftPanel().cursorIndex).toBe(1);
+  });
+
   it('captures selected file-operation rows in visible order and ignores later state changes', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true }),

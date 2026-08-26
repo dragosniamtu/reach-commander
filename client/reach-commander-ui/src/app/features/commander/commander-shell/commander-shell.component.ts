@@ -27,6 +27,9 @@ import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metri
 import { UploadDialogComponent } from '../../uploads/upload-dialog.component';
 import { MultiRenameStore } from '../../../core/state/multi-rename-store';
 import { MultiRenameDialogComponent } from '../../multi-rename/multi-rename-dialog.component';
+import { SingleRenameStore } from '../../../core/state/single-rename-store';
+import { SingleRenameCompletion } from '../../../core/state/single-rename.models';
+import { RenameDialogComponent } from '../single-rename/rename-dialog.component';
 import { ArchiveExtractionStore } from '../../../core/state/archive-extraction-store';
 import { captureArchiveExtractionContext } from '../../../core/state/archive-extraction.models';
 import { ArchiveExtractionDialogComponent } from '../../archive-extraction/archive-extraction-dialog.component';
@@ -71,6 +74,7 @@ export interface CreateDirectoryDialogContext {
     SystemMetricsDetailsComponent,
     UploadDialogComponent,
     MultiRenameDialogComponent,
+    RenameDialogComponent,
     ActivePanelToolbarComponent,
     ArchiveExtractionDialogComponent,
     PwaStatusComponent,
@@ -94,6 +98,7 @@ export class CommanderShellComponent implements OnInit {
   readonly metricsStore = inject(SystemMetricsStore);
   readonly uploadStore = inject(UploadStore);
   readonly multiRename = inject(MultiRenameStore);
+  readonly singleRename = inject(SingleRenameStore);
   readonly archiveExtraction = inject(ArchiveExtractionStore);
   readonly fileOperations = inject(FileOperationStore);
   readonly trash = inject(TrashStore);
@@ -107,6 +112,7 @@ export class CommanderShellComponent implements OnInit {
   readonly uploadOpener = signal<HTMLElement | null>(null);
   readonly extractionOpener = signal<HTMLElement | null>(null);
   readonly fileOperationOpener = signal<HTMLElement | null>(null);
+  readonly singleRenameOpener = signal<HTMLElement | null>(null);
   readonly trashOpen = signal(false);
   readonly createDirectoryContext = signal<CreateDirectoryDialogContext | null>(null);
   readonly systemUpdateDialogStatus = signal<SystemUpdateStatusDto | null>(null);
@@ -158,6 +164,7 @@ export class CommanderShellComponent implements OnInit {
     const copyContext = extractionIntent ? null : this.store.captureFileOperationContext('copy');
     const moveContext = this.store.captureFileOperationContext('move');
     const selection = this.store.createMultiRenameContext(this.store.activePanel());
+    const renameTarget = this.store.createSingleRenameContext(this.store.activePanel());
     const tab = this.activeTab();
     const source = this.activeSource();
     const createReason = !tab || !source
@@ -178,7 +185,23 @@ export class CommanderShellComponent implements OnInit {
         : selection.isReadOnly
           ? `${selection.sourceName} is read-only.`
           : null;
+    const renameReason = !renameTarget
+      ? tab?.location.kind === 'archive'
+        ? 'Archive entries are read-only.'
+        : 'Select or focus an item.'
+      : !renameTarget.isAvailable
+        ? `${renameTarget.sourceName} is unavailable.`
+        : renameTarget.isReadOnly
+          ? `${renameTarget.sourceName} is read-only.`
+          : renameTarget.entry.isSymbolicLink
+            ? 'Symbolic links cannot be renamed.'
+            : renameTarget.entry.isReadOnly
+              ? 'This item is read-only.'
+              : renameTarget.entry.type !== 'file' && renameTarget.entry.type !== 'directory'
+                ? 'This item type cannot be renamed.'
+                : null;
     return {
+      rename: { enabled: renameReason === null, reason: renameReason },
       copy: extractionIntent
         ? { enabled: extraction.context !== null, reason: extraction.error, label: 'Extract' }
         : { enabled: copyContext !== null, reason: copyContext ? null : this.transferDisabledReason('copy'), label: 'Copy' },
@@ -214,6 +237,7 @@ export class CommanderShellComponent implements OnInit {
       this.metricsStore.reset();
       this.uploadStore.reset();
       this.multiRename.close();
+      this.singleRename.close();
       this.archiveExtraction.close();
       this.fileOperations.resetProtectedState();
       this.trash.resetProtectedState();
@@ -232,6 +256,8 @@ export class CommanderShellComponent implements OnInit {
     this.fileOperations.setTerminalHandler((status, context) => {
       void this.refreshOperationPanels(status, context);
     });
+    this.singleRename.setCompletionHandler((completion) =>
+      this.completeSingleRename(completion));
   }
 
   ngOnInit(): void {
@@ -253,6 +279,12 @@ export class CommanderShellComponent implements OnInit {
 
   execute(command: CommanderCommand): void {
     if (this.hasBlockingFileModal()) {
+      return;
+    }
+    if (this.singleRename.state().open) {
+      if (command.type === 'escape' && !this.singleRename.state().actionPending) {
+        this.closeSingleRename();
+      }
       return;
     }
     if (this.archiveExtraction.state().phase !== 'closed') {
@@ -465,6 +497,37 @@ export class CommanderShellComponent implements OnInit {
     this.multiRename.open(context);
   }
 
+  openSingleRename(side: PanelSide = this.store.activePanel()): void {
+    const context = this.store.createSingleRenameContext(side);
+    const availability = this.fileCommandAvailability().rename;
+    if (!context || !availability.enabled) {
+      this.commandStatus.set(availability.reason ?? 'Rename is unavailable.');
+      return;
+    }
+
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.singleRenameOpener.set(
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+    this.singleRename.open(context);
+  }
+
+  closeSingleRename(): void {
+    const state = this.singleRename.state();
+    if (state.actionPending) {
+      return;
+    }
+
+    const opener = this.singleRenameOpener();
+    const side = state.context?.panelSide ?? this.store.activePanel();
+    this.singleRename.close();
+    this.singleRenameOpener.set(null);
+    queueMicrotask(() => opener?.isConnected
+      ? opener.focus()
+      : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+  }
+
   closeMultiRename(): void {
     const side = this.multiRename.state().context?.panelSide ?? this.store.activePanel();
     this.multiRename.close();
@@ -519,6 +582,11 @@ export class CommanderShellComponent implements OnInit {
     if (key === 'F9') {
       this.menuOpen.update((open) => !open);
       this.commandStatus.set(null);
+      return;
+    }
+
+    if (key === 'F4') {
+      this.openSingleRename();
       return;
     }
 
@@ -641,6 +709,11 @@ export class CommanderShellComponent implements OnInit {
     this.fileOperationOpener.set(
       document.activeElement instanceof HTMLElement ? document.activeElement : null,
     );
+  }
+
+  private async completeSingleRename(completion: SingleRenameCompletion): Promise<void> {
+    await this.store.refreshAfterRename(completion);
+    this.closeSingleRename();
   }
 
   private hasBlockingFileModal(): boolean {

@@ -9,6 +9,7 @@ interface CommandAction {
 }
 
 export interface FileCommandAvailability {
+  readonly rename: { readonly enabled: boolean; readonly reason: string | null };
   readonly copy: { readonly enabled: boolean; readonly reason: string | null; readonly label: 'Copy' | 'Extract' };
   readonly move: { readonly enabled: boolean; readonly reason: string | null };
   readonly createDirectory: { readonly enabled: boolean; readonly reason: string | null };
@@ -16,6 +17,7 @@ export interface FileCommandAvailability {
 }
 
 const unavailableCommands: FileCommandAvailability = {
+  rename: { enabled: false, reason: 'Select or focus an item.' },
   copy: { enabled: false, reason: 'Select or focus an item.', label: 'Copy' },
   move: { enabled: false, reason: 'Select or focus an item.' },
   createDirectory: { enabled: false, reason: 'Choose a writable filesystem folder.' },
@@ -33,7 +35,7 @@ export class CommandBarComponent {
   readonly availability = input<FileCommandAvailability>(unavailableCommands);
   readonly actions = computed<readonly CommandAction[]>(() => [
     { key: 'F3', label: 'View', enabled: false, reason: 'File viewing arrives in a later milestone.' },
-    { key: 'F4', label: 'Rename', enabled: false, reason: 'Use Multi-Rename from the toolbar or Ctrl+M.' },
+    { key: 'F4', label: 'Rename', enabled: this.availability().rename.enabled, reason: this.availability().rename.reason },
     { key: 'F5', label: this.availability().copy.label, enabled: this.availability().copy.enabled, reason: this.availability().copy.reason },
     { key: 'F6', label: 'Move', enabled: this.availability().move.enabled, reason: this.availability().move.reason },
     { key: 'F7', label: 'MkDir', enabled: this.availability().createDirectory.enabled, reason: this.availability().createDirectory.reason },

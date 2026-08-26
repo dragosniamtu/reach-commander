@@ -106,6 +106,9 @@
     />
   }
 
+  @if (singleRename.state().open) {
+    <app-rename-dialog (closeRequested)="closeSingleRename()" />
+  }
 
   @if (archiveExtraction.state().phase !== 'closed') {
     <app-archive-extraction-dialog (closeRequested)="closeArchiveExtraction()" />
@@ -162,7 +165,7 @@
     </div>
     <div class="shortcut-hint">
       <kbd>Tab</kbd> switch pane <span>·</span> <kbd>Insert</kbd> select <span>·</span>
-      <kbd>Ctrl+M</kbd> multi-rename <span>·</span> type to filter
+      <kbd>F4</kbd> rename <span>·</span> <kbd>Ctrl+M</kbd> multi-rename <span>·</span> type to filter
     </div>
     @if (commandStatus()) {
       <div class="command-status">{{ commandStatus() }}</div>
@@ -178,12 +181,13 @@
       <div class="menu-grid">
         <span>Navigate</span><kbd>↑ ↓ Enter Backspace</kbd> <span>Select</span
         ><kbd>Insert · Ctrl+A</kbd> <span>Panels & tabs</span><kbd>Tab · Ctrl+T · Ctrl+W</kbd>
-        <span>Path & refresh</span><kbd>Ctrl+L · Ctrl+R</kbd> <span>Multi-Rename</span
-        ><kbd>Ctrl+M</kbd>
+        <span>Path & refresh</span><kbd>Ctrl+L · Ctrl+R</kbd> <span>Rename</span
+        ><kbd>F4</kbd> <span>Multi-Rename</span><kbd>Ctrl+M</kbd>
       </div>
       <p>
-        Multi-Rename is available with Ctrl+M. F5 extracts eligible archives or copies filesystem
-        items; F6 moves, F7 creates a directory, and F8 opens safe deletion.
+        F4 renames the focused file or folder; Ctrl+M opens Multi-Rename. F5 extracts eligible
+        archives or copies filesystem items; F6 moves, F7 creates a directory, and F8 opens safe
+        deletion.
       </p>
     </section>
   }

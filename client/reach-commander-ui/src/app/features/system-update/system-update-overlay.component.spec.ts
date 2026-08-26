@@ -20,6 +20,17 @@ describe('SystemUpdateOverlayComponent', () => {
     expect(fixture.nativeElement.querySelector('button')).toBeNull();
   });
 
+  it('renders two decorative progress rings while applying', () => {
+    fixture.componentRef.setInput('status', status({ phase: 'applying' }));
+    fixture.componentRef.setInput('reconnecting', false);
+    fixture.detectChanges();
+
+    const spinner = fixture.nativeElement.querySelector('.spinner') as HTMLElement;
+    expect(spinner.getAttribute('aria-hidden')).toBe('true');
+    expect(spinner.querySelectorAll(':scope > i')).toHaveLength(2);
+    expect(fixture.nativeElement.textContent).toContain('Updating ReachCommander');
+  });
+
   it.each([
     ['rolledBack', 'previous version was restored'],
     ['failed', 'reachcommander doctor'],

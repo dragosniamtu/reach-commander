@@ -254,3 +254,64 @@ for (const norton of [false, true]) {
     ).toBeLessThanOrEqual(1);
   });
 }
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test.describe(`system update motion: ${reducedMotion}`, () => {
+    test(`renders ${reducedMotion === "reduce" ? "static" : "counter-rotating"} progress rings`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      expect(
+        await page.evaluate(
+          () => matchMedia("(prefers-reduced-motion: reduce)").matches,
+        ),
+      ).toBe(reducedMotion === "reduce");
+      const routes = await routeSystemUpdates(page, available());
+      routes.applyWith(
+        systemUpdateFixture({
+          targetVersion: "v1.4.0",
+          phase: "applying",
+          reasonCode: "update_applying",
+          operationId: "operation-motion",
+        }),
+      );
+      await page.goto("/");
+      await page.getByTestId("system-update-trigger").click();
+      await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+      const overlay = page.getByRole("alertdialog", {
+        name: "Updating ReachCommander",
+      });
+      await expect(overlay).toBeVisible();
+      const styles = await overlay.locator(".spinner > i").evaluateAll((rings) =>
+        rings.map((ring) => {
+          const style = getComputedStyle(ring);
+          return {
+            animationName: style.animationName,
+            animationDuration: style.animationDuration,
+          };
+        }),
+      );
+
+      expect(styles).toHaveLength(2);
+      if (reducedMotion === "reduce") {
+        expect(styles.map((style) => style.animationName)).toEqual([
+          "none",
+          "none",
+        ]);
+      } else {
+        expect(styles[0].animationName).toContain("update-spin-clockwise");
+        expect(styles[1].animationName).toContain(
+          "update-spin-counterclockwise",
+        );
+        expect(styles.map((style) => style.animationDuration)).toEqual([
+          "1.15s",
+          "0.9s",
+        ]);
+      }
+      await expect(overlay).toContainText(
+        "The trusted update is being applied and health checked",
+      );
+    });
+  });
+}

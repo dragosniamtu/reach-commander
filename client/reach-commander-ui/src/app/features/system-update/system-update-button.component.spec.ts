@@ -25,6 +25,61 @@ describe('SystemUpdateButtonComponent', () => {
     expect(fixture.nativeElement.querySelector('.availability-dot')).not.toBeNull();
   });
 
+  it('shows the backend current version beside the update action', () => {
+    fixture.componentRef.setInput('status', status({ currentVersion: 'v1.0.2' }));
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector(
+      '[data-testid="system-update-trigger"]',
+    ) as HTMLElement;
+    const badge = fixture.nativeElement.querySelector(
+      '[data-testid="current-version"]',
+    ) as HTMLElement;
+
+    expect(trigger.nextElementSibling).toBe(badge);
+    expect(badge.textContent?.trim()).toBe('v1.0.2');
+    expect(badge.getAttribute('aria-label')).toBe(
+      'Current ReachCommander version v1.0.2',
+    );
+    expect(badge.title).toBe('Current ReachCommander version v1.0.2');
+  });
+
+  it('shows a compact loading version before update status arrives', () => {
+    fixture.detectChanges();
+    const badge = fixture.nativeElement.querySelector(
+      '[data-testid="current-version"]',
+    ) as HTMLElement;
+
+    expect(badge.textContent?.trim()).toBe('v…');
+    expect(badge.getAttribute('aria-label')).toBe(
+      'Current ReachCommander version is loading',
+    );
+  });
+
+  it('shows an unavailable version when status omits currentVersion', () => {
+    fixture.componentRef.setInput('status', status({ currentVersion: null }));
+    fixture.detectChanges();
+    const badge = fixture.nativeElement.querySelector(
+      '[data-testid="current-version"]',
+    ) as HTMLElement;
+
+    expect(badge.textContent?.trim()).toBe('Unknown');
+    expect(badge.title).toBe('Current ReachCommander version is unavailable');
+  });
+
+  it('keeps a long edge version complete for assistive text and the tooltip', () => {
+    const version = 'edge@0123456789abcdef';
+    fixture.componentRef.setInput('status', status({ currentVersion: version }));
+    fixture.detectChanges();
+    const badge = fixture.nativeElement.querySelector(
+      '[data-testid="current-version"]',
+    ) as HTMLElement;
+
+    expect(badge.textContent?.trim()).toBe(version);
+    expect(badge.getAttribute('aria-label')).toContain(version);
+    expect(badge.title).toContain(version);
+  });
+
   it.each([
     ['checking', 'Checking for updates'],
     ['current', 'ReachCommander is up to date'],

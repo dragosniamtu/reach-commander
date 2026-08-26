@@ -1,14 +1,16 @@
 :host { display: inline-flex; flex: 0 0 auto; }
 .update-control { position: relative; display: inline-flex; border-radius: 4px; }
-button { position: relative; display: grid; place-items: center; width: 30px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 4px; color: var(--text-4); background: var(--surface-3); }
+button { position: relative; display: grid; place-items: center; width: 30px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 4px 0 0 4px; color: var(--text-4); background: var(--surface-3); }
 button:not(:disabled) { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); cursor: pointer; }
 button:not(:disabled):hover { border-color: var(--accent); background: var(--accent-dim); }
 button:disabled { opacity: .68; cursor: not-allowed; }
+.version-badge { display: block; max-width: 96px; height: 28px; padding: 0 6px; overflow: hidden; border: 1px solid var(--line); border-left: 0; border-radius: 0 4px 4px 0; color: var(--text-3); background: var(--surface-3); font: 700 9px/26px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 svg { width: 16px; height: 16px; stroke-width: 1.5; }
 .availability-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 7px var(--warning); }
 .busy svg { animation: update-rotate 1.15s linear infinite; }
 @keyframes update-rotate { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .busy svg { animation: none; } }
 :host-context([data-theme='norton']) .update-control,
-:host-context([data-theme='norton']) button { border-radius: 0; box-shadow: none; }
+:host-context([data-theme='norton']) button,
+:host-context([data-theme='norton']) .version-badge { border-radius: 0; box-shadow: none; }
 :host-context([data-theme='norton']) .availability-dot { background: #ffff00; box-shadow: none; }

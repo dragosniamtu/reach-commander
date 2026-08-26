@@ -25,4 +25,13 @@
       <i class="availability-dot" aria-hidden="true"></i>
     }
   </button>
+  @let version = currentVersion();
+  <span
+    class="version-badge"
+    data-testid="current-version"
+    [attr.aria-label]="version.accessibleLabel"
+    [attr.title]="version.accessibleLabel"
+  >
+    {{ version.label }}
+  </span>
 </span>

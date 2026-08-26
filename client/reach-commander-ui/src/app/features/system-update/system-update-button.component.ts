@@ -9,6 +9,11 @@ import {
 } from '@angular/core';
 import { SystemUpdateStatusDto } from '../../core/api/api.models';
 
+interface CurrentVersionPresentation {
+  readonly label: string;
+  readonly accessibleLabel: string;
+}
+
 @Component({
   selector: 'app-system-update-button',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -23,6 +28,28 @@ export class SystemUpdateButtonComponent {
   private trigger?: ElementRef<HTMLButtonElement>;
 
   readonly accessibleSummary = computed(() => updateLabel(this.status()));
+  readonly currentVersion = computed<CurrentVersionPresentation>(() => {
+    const status = this.status();
+    if (!status) {
+      return {
+        label: 'v…',
+        accessibleLabel: 'Current ReachCommander version is loading',
+      };
+    }
+
+    const currentVersion = status.currentVersion;
+    if (!currentVersion?.trim()) {
+      return {
+        label: 'Unknown',
+        accessibleLabel: 'Current ReachCommander version is unavailable',
+      };
+    }
+
+    return {
+      label: currentVersion,
+      accessibleLabel: `Current ReachCommander version ${currentVersion}`,
+    };
+  });
   readonly tooltip = computed(() => {
     const status = this.status();
     const metadata = [

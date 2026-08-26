@@ -166,6 +166,10 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   mkdirSync(join(downloadsRoot, 'Incomplete'), { recursive: true });
   mkdirSync(join(downloadsRoot, 'Rename Lab', 'Drafts'), { recursive: true });
   mkdirSync(join(downloadsRoot, 'Conflict Lab'), { recursive: true });
+  mkdirSync(join(downloadsRoot, 'Single Rename Lab', 'File Case'), { recursive: true });
+  mkdirSync(join(downloadsRoot, 'Single Rename Lab', 'Folder Case', 'Old Folder'), { recursive: true });
+  mkdirSync(join(downloadsRoot, 'Single Rename Lab', 'Literal Case'), { recursive: true });
+  mkdirSync(join(downloadsRoot, 'Single Rename Lab', 'Conflict Case'), { recursive: true });
   mkdirSync(join(downloadsRoot, 'File Ops', 'Copy Source'), { recursive: true });
   mkdirSync(join(downloadsRoot, 'File Ops', 'Move Source'), { recursive: true });
   mkdirSync(join(downloadsRoot, 'File Ops', 'Delete Source'), { recursive: true });
@@ -184,6 +188,10 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   writeFileSync(join(downloadsRoot, 'Rename Lab', 'holiday-video.mp4'), 'video fixture\n');
   writeFileSync(join(downloadsRoot, 'Conflict Lab', 'one.txt'), 'one\n');
   writeFileSync(join(downloadsRoot, 'Conflict Lab', 'two.txt'), 'two\n');
+  writeFileSync(join(downloadsRoot, 'Single Rename Lab', 'File Case', 'draft.txt'), 'draft\n');
+  writeFileSync(join(downloadsRoot, 'Single Rename Lab', 'Literal Case', 'literal.txt'), 'literal\n');
+  writeFileSync(join(downloadsRoot, 'Single Rename Lab', 'Conflict Case', 'source.txt'), 'source\n');
+  writeFileSync(join(downloadsRoot, 'Single Rename Lab', 'Conflict Case', 'existing.txt'), 'existing\n');
   writeFileSync(join(downloadsRoot, 'existing.txt'), 'existing\n');
   writeFileSync(join(downloadsRoot, 'report-01.pdf'), 'two digit report\n');
   writeFileSync(join(downloadsRoot, 'report-1.pdf'), 'one digit report\n');

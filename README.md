@@ -6,7 +6,7 @@
 [![Angular 22](https://img.shields.io/badge/Angular-22-DD0031)](https://angular.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](Dockerfile)
 
-ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on native Windows and containerized Linux hosts.
+ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative single and batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on native Windows and containerized Linux hosts.
 
 ![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
 
@@ -32,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 600+ cross-platform .NET checks, 295 Angular tests, PWA contract tests, and 27 real-browser scenarios |
+| Quality | 712 cross-platform .NET tests, 346 Angular tests, PWA contract checks, and 40 real-browser checks |
 
 ## What ReachCommander includes
 
@@ -45,6 +45,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - A persistent Norton Commander-inspired theme, activated from the top toolbar and stored only in the current browser or installed PWA.
 - Explicit `RO`, `RW`, and unavailable source states.
 - Read-only source discovery, directory listing, and file-information APIs.
+- F4 single-file and single-folder rename with a live server-authoritative preview, literal complete-name semantics, and conflict blocking.
 - Server-authoritative Multi-Rename previews, all-or-nothing execution, compensation, and one-level Undo.
 - Bounded streamed multi-file uploads with review, progress, cancellation, conflict rejection, and compensation.
 - Read-only virtual browsing for supported single and multi-volume ZIP, RAR, and 7z archives.
@@ -57,7 +58,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
-Single-item F4 rename, downloads, file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
+Downloads, file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
 
 ## Architecture
 
@@ -342,7 +343,15 @@ Search filters only the loaded current directory and preserves a separate value 
 - Every other character is literal. For example, `a+b[1].txt` does not use regular-expression semantics.
 - `Ctrl+F` focuses the active search field. Typing while a panel has focus appends to its search; Backspace removes one character and Escape clears it.
 
-Source chips show `RO` for application read-only policy and `RW` for application write opt-in. Unavailable sources remain visible with an accessible explanation. Multi-Rename and Add files require an available `RW` source, and the server still revalidates source policy, containment, symlinks, staleness, and actual storage permissions.
+Source chips show `RO` for application read-only policy and `RW` for application write opt-in. Unavailable sources remain visible with an accessible explanation. F4 Rename, Multi-Rename, and Add files require an available `RW` source, and the server still revalidates source policy, containment, symlinks, staleness, and actual storage permissions.
+
+## Single Rename (F4)
+
+F4 renames the focused non-parent file or folder in the active filesystem panel. It deliberately follows the cursor rather than the multi-selection, matching classic commander behavior. The dialog selects the complete current name, including the extension, and treats every character literally: `[N]`, `*`, `+`, and other mask-looking characters are ordinary filename characters here. Use `Ctrl+M` when one operation should rename multiple selected entries.
+
+A short-lived server-authoritative preview validates the exact source, directory, entry fingerprint, destination name, source policy, containment, symlink status, and current filesystem conflict before enabling Rename. Existing entries are never overwritten or auto-numbered. Successful file, folder, and case-only renames refresh every panel showing the same source directory, clear stale selections, restore the originating cursor to the new path, and return keyboard focus to the F4 opener. Read-only, unavailable, archive, parent, and symbolic-link targets stay disabled with an explicit reason.
+
+The complete behavior and safety contract is recorded in the [Single Rename design](docs/superpowers/specs/2026-08-26-reachcommander-single-rename-design.md).
 
 ## Multi-Rename
 
@@ -359,7 +368,7 @@ The complete behavior and safety contract is recorded in the [Multi-Rename desig
 
 Execution revalidates the source, direct-child paths, fingerprints, conflicts, and write access. A two-phase temporary-name algorithm handles swaps, cycles, and case-only changes. Handled failures attempt to compensate the complete batch; if compensation is incomplete, the UI reports logical recovery locations and requires acknowledgement. Repeating Execute or Undo for the same identifier is idempotent.
 
-One-level Undo is available for 30 minutes in the current API process and revalidates the filesystem before reversing the batch. Preview plans expire after 10 minutes. An API restart, process crash, external filesystem mutation, or power loss can invalidate previews/Undo and may require administrator recovery; this is not a substitute for backups. Date/time tokens, presets, plugins, persistent history, recursive rename, and F4 single-item rename are not included.
+One-level Undo is available for 30 minutes in the current API process and revalidates the filesystem before reversing the batch. Preview plans expire after 10 minutes. An API restart, process crash, external filesystem mutation, or power loss can invalidate previews/Undo and may require administrator recovery; this is not a substitute for backups. Date/time tokens, presets, plugins, persistent history, and recursive rename are not included.
 
 ## Add files
 
@@ -455,12 +464,13 @@ If normal compensation cannot safely remove staging data, the UI reports only lo
 | `Ctrl+T` | Create a tab at the active path |
 | `Ctrl+W` | Close the active tab; the last tab is replaced with a root tab |
 | Type while a pane has focus | Append to its active-panel search |
+| `F4` | Rename the focused file or folder with a literal complete-name preview |
 | `F5` | Extract an eligible archive; otherwise Copy filesystem selection to the opposite pane |
 | `F6` | Move filesystem selection to the opposite pane |
 | `F7` | Create one directory in the active writable filesystem folder |
 | `F8` | Review recoverable Trash or explicitly confirmed permanent deletion |
 | `F9` | Toggle the command reference menu |
-| `F3`, `F4` | Reserved/disabled until a later milestone |
+| `F3` | Reserved/disabled until a later milestone |
 
 Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source buttons, toolbar actions, tabs, sortable headings, the path field, search, and F9 also work with pointer/touch input.
 
@@ -480,6 +490,7 @@ GET /api/archives/entries?sourceId=downloads&archivePath=/photos.zip&path=/Famil
 GET /api/system-metrics
 GET /api/uploads/limits
 POST /api/uploads?sourceId=downloads&path=/Incoming
+POST /api/renames/preview
 POST /api/batch-renames/preview
 POST /api/batch-renames/{planId}/execute
 POST /api/batch-renames/{operationId}/undo
@@ -515,7 +526,7 @@ API errors use `application/problem+json` and stable codes. Common path/source c
 - The backend rejects NUL characters, relative traversal, rooted paths, drive-qualified paths, and UNC paths.
 - Every request is resolved beneath its configured source. Existing path components are canonicalized one by one, symbolic links are resolved, and containment is checked after each resolution and on the final path.
 - A symlink that escapes its source is rejected even if the final target exists.
-- Copy, Move, MkDir, managed Trash, Restore, permanent Delete, Empty Trash, Multi-Rename, Add files, and archive extraction are the current write paths. All require explicit `readOnly: false`, re-resolve logical paths beneath configured sources, reject symbolic-link targets, reserved internal names, and unsafe traversal, and serialize overlapping mutations. The archive worker never receives the destination root or final names.
+- Copy, Move, MkDir, managed Trash, Restore, permanent Delete, Empty Trash, F4 Rename, Multi-Rename, Add files, and archive extraction are the current write paths. All require explicit `readOnly: false`, re-resolve logical paths beneath configured sources, reject symbolic-link targets, reserved internal names, and unsafe traversal, and serialize overlapping mutations. The archive worker never receives the destination root or final names.
 - The checked-in sample bind mounts remain read-only, providing defense in depth until an administrator opts a narrow source into writes at both configuration and filesystem layers.
 - The PWA service worker has no API data groups and explicitly excludes `/api/**` and `/health` from navigation fallback; it cannot provide stale filesystem or operation results offline.
 - Filesystem exceptions are converted to stable, non-leaking Problem Details. Automated tests use temporary fixture trees, never developer data.
@@ -556,7 +567,7 @@ Archive fixture generation, immutable upstream provenance, expected catalogs, an
 
 ## Roadmap
 
-- **Milestone 2 — controlled active-panel operations (current):** Multi-Rename, bounded uploads, archive browsing/extraction, F5 Copy, F6 Move, F7 MkDir, F8 Delete, durable queued progress, and managed Trash/Restore.
+- **Milestone 2 — controlled active-panel operations (current):** F4 Rename, Multi-Rename, bounded uploads, archive browsing/extraction, F5 Copy, F6 Move, F7 MkDir, F8 Delete, durable queued progress, and managed Trash/Restore.
 - **Milestone 3 — richer transfers:** optional SignalR push progress, pause/resume where the underlying operation can prove safety, downloads, and administrator-visible recovery tooling.
 - **Milestone 4 — multi-user access control:** additional users, per-source permissions, read-only roles, settings, and feature flags.
 - **Milestone 5 — richer file workflows:** image/video/PDF/text previews, thumbnail mode, recursive search, downloads, optional nested/password archive workflows, bookmarks, history, and favorites.

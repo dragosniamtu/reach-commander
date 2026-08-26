@@ -216,7 +216,12 @@ pass "lifecycle commands are locked and map to bounded Compose operations"
 
 deployment_before="$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
 : >"$FAKE_FLOCK_LOG"
+export FAKE_SETPRIV_DENY_PREFIX="$INSTALL_ROOT/data"
+export FAKE_DOCKER_EXEC_DENY_PREFIX="$INSTALL_ROOT/data"
+: >"$FAKE_DOCKER_LOG"
 run_command doctor
+unset FAKE_SETPRIV_DENY_PREFIX
+unset FAKE_DOCKER_EXEC_DENY_PREFIX
 if (( last_status != 0 )); then
   printf '%s\n' "$last_output" >&2
 fi
@@ -226,7 +231,31 @@ assert_equal "0" "$last_status" "healthy doctor status"
 [[ "$last_output" != *'[FAIL]'* ]] || fail "healthy doctor reported a failure"
 [[ ! -s "$FAKE_FLOCK_LOG" ]] || fail "doctor acquired a mutating lock"
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "doctor deployment mutation"
+mapfile -d '' doctor_args <"$FAKE_DOCKER_LOG"
+doctor_log="$(printf '%s\n' "${doctor_args[@]}")"
+[[ "$doctor_log" == *$'exec\n--user\n'"$RUNTIME_UID:$RUNTIME_GID"* ]] ||
+  fail "doctor did not probe application data as the configured container identity"
+for container_path in \
+  /data \
+  /data/auth \
+  /data/keys \
+  /data/file-operations \
+  /data/file-operations/plans \
+  /data/file-operations/operations; do
+  printf '%s\n' "${doctor_args[@]}" | grep -Fxq "$container_path" ||
+    fail "doctor did not probe fixed container path: $container_path"
+done
 pass "doctor reports a healthy deployment without mutating it"
+
+export FAKE_DOCKER_EXEC_EXIT=1
+run_command doctor
+unset FAKE_DOCKER_EXEC_EXIT
+assert_equal "1" "$last_status" "doctor inaccessible container data status"
+[[ "$last_output" == *'[FAIL] Application data directory is not accessible to the runtime identity'* ]] ||
+  fail "doctor container data access failure missing"
+[[ "$last_output" != *"$INSTALL_ROOT"* ]] ||
+  fail "doctor exposed its host installation path"
+pass "doctor validates runtime access at the application data mount boundary"
 
 printf 'unexpected\n' >"$INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
 run_command doctor

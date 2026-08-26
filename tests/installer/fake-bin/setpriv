@@ -9,4 +9,12 @@ if (($# == 0)); then
   exit 97
 fi
 shift
-exec "$@"
+command_arguments=("$@")
+if [[ -n "${FAKE_SETPRIV_DENY_PREFIX:-}" ]]; then
+  for argument in "${command_arguments[@]}"; do
+    if [[ "$argument" == "$FAKE_SETPRIV_DENY_PREFIX" || "$argument" == "$FAKE_SETPRIV_DENY_PREFIX/"* ]]; then
+      exit 96
+    fi
+  done
+fi
+exec "${command_arguments[@]}"

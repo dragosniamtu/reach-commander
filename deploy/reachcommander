@@ -945,6 +945,7 @@ doctor_application_data() {
   local owner
   local mode
   local relative_path
+  local container_path
   local -a data_directories=(data data/auth data/keys)
   if ! application_data_tree_is_safe; then
     doctor_fail 'Application data tree contains an unsafe entry'
@@ -969,11 +970,13 @@ doctor_application_data() {
     else
       doctor_fail 'Application data directory ownership or mode is incorrect'
     fi
-    if command -v setpriv >/dev/null 2>&1 && setpriv \
-      --reuid="$runtime_uid" \
-      --regid="$runtime_gid" \
-      --clear-groups \
-      -- sh -c "test -r \"\$1\" && test -w \"\$1\" && test -x \"\$1\"" reachcommander-doctor "$path"; then
+    container_path="/$relative_path"
+    if docker exec \
+      --user "$runtime_uid:$runtime_gid" \
+      reachcommander \
+      sh -c 'test -r "$1" && test -w "$1" && test -x "$1"' \
+      reachcommander-doctor \
+      "$container_path" >/dev/null 2>&1; then
       doctor_pass 'Application data directory is accessible to the runtime identity'
     else
       doctor_fail 'Application data directory is not accessible to the runtime identity'

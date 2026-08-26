@@ -60,6 +60,16 @@ case "${1:-}" in
     fi
     exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
     ;;
+  exec)
+    if [[ -n "${FAKE_DOCKER_EXEC_DENY_PREFIX:-}" ]]; then
+      for argument in "$@"; do
+        if [[ "$argument" == "$FAKE_DOCKER_EXEC_DENY_PREFIX" || "$argument" == "$FAKE_DOCKER_EXEC_DENY_PREFIX/"* ]]; then
+          exit 98
+        fi
+      done
+    fi
+    exit "${FAKE_DOCKER_EXEC_EXIT:-0}"
+    ;;
   *)
     printf 'fake docker: unsupported invocation\n' >&2
     exit 97

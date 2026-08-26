@@ -239,7 +239,7 @@ sudo reachcommander stop
 sudo reachcommander restart
 ```
 
-Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, the exact application-data allowlist and its ownership/modes, authentication JSON, image state, port, and container health without changing the deployment. The allowlist covers account state, Data Protection keys, and ReachCommander's durable file-operation plans and status records. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
+Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, the exact application-data allowlist and its host ownership/modes, authentication JSON, image state, port, and container health without changing the deployment. Read/write/traverse access is checked as the configured numeric runtime identity inside the running container at the fixed `/data` mount, which is where the application actually accesses the bind-mounted data. The root-owned `/opt/reachcommander` directory remains protected and does not need to be traversable by the container identity. The allowlist covers account state, Data Protection keys, and ReachCommander's durable file-operation plans and status records. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
 
 ### Updates, channels, and rollback
 

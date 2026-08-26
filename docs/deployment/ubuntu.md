@@ -239,7 +239,7 @@ sudo reachcommander stop
 sudo reachcommander restart
 ```
 
-Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, authentication-data allowlist/ownership/modes/JSON, image state, port, and container health without changing the deployment. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
+Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, the exact application-data allowlist and its ownership/modes, authentication JSON, image state, port, and container health without changing the deployment. The allowlist covers account state, Data Protection keys, and ReachCommander's durable file-operation plans and status records. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
 
 ### Updates, channels, and rollback
 
@@ -286,14 +286,14 @@ The in-app control is supported only for Ubuntu installer-managed deployments. I
 sudo reachcommander uninstall
 ```
 
-The command first asks what to do with authentication data:
+The command first asks what to do with application data:
 
-- `retain` is the default. It removes the container, command, and generated deployment files but leaves the inactive authentication tree at `/opt/reachcommander/data` and prints that exact path.
-- `backup` stops the service, copies the generated deployment plus every allowlisted authentication file to a timestamped directory under `/var/backups/reachcommander`, sets authentication backup files to mode `0600`, flushes them, compares every copy byte-for-byte, and only then removes the original data tree.
+- `retain` is the default. It removes the container, command, and generated deployment files but leaves the inactive application-data tree at `/opt/reachcommander/data` and prints that exact path.
+- `backup` stops the service, copies the generated deployment plus every allowlisted application-data file to a timestamped directory under `/var/backups/reachcommander`, sets those backup files to mode `0600`, flushes them, compares every copy byte-for-byte, and only then removes the original data tree.
 
-After that selection, the command requires the exact confirmation `uninstall ReachCommander`. It revalidates every recorded source path and the authentication-data tree, stops the application before its final validation or backup, tears down Compose without deleting volumes, and removes only the installer-owned allowlist. Source directories and their contents are never removed by the uninstaller. This includes source-local `.reachcommander-trash`, which is not copied into the installer backup and must be retained or backed up with its source. If final validation or verified backup creation fails, uninstall preserves the deployment and attempts to restart the previously healthy service.
+After that selection, the command requires the exact confirmation `uninstall ReachCommander`. It revalidates every recorded source path and the application-data tree, stops the application before its final validation or backup, tears down Compose without deleting volumes, and removes only the installer-owned allowlist. Source directories and their contents are never removed by the uninstaller. This includes source-local `.reachcommander-trash`, which is not copied into the installer backup and must be retained or backed up with its source. If final validation or verified backup creation fails, uninstall preserves the deployment and attempts to restart the previously healthy service.
 
-Keep a verified backup until you have confirmed that you no longer need the account, cookie keys, generated source mapping, or pinned image record.
+Keep a verified backup until you have confirmed that you no longer need the account, cookie keys, file-operation history, generated source mapping, or pinned image record.
 
 ## Troubleshooting
 

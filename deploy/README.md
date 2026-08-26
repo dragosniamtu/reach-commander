@@ -20,7 +20,7 @@ The archive contains no credentials, source directories, generated authenticatio
 
 Ubuntu installations default to a loopback-only HTTPS reverse-proxy upstream. The explicit **Direct HTTP on trusted LAN** mode publishes host port `8092` on all host interfaces and forwards it to container port `8080`; open `http://<server-lan-ip>:<port>`. It keeps authentication protections enabled but provides no transport encryption. Do not add router forwarding or public exposure; DHCP address changes do not require reconfiguration, and PWA installation requires HTTPS.
 
-The installer creates a dedicated mode-`0700` `data/auth` account directory and `data/keys` Data Protection key ring outside the container image. Reconfiguration preserves those bytes. Uninstall can retain the inactive data tree in place or copy every validated authentication file to a verified mode-`0600` backup before removing it.
+The installer keeps account state, Data Protection keys, and durable file-operation metadata under a mode-`0700` application-data tree outside the container image. Reconfiguration preserves those bytes and normalizes validated files to mode `0600`. Uninstall can retain the inactive data tree in place or copy every exactly allowlisted application-data file to a verified mode-`0600` backup before removing it.
 
 To build a stable release bundle locally:
 

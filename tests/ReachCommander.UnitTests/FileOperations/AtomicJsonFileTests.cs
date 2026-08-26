@@ -21,6 +21,22 @@ public sealed class AtomicJsonFileTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_uses_owner_only_permissions_on_Unix()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var path = Path.Combine(_temporary.Path, "state", "document.json");
+
+        await AtomicJsonFile.WriteAsync(path, new SampleDocument(1, "private"), default);
+
+        const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        Assert.Equal(expected, File.GetUnixFileMode(path));
+    }
+
+    [Fact]
     public async Task ReadAsync_rejects_unmapped_json_members()
     {
         var path = _temporary.Write(

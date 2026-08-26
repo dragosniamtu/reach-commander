@@ -36,6 +36,8 @@ mkdir -p \
   "$INSTALL_ROOT/state" \
   "$INSTALL_ROOT/data/auth" \
   "$INSTALL_ROOT/data/keys" \
+  "$INSTALL_ROOT/data/file-operations/plans" \
+  "$INSTALL_ROOT/data/file-operations/operations" \
   "$SOURCE_PATH" \
   "$(dirname -- "$COMMAND_PATH")"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
@@ -73,11 +75,23 @@ printf '{"username":"command-test","passwordHash":"fixture","securityStamp":"fix
   >"$INSTALL_ROOT/data/auth/account.json"
 printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
 printf '<key id="command-fixture" />\n' >"$INSTALL_ROOT/data/keys/key-command.xml"
-chmod 0700 "$INSTALL_ROOT/data" "$INSTALL_ROOT/data/auth" "$INSTALL_ROOT/data/keys"
+printf '{"schemaVersion":1,"kind":"copy"}\n' \
+  >"$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json"
+printf '{"schemaVersion":1,"phase":"completed"}\n' \
+  >"$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+chmod 0700 \
+  "$INSTALL_ROOT/data" \
+  "$INSTALL_ROOT/data/auth" \
+  "$INSTALL_ROOT/data/keys" \
+  "$INSTALL_ROOT/data/file-operations" \
+  "$INSTALL_ROOT/data/file-operations/plans" \
+  "$INSTALL_ROOT/data/file-operations/operations"
 chmod 0600 \
   "$INSTALL_ROOT/data/auth/account.json" \
   "$INSTALL_ROOT/data/auth/bootstrap.json" \
-  "$INSTALL_ROOT/data/keys/key-command.xml"
+  "$INSTALL_ROOT/data/keys/key-command.xml" \
+  "$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
+  "$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
 if (( EUID == 0 )); then
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$INSTALL_ROOT/data"
 fi
@@ -214,6 +228,14 @@ assert_equal "0" "$last_status" "healthy doctor status"
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "doctor deployment mutation"
 pass "doctor reports a healthy deployment without mutating it"
 
+printf 'unexpected\n' >"$INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
+run_command doctor
+assert_equal "1" "$last_status" "doctor unexpected file-operation data status"
+[[ "$last_output" == *'[FAIL] Application data tree contains an unsafe entry'* ]] ||
+  fail "doctor unsafe file-operation tree failure missing"
+rm -f -- "$INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
+pass "doctor rejects file-operation state outside the exact allowlist"
+
 mv -- "$INSTALL_ROOT/data/auth/account.json" "$TEST_ROOT/account.json"
 run_command doctor
 assert_equal "0" "$last_status" "doctor setup-mode status"
@@ -236,10 +258,10 @@ pass "doctor rejects malformed account state without exposing contents"
 printf 'unexpected\n' >"$INSTALL_ROOT/data/unexpected.txt"
 run_command doctor
 assert_equal "1" "$last_status" "doctor unexpected authentication data status"
-[[ "$last_output" == *'[FAIL] Authentication data tree contains an unsafe entry'* ]] ||
-  fail "doctor unsafe authentication tree failure missing"
+[[ "$last_output" == *'[FAIL] Application data tree contains an unsafe entry'* ]] ||
+  fail "doctor unsafe application tree failure missing"
 rm -f -- "$INSTALL_ROOT/data/unexpected.txt"
-pass "doctor rejects unexpected authentication data entries"
+pass "doctor rejects unexpected application data entries"
 
 printf '%s\n' "$INSTALL_ROOT/backups/.reconfigure-transaction" >"$INSTALL_ROOT/state/install-transaction"
 run_command doctor
@@ -501,15 +523,15 @@ printf 'ancestor canary\n' >"$TEST_ROOT/ancestor-canary.txt"
 deployment_before="$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)"
 command_before="$(sha256sum "$COMMAND_PATH")"
 
-printf 'unexpected authentication data\n' >"$INSTALL_ROOT/data/unexpected.txt"
+printf 'unexpected application data\n' >"$INSTALL_ROOT/data/unexpected.txt"
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'retain\nuninstall ReachCommander' uninstall
-(( last_status != 0 )) || fail "unsafe authentication data must stop uninstall"
-[[ "$last_output" == *'authentication data tree contains an unsafe entry'* ]] ||
-  fail "unsafe authentication data failure missing"
-[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "unsafe authentication data invoked Docker"
+(( last_status != 0 )) || fail "unsafe application data must stop uninstall"
+[[ "$last_output" == *'application data tree contains an unsafe entry'* ]] ||
+  fail "unsafe application data failure missing"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "unsafe application data invoked Docker"
 rm -f -- "$INSTALL_ROOT/data/unexpected.txt"
-pass "uninstall rejects unexpected authentication data before stopping the service"
+pass "uninstall rejects unexpected application data before stopping the service"
 
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'\ncancel' uninstall
@@ -517,7 +539,7 @@ run_command_with_input $'\ncancel' uninstall
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "cancelled uninstall deployment"
 assert_equal "$command_before" "$(sha256sum "$COMMAND_PATH")" "cancelled uninstall command"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "cancelled uninstall invoked Docker"
-pass "uninstall defaults to retaining authentication data and requires the exact destructive confirmation"
+pass "uninstall defaults to retaining application data and requires the exact destructive confirmation"
 
 cp -- "$INSTALL_ROOT/state/source-mounts.json" "$TEST_ROOT/source-mounts.backup"
 sed -E \
@@ -561,25 +583,31 @@ backup_destination="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxde
 [[ -f "$backup_destination/deployment/config/sources.json" ]] || fail "backup source configuration missing"
 [[ -f "$backup_destination/deployment/state/source-mounts.json" ]] || fail "backup source metadata missing"
 [[ -f "$backup_destination/reachcommander-command" ]] || fail "backup management command missing"
-for authentication_file in \
+for application_file in \
   auth/account.json \
   auth/bootstrap.json \
-  keys/key-command.xml; do
-  [[ -f "$backup_destination/authentication-data/$authentication_file" ]] ||
-    fail "backup authentication file missing: $authentication_file"
+  keys/key-command.xml \
+  file-operations/plans/0123456789abcdef0123456789abcdef.json \
+  file-operations/operations/fedcba9876543210fedcba9876543210.json; do
+  [[ -f "$backup_destination/application-data/$application_file" ]] ||
+    fail "backup application file missing: $application_file"
   case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*)
       ;;
     *)
-      [[ "$(stat -c '%a' "$backup_destination/authentication-data/$authentication_file")" == '600' ]] ||
-        fail "backup authentication file mode is not 0600: $authentication_file"
+      [[ "$(stat -c '%a' "$backup_destination/application-data/$application_file")" == '600' ]] ||
+        fail "backup application file mode is not 0600: $application_file"
       ;;
   esac
 done
 cmp -s \
   "$TEST_ROOT/account-valid.json" \
-  "$backup_destination/authentication-data/auth/account.json" ||
+  "$backup_destination/application-data/auth/account.json" ||
   fail "backup account bytes changed"
+cmp -s \
+  "$backup_destination/application-data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
+  <(printf '{"schemaVersion":1,"kind":"copy"}\n') ||
+  fail "backup file-operation plan bytes changed"
 mapfile -d '' uninstall_args <"$FAKE_DOCKER_LOG"
 printf '%s\n' "${uninstall_args[@]}" | grep -q '^down$' || fail "successful uninstall did not call Compose down"
 if printf '%s\n' "${uninstall_args[@]}" | grep -q '^-v$'; then
@@ -597,7 +625,9 @@ mkdir -p \
   "$INSTALL_ROOT/lib" \
   "$INSTALL_ROOT/state" \
   "$INSTALL_ROOT/data/auth" \
-  "$INSTALL_ROOT/data/keys"
+  "$INSTALL_ROOT/data/keys" \
+  "$INSTALL_ROOT/data/file-operations/plans" \
+  "$INSTALL_ROOT/data/file-operations/operations"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
@@ -617,15 +647,33 @@ cp -- "$UPDATER_UNIT" "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH"
 cp -- "$TEST_ROOT/account-valid.json" "$INSTALL_ROOT/data/auth/account.json"
 printf '{"verifier":"fixture"}\n' >"$INSTALL_ROOT/data/auth/bootstrap.json"
 printf '<key id="command-fixture" />\n' >"$INSTALL_ROOT/data/keys/key-command.xml"
-chmod 0700 "$INSTALL_ROOT/data" "$INSTALL_ROOT/data/auth" "$INSTALL_ROOT/data/keys"
-chmod 0600 "$INSTALL_ROOT/data/auth/"*.json "$INSTALL_ROOT/data/keys/"*.xml
+printf '{"schemaVersion":1,"kind":"copy"}\n' \
+  >"$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json"
+printf '{"schemaVersion":1,"phase":"completed"}\n' \
+  >"$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+chmod 0700 \
+  "$INSTALL_ROOT/data" \
+  "$INSTALL_ROOT/data/auth" \
+  "$INSTALL_ROOT/data/keys" \
+  "$INSTALL_ROOT/data/file-operations" \
+  "$INSTALL_ROOT/data/file-operations/plans" \
+  "$INSTALL_ROOT/data/file-operations/operations"
+chmod 0600 \
+  "$INSTALL_ROOT/data/auth/"*.json \
+  "$INSTALL_ROOT/data/keys/"*.xml \
+  "$INSTALL_ROOT/data/file-operations/plans/"*.json \
+  "$INSTALL_ROOT/data/file-operations/operations/"*.json
 
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'retain\nuninstall ReachCommander' uninstall
 assert_equal "0" "$last_status" "retain uninstall status"
 [[ -d "$INSTALL_ROOT/data/auth" && -d "$INSTALL_ROOT/data/keys" ]] ||
   fail "retain uninstall removed authentication data directories"
+[[ -d "$INSTALL_ROOT/data/file-operations/plans" && -d "$INSTALL_ROOT/data/file-operations/operations" ]] ||
+  fail "retain uninstall removed file-operation data directories"
 [[ -f "$INSTALL_ROOT/data/auth/account.json" ]] || fail "retain uninstall removed account state"
+[[ -f "$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" ]] ||
+  fail "retain uninstall removed file-operation state"
 [[ ! -e "$COMMAND_PATH" ]] || fail "retain uninstall kept management command"
 unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
   ! -path "$INSTALL_ROOT/data" \
@@ -634,12 +682,17 @@ unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
   ! -path "$INSTALL_ROOT/data/auth/bootstrap.json" \
   ! -path "$INSTALL_ROOT/data/keys" \
   ! -path "$INSTALL_ROOT/data/keys/key-command.xml" \
+  ! -path "$INSTALL_ROOT/data/file-operations" \
+  ! -path "$INSTALL_ROOT/data/file-operations/plans" \
+  ! -path "$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
+  ! -path "$INSTALL_ROOT/data/file-operations/operations" \
+  ! -path "$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json" \
   -print -quit)"
 [[ -z "$unexpected_retained" ]] || fail "retain uninstall left generated deployment state"
-[[ "$last_output" == *"Authentication data retained at: $INSTALL_ROOT/data"* ]] ||
+[[ "$last_output" == *"Application data retained at: $INSTALL_ROOT/data"* ]] ||
   fail "retain uninstall did not print the retained data location"
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "retain uninstall source canary"
-pass "uninstall retain leaves only inactive authentication data and preserves sources"
+pass "uninstall retain leaves only inactive application data and preserves sources"
 
 assert_equal "source canary" "$(cat -- "$SOURCE_PATH/canary.txt")" "command source canary"
 printf '1..%d\n' "$tests_run"

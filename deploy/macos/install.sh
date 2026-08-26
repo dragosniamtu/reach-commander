@@ -619,7 +619,7 @@ rc_prepare_installer_root() {
   rc_require_real_directory "$RC_INSTALL_ROOT/excluded" 0555 || return 1
 }
 
-rc_validate_authentication_data_tree() {
+rc_validate_application_data_tree() {
   local data_root="$RC_INSTALL_ROOT/data"
   local data_device
   local installer_device
@@ -627,26 +627,29 @@ rc_validate_authentication_data_tree() {
   local relative
   local directory_device
   [[ -d "$data_root" && ! -L "$data_root" ]] ||
-    { rc_die 'authentication data root is unsafe'; return 1; }
+    { rc_die 'application data root is unsafe'; return 1; }
   installer_device="$(rc_device_id "$RC_INSTALL_ROOT")" || return 1
   data_device="$(rc_device_id "$data_root")" || return 1
   [[ "$data_device" == "$installer_device" ]] ||
-    { rc_die 'authentication data cannot be a separate mount'; return 1; }
+    { rc_die 'application data cannot be a separate mount'; return 1; }
   for entry in "$data_root/auth" "$data_root/keys"; do
     [[ -d "$entry" && ! -L "$entry" ]] ||
-      { rc_die 'authentication data directory is unsafe'; return 1; }
+      { rc_die 'application data directory is unsafe'; return 1; }
     directory_device="$(rc_device_id "$entry")" || return 1
     [[ "$directory_device" == "$data_device" ]] ||
-      { rc_die 'authentication data cannot be a separate mount'; return 1; }
+      { rc_die 'application data cannot be a separate mount'; return 1; }
   done
   while IFS= read -r -d '' entry; do
     relative="${entry#"$data_root"/}"
     [[ ! -L "$entry" ]] ||
-      { rc_die 'authentication data contains a symbolic link'; return 1; }
+      { rc_die 'application data contains a symbolic link'; return 1; }
     case "$relative" in
-      auth | keys)
+      auth | keys | file-operations | file-operations/plans | file-operations/operations)
         [[ -d "$entry" ]] ||
-          { rc_die 'authentication data directory has an invalid type'; return 1; }
+          { rc_die 'application data directory has an invalid type'; return 1; }
+        directory_device="$(rc_device_id "$entry")" || return 1
+        [[ "$directory_device" == "$data_device" ]] ||
+          { rc_die 'application data cannot be a separate mount'; return 1; }
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock)
         [[ -f "$entry" ]] ||
@@ -656,12 +659,45 @@ rc_validate_authentication_data_tree() {
         [[ -f "$entry" ]] ||
           { rc_die 'Data Protection key has an invalid type'; return 1; }
         ;;
+      file-operations/plans/* | file-operations/operations/*)
+        if [[ "$relative" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$entry" ]] ||
+            { rc_die 'file-operation state has an invalid type'; return 1; }
+        else
+          rc_die 'application data contains an unexpected entry'
+          return 1
+        fi
+        ;;
       *)
-        rc_die 'authentication data contains an unexpected entry'
+        rc_die 'application data contains an unexpected entry'
         return 1
         ;;
     esac
-  done < <(find "$data_root" -mindepth 1 -maxdepth 2 -print0)
+  done < <(find "$data_root" -mindepth 1 -maxdepth 3 -print0)
+  [[ ! -e "$data_root/file-operations" ]] ||
+    {
+      [[ -d "$data_root/file-operations" && ! -L "$data_root/file-operations" ]] &&
+        [[ -d "$data_root/file-operations/plans" && ! -L "$data_root/file-operations/plans" ]] &&
+        [[ -d "$data_root/file-operations/operations" && ! -L "$data_root/file-operations/operations" ]]
+    } || { rc_die 'application data directory is unsafe'; return 1; }
+}
+
+rc_prepare_application_data() {
+  local directory
+  local file
+  rc_validate_application_data_tree || return 1
+  for directory in data data/auth data/keys; do
+    chmod 0700 "$RC_INSTALL_ROOT/$directory" || return 1
+  done
+  for directory in data/file-operations data/file-operations/plans data/file-operations/operations; do
+    if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
+      chmod 0700 "$RC_INSTALL_ROOT/$directory" || return 1
+    fi
+  done
+  while IFS= read -r -d '' file; do
+    chmod 0600 "$file" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data" -mindepth 2 -type f -print0)
+  rc_validate_application_data_tree
 }
 
 rc_fetch_template() {
@@ -1039,7 +1075,7 @@ rc_update_existing() {
   printf '%s\n' "$old_digest" >"$RC_INSTALL_ROOT/state/previous-image"
   printf '%s\n' "$new_digest" >"$RC_INSTALL_ROOT/state/current-image"
   chmod 0600 "$RC_INSTALL_ROOT/state/previous-image" "$RC_INSTALL_ROOT/state/current-image"
-  rc_validate_authentication_data_tree ||
+  rc_validate_application_data_tree ||
     { rc_rollback_generated || true; return 1; }
   if rc_compose "$RC_INSTALL_ROOT" up -d reachcommander &&
     rc_wait_healthy "$RC_INSTALL_ROOT" 60; then
@@ -1105,7 +1141,7 @@ rc_reconfigure_existing() {
     RC_WORK_ROOT=''
     return 1
   fi
-  rc_validate_authentication_data_tree ||
+  rc_validate_application_data_tree ||
     { rc_rollback_generated || true; rc_cleanup_work_root "$RC_WORK_ROOT" || true; RC_WORK_ROOT=''; return 1; }
   if rc_compose "$RC_INSTALL_ROOT" up -d reachcommander &&
     rc_wait_healthy "$RC_INSTALL_ROOT" 60; then
@@ -1234,7 +1270,7 @@ main() {
   rc_init_paths || return 1
   rc_preflight || return 1
   rc_prepare_installer_root || return 1
-  rc_validate_authentication_data_tree || return 1
+  rc_prepare_application_data || return 1
   rc_acquire_lock || return 1
   trap 'rc_cleanup_work_root "$RC_WORK_ROOT" || true; rc_release_lock' EXIT
   trap rc_handle_signal HUP INT TERM
@@ -1267,7 +1303,7 @@ main() {
     fi
     return 1
   fi
-  rc_validate_authentication_data_tree ||
+  rc_validate_application_data_tree ||
     { rc_rollback_generated || true; return 1; }
   if ! rc_compose "$RC_INSTALL_ROOT" up -d reachcommander ||
     ! rc_wait_healthy "$RC_INSTALL_ROOT" 60; then

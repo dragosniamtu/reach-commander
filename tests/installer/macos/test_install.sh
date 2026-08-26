@@ -307,6 +307,45 @@ run_installer "$(single_source_input 1 8080)" "$TEST_ROOT/unexpected-auth.out"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "unexpected authentication entry allowed writes"
 pass "unexpected authentication data fails closed"
 
+set_install_root operation-data
+mkdir -p -- \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations"
+printf '{"schemaVersion":1,"kind":"copy"}\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json"
+printf '{"schemaVersion":1,"phase":"completed"}\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+chmod 0644 \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+run_installer "$(single_source_input 1 8080)" "$TEST_ROOT/operation-data.out"
+assert_equal 0 "$last_status" "legitimate file-operation data"
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    assert_equal \
+      600 \
+      "$(stat -f '%Lp' "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json")" \
+      "operation plan mode"
+    ;;
+esac
+pass "exact durable file-operation state is preserved and protected"
+
+set_install_root unexpected-operation
+mkdir -p -- \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations"
+printf 'unexpected\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
+run_installer "$(single_source_input 1 8080)" "$TEST_ROOT/unexpected-operation.out"
+[[ "$last_status" -ne 0 ]] || fail "unexpected file-operation entry must fail"
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "unexpected file-operation entry allowed writes"
+pass "file-operation data outside the exact allowlist fails closed"
+
 assert_symlink_layout_rejected root '.'
 assert_symlink_layout_rejected data data
 assert_symlink_layout_rejected auth data/auth

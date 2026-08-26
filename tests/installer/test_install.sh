@@ -331,11 +331,39 @@ printf '{"verifier":"fixture"}\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/bootstrap.json"
 printf '<key id="installer-fixture" />\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml"
+mkdir -p \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations"
+printf '{"schemaVersion":1,"kind":"copy"}\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json"
+printf '{"schemaVersion":1,"phase":"completed"}\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+chmod 0700 \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations"
 chmod 0600 \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/account.json" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/bootstrap.json" \
-  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml"
-authentication_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+application_data_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
+
+run_installer $'n\n' "$TEST_ROOT/decline-with-operation-data.out"
+assert_equal "0" "$last_status" "legitimate file-operation data validation status"
+assert_equal \
+  "$application_data_before" \
+  "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" \
+  "legitimate file-operation data preservation"
+pass "installer accepts exact durable file-operation state without mutating it"
+
+printf 'unexpected\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
+run_installer $'n\n' "$TEST_ROOT/unexpected-operation-data.out"
+(( last_status != 0 )) || fail "unexpected file-operation data entry must be rejected"
+rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
+pass "installer rejects file-operation state outside the exact allowlist"
 
 printf 'unexpected\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/unexpected.txt"
 run_installer $'n\n' "$TEST_ROOT/unexpected-auth-data.out"
@@ -363,6 +391,14 @@ assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")
 pass "existing deployment is never overwritten without confirmation"
 
 reconfigure_success_input=$'y\n'"$(source_prompt_input 'Renamed Media' 'RO' 'Renamed Movies' 'RW' 'renamed-media' 'renamed-movies')"
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    chmod 0644 \
+      "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
+      "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+    ;;
+esac
 run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-success.out"
 if (( last_status != 0 )); then
   cat -- "$TEST_ROOT/reconfigure-success.out" >&2
@@ -370,11 +406,24 @@ fi
 assert_equal "0" "$last_status" "successful reconfiguration status"
 grep -q 'Renamed Media' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json" || fail "reconfigured source name missing"
 assert_equal \
-  "$authentication_before" \
+  "$application_data_before" \
   "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" \
-  "reconfiguration authentication data"
+  "reconfiguration application data"
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    assert_equal \
+      "600" \
+      "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json")" \
+      "reconfigured operation plan mode"
+    assert_equal \
+      "600" \
+      "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json")" \
+      "reconfigured operation status mode"
+    ;;
+esac
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "reconfiguration source canary"
-pass "healthy reconfiguration replaces generated configuration"
+pass "healthy reconfiguration replaces generated configuration and preserves application data"
 
 deployment_before="$(active_deployment_fingerprint)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"

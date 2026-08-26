@@ -225,7 +225,7 @@ raise SystemExit(1)
 PY
 }
 
-validate_authentication_data_tree() {
+validate_application_data_tree() {
   local data_root="$RC_INSTALL_ROOT/data"
   local path
   local relative_path
@@ -234,7 +234,7 @@ validate_authentication_data_tree() {
     return 0
   fi
   if [[ ! -d "$data_root" || -L "$data_root" ]] || authentication_path_is_mount_point "$data_root"; then
-    rc_die 'authentication data root must be a real, unmounted directory'
+    rc_die 'application data root must be a real, unmounted directory'
     return 1
   fi
   while IFS= read -r -d '' path; do
@@ -244,20 +244,29 @@ validate_authentication_data_tree() {
     fi
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
-      auth | keys)
+      auth | keys | file-operations | file-operations/plans | file-operations/operations)
         [[ -d "$path" ]] || invalid=1
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
         [[ -f "$path" ]] || invalid=1
         ;;
       *)
-        invalid=1
+        if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$path" ]] || invalid=1
+        else
+          invalid=1
+        fi
         ;;
     esac
     (( invalid == 0 )) || break
   done < <(find "$data_root" -xdev -mindepth 1 -print0)
   if (( invalid != 0 )); then
-    rc_die 'authentication data tree contains an unsafe entry'
+    rc_die 'application data tree contains an unsafe entry'
+    return 1
+  fi
+  if [[ -e "$data_root/file-operations" ]] &&
+    [[ ! -d "$data_root/file-operations/plans" || ! -d "$data_root/file-operations/operations" ]]; then
+    rc_die 'application data tree contains an unsafe entry'
     return 1
   fi
 }
@@ -283,21 +292,30 @@ assert_generated_layout_safe() {
       return 1
     fi
   done
-  validate_authentication_data_tree
+  validate_application_data_tree
 }
 
-prepare_authentication_data() {
+prepare_application_data() {
   local directory
-  validate_authentication_data_tree || return 1
+  local file
+  validate_application_data_tree || return 1
   for directory in data data/auth data/keys; do
     if [[ -L "$RC_INSTALL_ROOT/$directory" ]]; then
-      rc_die 'authentication data directories must not be symlinks'
+      rc_die 'application data directories must not be symlinks'
       return 1
     fi
     mkdir -p -- "$RC_INSTALL_ROOT/$directory" || return 1
     chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
   done
-  validate_authentication_data_tree || return 1
+  for directory in data/file-operations data/file-operations/plans data/file-operations/operations; do
+    if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
+      chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
+    fi
+  done
+  while IFS= read -r -d '' file; do
+    chmod 0600 -- "$file" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 2 -type f -print0)
+  validate_application_data_tree || return 1
   if (( EUID == 0 )); then
     chown -R -- "$RUNTIME_UID:$RUNTIME_GID" "$RC_INSTALL_ROOT/data" || return 1
   fi
@@ -1009,7 +1027,7 @@ else
   INSTALL_TRANSACTION_ACTIVE=true
 fi
 
-if ! install_staged_deployment "$STAGE_ROOT" || ! prepare_authentication_data; then
+if ! install_staged_deployment "$STAGE_ROOT" || ! prepare_application_data; then
   if [[ "$HAD_EXISTING" == 'true' ]]; then
     if rollback_reconfiguration_transaction true; then
       rc_die 'reconfiguration write failed; the previous deployment was restored'

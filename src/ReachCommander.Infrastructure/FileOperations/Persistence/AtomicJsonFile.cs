@@ -24,13 +24,21 @@ internal static class AtomicJsonFile
         var temporaryPath = $"{destinationPath}.tmp-{Guid.NewGuid():N}";
         try
         {
-            await using (var stream = new FileStream(
-                             temporaryPath,
-                             FileMode.CreateNew,
-                             FileAccess.Write,
-                             FileShare.None,
-                             64 * 1024,
-                             FileOptions.Asynchronous | FileOptions.WriteThrough))
+            const UnixFileMode ownerFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            var streamOptions = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                BufferSize = 64 * 1024,
+                Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
+            };
+            if (!OperatingSystem.IsWindows())
+            {
+                streamOptions.UnixCreateMode = ownerFileMode;
+            }
+
+            await using (var stream = new FileStream(temporaryPath, streamOptions))
             {
                 await JsonSerializer.SerializeAsync(
                     stream,

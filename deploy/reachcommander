@@ -402,7 +402,7 @@ raise SystemExit(1)
 PY
 }
 
-authentication_data_tree_is_safe() {
+application_data_tree_is_safe() {
   local data_root="$RC_INSTALL_ROOT/data"
   local path
   local relative_path
@@ -415,19 +415,31 @@ authentication_data_tree_is_safe() {
     fi
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
-      auth | keys)
+      auth | keys | file-operations | file-operations/plans | file-operations/operations)
         [[ -d "$path" ]] || return 1
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
         [[ -f "$path" ]] || return 1
         ;;
       *)
-        return 1
+        if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$path" ]] || return 1
+        else
+          return 1
+        fi
         ;;
     esac
   done < <(find "$data_root" -xdev -mindepth 1 -print0)
   [[ -d "$data_root/auth" && ! -L "$data_root/auth" ]] &&
-    [[ -d "$data_root/keys" && ! -L "$data_root/keys" ]]
+    [[ -d "$data_root/keys" && ! -L "$data_root/keys" ]] &&
+    {
+      [[ ! -e "$data_root/file-operations" ]] ||
+        {
+          [[ -d "$data_root/file-operations" && ! -L "$data_root/file-operations" ]] &&
+            [[ -d "$data_root/file-operations/plans" && ! -L "$data_root/file-operations/plans" ]] &&
+            [[ -d "$data_root/file-operations/operations" && ! -L "$data_root/file-operations/operations" ]]
+        }
+    }
 }
 
 UNINSTALL_FILES=(
@@ -468,8 +480,8 @@ validate_uninstall_tree() {
     rc_die 'uninstall paths must not be symlinks'
     return 1
   fi
-  if ! authentication_data_tree_is_safe; then
-    rc_die 'authentication data tree contains an unsafe entry'
+  if ! application_data_tree_is_safe; then
+    rc_die 'application data tree contains an unsafe entry'
     return 1
   fi
   while IFS= read -r -d '' path; do
@@ -480,6 +492,7 @@ validate_uninstall_tree() {
     relative_path="${path#"$RC_INSTALL_ROOT"/}"
     case "$relative_path" in
       config|state|bin|lib|backups|data|data/auth|data/keys|\
+      data/file-operations|data/file-operations/plans|data/file-operations/operations|\
       .env|compose.yaml|compose.override.yaml|\
       config/sources.json|\
       state/source-mounts.json|\
@@ -503,8 +516,13 @@ validate_uninstall_tree() {
         [[ -f "$path" ]] || invalid=1
         ;;
       *)
-        invalid=1
-        break
+        if [[ "$relative_path" =~ ^data/file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]] &&
+          [[ -f "$path" ]]; then
+          :
+        else
+          invalid=1
+          break
+        fi
         ;;
     esac
   done < <(find "$RC_INSTALL_ROOT" -mindepth 1 -print0)
@@ -618,52 +636,54 @@ create_uninstall_backup() {
   fi
 }
 
-backup_authentication_file() {
+backup_application_file() {
   local relative_path="$1"
   local backup_destination="$2"
   local source="$RC_INSTALL_ROOT/data/$relative_path"
-  local destination="$backup_destination/authentication-data/$relative_path"
+  local destination="$backup_destination/application-data/$relative_path"
   [[ -f "$source" && ! -L "$source" ]] || return 0
   mkdir -p -- "$(dirname -- "$destination")"
   if ! install -m 0600 -- "$source" "$destination" ||
     ! sync -f -- "$destination" ||
     ! cmp -s -- "$source" "$destination"; then
-    rc_die 'authentication data backup verification failed'
+    rc_die 'application data backup verification failed'
     return 1
   fi
 }
 
-backup_authentication_data() {
+backup_application_data() {
   local backup_destination="$1"
-  local key_path
+  local data_path
   local relative_path
-  mkdir -p -- \
-    "$backup_destination/authentication-data/auth" \
-    "$backup_destination/authentication-data/keys"
-  chmod 0700 -- \
-    "$backup_destination/authentication-data" \
-    "$backup_destination/authentication-data/auth" \
-    "$backup_destination/authentication-data/keys"
-  for relative_path in auth/account.json auth/bootstrap.json auth/auth.lock; do
-    backup_authentication_file "$relative_path" "$backup_destination" || return 1
-  done
-  while IFS= read -r -d '' key_path; do
-    relative_path="keys/${key_path##*/}"
-    backup_authentication_file "$relative_path" "$backup_destination" || return 1
-  done < <(find "$RC_INSTALL_ROOT/data/keys" -xdev -mindepth 1 -maxdepth 1 -type f -name 'key-*.xml' -print0)
+  mkdir -p -- "$backup_destination/application-data"
+  chmod 0700 -- "$backup_destination/application-data"
+  while IFS= read -r -d '' data_path; do
+    relative_path="${data_path#"$RC_INSTALL_ROOT/data"/}"
+    mkdir -p -- "$backup_destination/application-data/$relative_path"
+    chmod 0700 -- "$backup_destination/application-data/$relative_path"
+  done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 1 -type d -print0)
+  while IFS= read -r -d '' data_path; do
+    relative_path="${data_path#"$RC_INSTALL_ROOT/data"/}"
+    backup_application_file "$relative_path" "$backup_destination" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 1 -type f -print0)
 }
 
-remove_authentication_data() {
-  local key_path
-  rm -f -- \
-    "$RC_INSTALL_ROOT/data/auth/account.json" \
-    "$RC_INSTALL_ROOT/data/auth/bootstrap.json" \
-    "$RC_INSTALL_ROOT/data/auth/auth.lock" || return 1
-  while IFS= read -r -d '' key_path; do
-    rm -f -- "$key_path" || return 1
-  done < <(find "$RC_INSTALL_ROOT/data/keys" -xdev -mindepth 1 -maxdepth 1 -type f -name 'key-*.xml' -print0)
-  rmdir -- "$RC_INSTALL_ROOT/data/auth" || return 1
-  rmdir -- "$RC_INSTALL_ROOT/data/keys" || return 1
+remove_application_data() {
+  local data_path
+  local relative_directory
+  while IFS= read -r -d '' data_path; do
+    rm -f -- "$data_path" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 1 -type f -print0)
+  for relative_directory in \
+    file-operations/plans \
+    file-operations/operations \
+    file-operations \
+    auth \
+    keys; do
+    if [[ -d "$RC_INSTALL_ROOT/data/$relative_directory" ]]; then
+      rmdir -- "$RC_INSTALL_ROOT/data/$relative_directory" || return 1
+    fi
+  done
   rmdir -- "$RC_INSTALL_ROOT/data"
 }
 
@@ -710,7 +730,7 @@ remove_updater_service_files() {
 command_uninstall() {
   local timestamp=''
   local backup_destination=''
-  local authentication_action
+  local application_action
   local confirmation
   local source_path
   if ! rc_acquire_lock; then
@@ -736,17 +756,17 @@ command_uninstall() {
   for source_path in "${UNINSTALL_SOURCE_PATHS[@]}"; do
     printf '  %s\n' "$source_path"
   done
-  printf 'Authentication data action (retain or backup) [retain]: ' >&2
-  if ! IFS= read -r authentication_action; then
-    rc_die 'uninstall cancelled; authentication data action was not provided'
+  printf 'Application data action (retain or backup) [retain]: ' >&2
+  if ! IFS= read -r application_action; then
+    rc_die 'uninstall cancelled; application data action was not provided'
     return 1
   fi
-  authentication_action="${authentication_action:-retain}"
-  if [[ "$authentication_action" != 'retain' && "$authentication_action" != 'backup' ]]; then
-    rc_die 'uninstall cancelled; authentication data action must be retain or backup'
+  application_action="${application_action:-retain}"
+  if [[ "$application_action" != 'retain' && "$application_action" != 'backup' ]]; then
+    rc_die 'uninstall cancelled; application data action must be retain or backup'
     return 1
   fi
-  if [[ "$authentication_action" == 'backup' ]]; then
+  if [[ "$application_action" == 'backup' ]]; then
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
     if [[ ! "$timestamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
       rc_die 'UTC backup timestamp is invalid'
@@ -755,7 +775,7 @@ command_uninstall() {
     backup_destination="$RC_BACKUP_ROOT/$timestamp"
     printf '  verified backup destination: %s\n' "$backup_destination"
   else
-    printf '  authentication data retained at: %s\n' "$RC_INSTALL_ROOT/data"
+    printf '  application data retained at: %s\n' "$RC_INSTALL_ROOT/data"
   fi
   printf "Type 'uninstall ReachCommander' to continue: " >&2
   if ! IFS= read -r confirmation || [[ "$confirmation" != 'uninstall ReachCommander' ]]; then
@@ -771,9 +791,9 @@ command_uninstall() {
     restart_uninstall_service || true
     return 1
   fi
-  if [[ "$authentication_action" == 'backup' ]]; then
+  if [[ "$application_action" == 'backup' ]]; then
     if ! create_uninstall_backup "$backup_destination" ||
-      ! backup_authentication_data "$backup_destination"; then
+      ! backup_application_data "$backup_destination"; then
       restart_uninstall_service || true
       return 1
     fi
@@ -791,34 +811,34 @@ command_uninstall() {
     rc_die 'updater service files could not be removed'
     return 1
   fi
-  if [[ "$authentication_action" == 'backup' ]] && ! remove_authentication_data; then
-    rc_die "authentication data removal was incomplete; verified backup is at $backup_destination"
+  if [[ "$application_action" == 'backup' ]] && ! remove_application_data; then
+    rc_die "application data removal was incomplete; verified backup is at $backup_destination"
     return 1
   fi
   if ! remove_generated_deployment; then
-    if [[ "$authentication_action" == 'backup' ]]; then
+    if [[ "$application_action" == 'backup' ]]; then
       rc_die "generated deployment removal was incomplete; verified backup is at $backup_destination"
     else
-      rc_die "generated deployment removal was incomplete; authentication data remains at $RC_INSTALL_ROOT/data"
+      rc_die "generated deployment removal was incomplete; application data remains at $RC_INSTALL_ROOT/data"
     fi
     return 1
   fi
-  if [[ "$authentication_action" == 'backup' ]] && ! rmdir -- "$RC_INSTALL_ROOT"; then
+  if [[ "$application_action" == 'backup' ]] && ! rmdir -- "$RC_INSTALL_ROOT"; then
     rc_die "install root removal was incomplete; verified backup is at $backup_destination"
     return 1
   fi
   if ! rm -f -- "$RC_COMMAND_PATH"; then
-    if [[ "$authentication_action" == 'backup' ]]; then
+    if [[ "$application_action" == 'backup' ]]; then
       rc_die "management command removal failed; verified backup is at $backup_destination"
     else
-      rc_die "management command removal failed; authentication data remains at $RC_INSTALL_ROOT/data"
+      rc_die "management command removal failed; application data remains at $RC_INSTALL_ROOT/data"
     fi
     return 1
   fi
-  if [[ "$authentication_action" == 'backup' ]]; then
+  if [[ "$application_action" == 'backup' ]]; then
     printf 'ReachCommander was uninstalled. Verified backup: %s\n' "$backup_destination"
   else
-    printf 'ReachCommander was uninstalled. Authentication data retained at: %s\n' "$RC_INSTALL_ROOT/data"
+    printf 'ReachCommander was uninstalled. Application data retained at: %s\n' "$RC_INSTALL_ROOT/data"
   fi
 }
 
@@ -918,36 +938,45 @@ doctor_sources() {
   rm -f -- "$source_output"
 }
 
-doctor_authentication_data() {
+doctor_application_data() {
   local runtime_uid="$1"
   local runtime_gid="$2"
   local path
   local owner
   local mode
   local relative_path
-  if ! authentication_data_tree_is_safe; then
-    doctor_fail 'Authentication data tree contains an unsafe entry'
+  local -a data_directories=(data data/auth data/keys)
+  if ! application_data_tree_is_safe; then
+    doctor_fail 'Application data tree contains an unsafe entry'
     return
   fi
-  doctor_pass 'Authentication data tree is structurally safe'
+  doctor_pass 'Application data tree is structurally safe'
 
-  for relative_path in data data/auth data/keys; do
+  if [[ -d "$RC_INSTALL_ROOT/data/file-operations" ]]; then
+    data_directories+=(
+      data/file-operations
+      data/file-operations/plans
+      data/file-operations/operations
+    )
+  fi
+
+  for relative_path in "${data_directories[@]}"; do
     path="$RC_INSTALL_ROOT/$relative_path"
     owner="$(stat -c '%u:%g' -- "$path" 2>/dev/null || true)"
     mode="$(stat -c '%a' -- "$path" 2>/dev/null || true)"
     if [[ "$owner" == "$runtime_uid:$runtime_gid" && "$mode" == '700' ]]; then
-      doctor_pass 'Authentication data directory ownership and mode are correct'
+      doctor_pass 'Application data directory ownership and mode are correct'
     else
-      doctor_fail 'Authentication data directory ownership or mode is incorrect'
+      doctor_fail 'Application data directory ownership or mode is incorrect'
     fi
     if command -v setpriv >/dev/null 2>&1 && setpriv \
       --reuid="$runtime_uid" \
       --regid="$runtime_gid" \
       --clear-groups \
       -- sh -c "test -r \"\$1\" && test -w \"\$1\" && test -x \"\$1\"" reachcommander-doctor "$path"; then
-      doctor_pass 'Authentication data directory is accessible to the runtime identity'
+      doctor_pass 'Application data directory is accessible to the runtime identity'
     else
-      doctor_fail 'Authentication data directory is not accessible to the runtime identity'
+      doctor_fail 'Application data directory is not accessible to the runtime identity'
     fi
   done
 
@@ -955,9 +984,9 @@ doctor_authentication_data() {
     owner="$(stat -c '%u:%g' -- "$path" 2>/dev/null || true)"
     mode="$(stat -c '%a' -- "$path" 2>/dev/null || true)"
     if [[ "$owner" == "$runtime_uid:$runtime_gid" && "$mode" == '600' ]]; then
-      doctor_pass 'Authentication data file ownership and mode are correct'
+      doctor_pass 'Application data file ownership and mode are correct'
     else
-      doctor_fail 'Authentication data file ownership or mode is incorrect'
+      doctor_fail 'Application data file ownership or mode is incorrect'
     fi
   done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 2 -type f -print0)
 
@@ -1060,7 +1089,7 @@ command_doctor() {
     [[ "$runtime_gid" =~ ^[1-9][0-9]*$ ]]; then
     doctor_pass 'Runtime UID and GID are non-root'
     doctor_sources "$runtime_uid" "$runtime_gid"
-    doctor_authentication_data "$runtime_uid" "$runtime_gid"
+    doctor_application_data "$runtime_uid" "$runtime_gid"
   else
     doctor_fail 'Runtime UID or GID is invalid'
   fi

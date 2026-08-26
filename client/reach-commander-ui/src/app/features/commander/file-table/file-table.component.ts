@@ -51,4 +51,9 @@ export class FileTableComponent {
   rowExplanation(row: FileTableRow): string | null {
     return fileTableRowExplanation(this.panel(), row);
   }
+
+  rowTooltip(row: FileTableRow): string {
+    const explanation = this.rowExplanation(row);
+    return explanation ? `${row.name}\n${explanation}` : row.name;
+  }
 }

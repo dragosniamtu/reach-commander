@@ -18,6 +18,13 @@ describe('FileTableComponent', () => {
 
     expect(nameHeader.closest('th')?.getAttribute('aria-sort')).toBe('ascending');
     expect(selected.textContent).toContain('movie.mkv');
+
+    const name = selected.querySelector('.file-name') as HTMLElement;
+    const nameContent = selected.querySelector('.name-content');
+
+    expect(nameContent).not.toBeNull();
+    expect(name.textContent?.trim()).toBe('movie.mkv');
+    expect(name.title).toBe('movie.mkv');
   });
 
   it('emits pointer selection with modifier intent', () => {
@@ -43,6 +50,14 @@ describe('FileTableComponent', () => {
     expect(fixture.nativeElement.querySelector('.type-icon.archive')).toBeTruthy();
     expect(fixture.nativeElement.querySelector('.type-icon.volume')).toBeTruthy();
     expect(fixture.nativeElement.textContent).toContain('Open the primary volume instead');
+
+    const volumeName = fixture.nativeElement.querySelector(
+      'tr[data-path="/photos.7z.002"] .file-name',
+    ) as HTMLElement;
+
+    expect(volumeName.title).toBe(
+      'photos.7z.002\nArchive volume part. Open the primary volume instead.',
+    );
 
     fixture.componentRef.setInput('panel', panel({
       tabs: [{

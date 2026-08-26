@@ -15,15 +15,15 @@ tbody tr:hover { background: var(--row-hover); }
 tbody tr.selected { background: var(--selection); color: var(--selection-text); }
 tbody tr.cursor { outline: 1px solid var(--accent); outline-offset: -1px; }
 tbody tr.cursor td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-td { overflow: hidden; padding: 0 8px; text-overflow: ellipsis; white-space: nowrap; }
-.name-cell { display: flex; align-items: center; gap: 7px; }
+td { overflow: hidden; padding: 0 8px; vertical-align: middle; text-overflow: ellipsis; white-space: nowrap; }
+.name-content { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
 .type-icon { width: 15px; flex: 0 0 15px; color: var(--file); text-align: center; }
 .type-icon.folder { color: var(--folder); }
 .type-icon.archive { color: var(--accent-text); }
 .type-icon.volume { color: var(--warning); }
 .parent .type-icon { color: var(--accent); }
-.file-name { overflow: hidden; text-overflow: ellipsis; }
-.link-mark { color: var(--accent-soft); }
+.file-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-mark { flex: 0 0 auto; color: var(--accent-soft); }
 .size-cell { text-align: right; font-variant-numeric: tabular-nums; }
 .muted { color: var(--text-3); }
 .selected .muted { color: inherit; opacity: .84; }

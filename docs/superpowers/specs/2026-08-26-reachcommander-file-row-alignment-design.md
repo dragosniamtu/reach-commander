@@ -1,6 +1,6 @@
 # ReachCommander File Row Alignment and Name Overflow Design
 
-**Date:** 2026-08-26  
+**Date:** 2026-08-26
 **Status:** Approved for implementation
 
 ## Objective

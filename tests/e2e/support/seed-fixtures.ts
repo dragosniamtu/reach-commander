@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { e2eAuthStatePath, e2eSetupCodePath } from './authentication';
+import { longFileNameFixture } from './fixture-names';
 
 interface SourceTemplate {
   id: string;
@@ -206,6 +207,10 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   writeFileSync(join(downloadsRoot, 'File Ops', 'Permanent Source', 'doomed.txt'), 'permanent payload\n');
   writeFileSync(join(mediaRoot, 'File Ops', 'Copy Target', 'alpha.bin'), 'existing alpha payload\n');
   writeFileSync(join(mediaRoot, 'Movies', 'Gladiator II.mkv'), 'deterministic fixture\n');
+  writeFileSync(
+    join(mediaRoot, 'Movies', longFileNameFixture),
+    'long filename layout fixture\n',
+  );
   writeFileSync(join(mediaRoot, 'Conflicts', 'root.txt'), 'conflict fixture\n');
   writeFileSync(join(archiveRoot, 'locked.txt'), 'read-only fixture\n');
 

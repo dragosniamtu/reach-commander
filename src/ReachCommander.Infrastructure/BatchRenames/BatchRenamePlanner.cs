@@ -53,17 +53,50 @@ internal sealed class BatchRenamePlanner
         _maximumEntries = maximumEntries;
     }
 
-    public async ValueTask<BatchRenamePreview> PreviewAsync(
+    public ValueTask<BatchRenamePreview> PreviewAsync(
         BatchRenamePreviewCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        ValidateBatchSize(command.EntryPaths);
-        var directory = await ResolveWritableDirectoryAsync(
+        return PreviewCoreAsync(
             command.SourceId,
             command.DirectoryPath,
+            command.EntryPaths,
+            (entry, index) => _ruleEvaluator.Evaluate(
+                entry.Name,
+                entry.Extension,
+                entry.Type,
+                command.Rules,
+                index).CompleteName,
             cancellationToken);
-        var entries = await ResolveSelectedEntriesAsync(directory, command.EntryPaths, cancellationToken);
+    }
+
+    public ValueTask<BatchRenamePreview> PreviewExactAsync(
+        ExactRenamePreviewCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        return PreviewCoreAsync(
+            command.SourceId,
+            command.DirectoryPath,
+            [command.EntryPath],
+            (_, _) => command.NewName,
+            cancellationToken);
+    }
+
+    private async ValueTask<BatchRenamePreview> PreviewCoreAsync(
+        string sourceId,
+        string directoryPath,
+        IReadOnlyList<string> entryPaths,
+        Func<BatchRenameEntrySnapshot, int, string> newName,
+        CancellationToken cancellationToken)
+    {
+        ValidateBatchSize(entryPaths);
+        var directory = await ResolveWritableDirectoryAsync(
+            sourceId,
+            directoryPath,
+            cancellationToken);
+        var entries = await ResolveSelectedEntriesAsync(directory, entryPaths, cancellationToken);
         var directoryChildren = _fileSystem.ListChildren(
             directory.LogicalPath,
             directory.PhysicalPath);
@@ -73,13 +106,8 @@ internal sealed class BatchRenamePlanner
         {
             cancellationToken.ThrowIfCancellationRequested();
             var entry = entries[index];
-            var evaluated = _ruleEvaluator.Evaluate(
-                entry.Name,
-                entry.Extension,
-                entry.Type,
-                command.Rules,
-                index);
-            var validation = _nameValidator.Validate(evaluated.CompleteName);
+            var completeName = newName(entry, index);
+            var validation = _nameValidator.Validate(completeName);
             var status = BatchRenamePreviewStatus.Ready;
             string? message = null;
 
@@ -93,7 +121,7 @@ internal sealed class BatchRenamePlanner
                 status = BatchRenamePreviewStatus.Invalid;
                 message = validation.Message;
             }
-            else if (entry.Name.Equals(evaluated.CompleteName, StringComparison.Ordinal))
+            else if (entry.Name.Equals(completeName, StringComparison.Ordinal))
             {
                 status = BatchRenamePreviewStatus.Unchanged;
             }
@@ -104,13 +132,13 @@ internal sealed class BatchRenamePlanner
                 destination = await _pathSecurity.ResolveChildAsync(
                     directory.Source.Id,
                     directory.LogicalPath,
-                    evaluated.CompleteName,
+                    completeName,
                     cancellationToken);
             }
 
             candidates.Add(new RenameCandidate(
                 entry,
-                evaluated.CompleteName,
+                completeName,
                 destination,
                 status,
                 message));

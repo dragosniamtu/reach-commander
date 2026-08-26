@@ -17,6 +17,12 @@ public sealed record BatchRenamePreviewCommand(
     IReadOnlyList<string> EntryPaths,
     BatchRenameRules Rules);
 
+public sealed record ExactRenamePreviewCommand(
+    string SourceId,
+    string DirectoryPath,
+    string EntryPath,
+    string NewName);
+
 public sealed record BatchRenamePreviewRow(
     string SourcePath,
     string OldName,

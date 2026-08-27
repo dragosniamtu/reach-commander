@@ -265,7 +265,9 @@ The installer also deploys the root-owned `reachcommander-updater.service`. Reac
 
 The application is never given Docker control. Its container mounts the restricted Unix socket directory `/run/reachcommander-updater` read-only and never mounts `/var/run/docker.sock`. Browser and API requests contain no channel, image, digest, executable, arguments, or target version. The root helper owns discovery, backup, Compose activation, health validation, rollback, and its durable result journal.
 
-Existing installations must run the new checksum-verified installer once, using the same inspect, `SHA256SUMS`, and `sha256sum --check --strict SHA256SUMS` process described above. Rerunning it preserves the configured sources, authentication record, Data Protection keys, and pinned image while installing the helper, systemd unit, and Compose socket override. Until that one-time migration is complete, the UI reports system updates as unavailable. Updater helper upgrades are host-owned and therefore still require a future installer refresh; updating the application image does not replace the root helper.
+The protocol-v2 helper in the current installer bundle reports fixed logical stages for downloading the verified image, installing deployment state, restarting ReachCommander, checking health, and recovering the previous version. ReachCommander renders those confirmed boundaries as an ordered checklist. A protocol-v1 helper remains compatible and performs the same protected update, but the browser shows one **Applying trusted update** row because finer stages are unavailable. That generic row does not mean the transaction is stalled. Raw host logs, Docker output, physical paths, and commands are deliberately not exposed through the API or browser.
+
+Existing installations must run the new checksum-verified installer once, using the same inspect, `SHA256SUMS`, and `sha256sum --check --strict SHA256SUMS` process described above. Rerunning it upgrades the root-owned helper, systemd unit, and Compose socket override without moving or replacing the configured sources, authentication record, Data Protection keys, durable operation state, or mounted source contents. Until the first helper installation is complete, the UI reports system updates as unavailable. Future root-helper changes still require another verified installer refresh; updating the application image cannot replace the host helper.
 
 Inspect the boundary and its journal without changing state:
 
@@ -276,7 +278,7 @@ sudo reachcommander status
 sudo reachcommander doctor
 ```
 
-During Apply, ReachCommander temporarily drains new mutations, waits for active work to finish, and restarts. Keep the browser tab open: it reconnects automatically, activates the matching PWA shell, and reloads once. If the candidate fails its health check, the helper restores the prior digest and reports the rollback. Preserve `/opt/reachcommander/state/system-update.json` and the normal update backups when investigating a failure.
+During Apply, ReachCommander temporarily drains new mutations, waits for active work to finish, and restarts. Keep the browser tab open: it reconnects automatically, activates the matching PWA shell, and reloads once. If the candidate fails its health check, the helper restores the prior digest and reports the rollback. Preserve `/opt/reachcommander/state/system-update.json` and the normal update backups when investigating a failure. If the screen reaches **Update requires attention**, run `sudo reachcommander doctor` before retrying; use the root-owned service journal for operational detail rather than expecting raw logs in the browser.
 
 The in-app control is supported only for Ubuntu installer-managed deployments. It remains safely disabled for Windows development, macOS Docker Desktop, and manual container deployments because those environments do not have this restricted systemd boundary.
 

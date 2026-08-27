@@ -32,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 712 cross-platform .NET tests, 346 Angular tests, PWA contract checks, and 40 real-browser checks |
+| Quality | 738 cross-platform .NET tests, 371 Angular tests, PWA contract checks, and 47 real-browser checks |
 
 ## What ReachCommander includes
 
@@ -330,7 +330,9 @@ Ubuntu installer-managed deployments also expose a system-update control immedia
 
 The application container receives only the restricted Unix socket directory at `/run/reachcommander-updater`. It never mounts `/var/run/docker.sock`. The helper resolves `stable` to the newest non-prerelease GitHub release and its fixed GHCR digest, or resolves `edge` to its current GHCR digest and revision. Exact version pins remain pinned. A successful update health-checks the matching backend and PWA shell; an unhealthy candidate is rolled back.
 
-Existing Ubuntu installations must run the new checksum-verified installer once to install the helper, systemd unit, and socket mount. System updates are intentionally unavailable for Windows development, macOS Docker Desktop, and manual container deployments. See the [Ubuntu installation guide](docs/deployment/ubuntu.md#automatic-system-update-control) for migration and recovery commands.
+The protocol-v2 Ubuntu helper reports the trusted download, install, restart, health-check, and rollback boundaries shown in the blocking update checklist. An older protocol-v1 helper remains safe and functional, but the screen shows one **Applying trusted update** row because the browser cannot confirm finer stages. Generic progress does not mean the transaction is stalled. Raw Docker output, host paths, commands, and updater logs are intentionally never displayed in the browser.
+
+Existing Ubuntu installations must rerun a checksum-verified installer bundle to install or refresh the root-owned helper, systemd unit, and socket mount. This preserves authentication data, Data Protection keys, source configuration, durable operation state, and every mounted source file. Updating the application image cannot replace the host helper. If an update ends in the administrator-attention state, run `sudo reachcommander doctor` before retrying. System updates are intentionally unavailable for Windows development, macOS Docker Desktop, and manual container deployments. See the [Ubuntu installation guide](docs/deployment/ubuntu.md#automatic-system-update-control) for migration and recovery commands.
 
 ## Active-panel toolbar and search
 

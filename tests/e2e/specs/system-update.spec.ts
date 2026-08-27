@@ -114,6 +114,181 @@ test("system update enables only a discovered update and recovers after restart"
   expect(routes.applyBodies).toEqual([null]);
 });
 
+test("system update advances through host-confirmed stages and activates the app", async ({
+  page,
+}) => {
+  const routes = await routeSystemUpdates(page, available());
+  routes.applyWith(
+    systemUpdateFixture({
+      targetVersion: "v1.4.0",
+      phase: "applying",
+      progressStage: "downloading",
+      updateAvailable: true,
+      reasonCode: "update_applying",
+      operationId: "operation-detailed",
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+  await page.goto("/");
+  await page.getByTestId("system-update-trigger").click();
+  await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+  const overlay = page.getByRole("alertdialog");
+  await expect(overlay.locator('[data-step-state="active"]')).toContainText(
+    "Downloading verified image",
+  );
+
+  for (const [progressStage, label, completedLabel] of [
+    ["installing", "Installing update", "Downloading verified image"],
+    ["restarting", "Restarting ReachCommander", "Installing update"],
+    ["healthChecking", "Checking system health", "Restarting ReachCommander"],
+  ] as const) {
+    routes.publish(
+      systemUpdateFixture({
+        targetVersion: "v1.4.0",
+        phase: "applying",
+        progressStage,
+        updateAvailable: true,
+        reasonCode: "update_applying",
+        operationId: "operation-detailed",
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    await expect(overlay.locator('[data-step-state="active"]')).toContainText(
+      label,
+      {
+        timeout: 15_000,
+      },
+    );
+    await expect(
+      overlay.locator('[data-step-state="complete"]', {
+        hasText: completedLabel,
+      }),
+    ).toBeVisible();
+  }
+
+  routes.publish(
+    systemUpdateFixture({
+      currentVersion: "v1.4.0",
+      targetVersion: "v1.4.0",
+      phase: "completed",
+      progressStage: "healthChecking",
+      reasonCode: "update_completed",
+      operationId: "operation-detailed",
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+  await expect(overlay.locator('[data-step-state="active"]')).toContainText(
+    "Activating updated application",
+    { timeout: 15_000 },
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        sessionStorage.getItem("reachcommander.systemUpdateRefreshed"),
+      ),
+    )
+    .toBe("operation-detailed");
+  expect(routes.applyBodies).toEqual([null]);
+});
+
+test("system update shows automatic recovery and the restored result", async ({
+  page,
+}) => {
+  const routes = await routeSystemUpdates(page, available());
+  routes.applyWith(
+    systemUpdateFixture({
+      targetVersion: "v1.4.0",
+      phase: "applying",
+      progressStage: "restoring",
+      updateAvailable: true,
+      reasonCode: "update_applying",
+      operationId: "operation-recovery",
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+  await page.goto("/");
+  await page.getByTestId("system-update-trigger").click();
+  await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+  const overlay = page.getByRole("alertdialog");
+  await expect(overlay).toContainText("Recovering previous version");
+  await expect(
+    overlay.getByRole("list", { name: "Recovery progress" }),
+  ).toBeVisible();
+  await expect(overlay.locator('[data-step-state="active"]')).toContainText(
+    "Restoring previous version",
+  );
+
+  for (const [progressStage, label] of [
+    ["restartingPrevious", "Restarting previous version"],
+    ["verifyingRecovery", "Verifying recovery"],
+  ] as const) {
+    routes.publish(
+      systemUpdateFixture({
+        targetVersion: "v1.4.0",
+        phase: "applying",
+        progressStage,
+        updateAvailable: true,
+        reasonCode: "update_applying",
+        operationId: "operation-recovery",
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    await expect(overlay.locator('[data-step-state="active"]')).toContainText(
+      label,
+      {
+        timeout: 15_000,
+      },
+    );
+  }
+
+  routes.publish(
+    systemUpdateFixture({
+      targetVersion: "v1.4.0",
+      phase: "rolledBack",
+      progressStage: "verifyingRecovery",
+      reasonCode: "candidate_rolled_back",
+      operationId: "operation-recovery",
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+  await expect(
+    page.getByRole("alertdialog", { name: "Previous version restored" }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    overlay
+      .getByRole("list", { name: "Recovery progress" })
+      .locator('[data-step-state="complete"]'),
+  ).toHaveCount(3);
+});
+
+test("system update uses generic progress with a protocol-v1 helper", async ({
+  page,
+}) => {
+  const routes = await routeSystemUpdates(page, available());
+  routes.applyWith(
+    systemUpdateFixture({
+      phase: "applying",
+      operationId: "operation-v1",
+      progressStage: null,
+      reasonCode: "update_applying",
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+
+  await page.goto("/");
+  await page.getByTestId("system-update-trigger").click();
+  await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+  await expect(
+    page
+      .getByRole("list", { name: "Update progress" })
+      .getByText("Applying trusted update"),
+  ).toBeVisible();
+  await expect(page.getByText("Downloading verified image")).toHaveCount(0);
+});
+
 test("system update confirmation is immutable, cancellable, and returns focus", async ({
   page,
 }) => {
@@ -227,11 +402,22 @@ for (const terminal of [
 }
 
 for (const norton of [false, true]) {
-  test(`system update stays usable in ${norton ? "Norton" : "default"} theme at compact width`, async ({
+  test(`system update overlay stays usable in ${norton ? "Norton" : "default"} theme at compact width`, async ({
     page,
   }) => {
-    await routeSystemUpdates(page, available());
-    await page.setViewportSize({ width: 680, height: 800 });
+    const routes = await routeSystemUpdates(page, available());
+    routes.applyWith(
+      systemUpdateFixture({
+        targetVersion: "v1.4.0",
+        phase: "applying",
+        progressStage: "healthChecking",
+        updateAvailable: true,
+        reasonCode: "update_applying",
+        operationId: "operation-compact",
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    await page.setViewportSize({ width: 360, height: 560 });
     await page.goto("/");
     if (norton) {
       await page.getByTestId("norton-theme-toggle").click();
@@ -244,14 +430,29 @@ for (const norton of [false, true]) {
     const trigger = page.getByTestId("system-update-trigger");
     await expect(trigger).toBeVisible();
     await trigger.click();
+    await page.getByRole("button", { name: "Update ReachCommander" }).click();
+    const overlay = page.getByRole("alertdialog");
+    await expect(overlay).toBeVisible();
     await expect(
-      page.getByRole("dialog", { name: "Update ReachCommander?" }),
+      overlay.getByRole("list", { name: "Update progress" }),
     ).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth - innerWidth,
       ),
     ).toBeLessThanOrEqual(1);
+    const scrolling = await overlay.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        overflowY: style.overflowY,
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      };
+    });
+    expect(scrolling.overflowY).toBe("auto");
+    expect(scrolling.scrollHeight).toBeGreaterThanOrEqual(
+      scrolling.clientHeight,
+    );
   });
 }
 
@@ -271,6 +472,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
         systemUpdateFixture({
           targetVersion: "v1.4.0",
           phase: "applying",
+          progressStage: "installing",
           reasonCode: "update_applying",
           operationId: "operation-motion",
         }),
@@ -283,15 +485,20 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
         name: "Updating ReachCommander",
       });
       await expect(overlay).toBeVisible();
-      const styles = await overlay.locator(".spinner > i").evaluateAll((rings) =>
-        rings.map((ring) => {
-          const style = getComputedStyle(ring);
-          return {
-            animationName: style.animationName,
-            animationDuration: style.animationDuration,
-          };
-        }),
-      );
+      const styles = await overlay
+        .locator(".spinner > i")
+        .evaluateAll((rings) =>
+          rings.map((ring) => {
+            const style = getComputedStyle(ring);
+            return {
+              animationName: style.animationName,
+              animationDuration: style.animationDuration,
+            };
+          }),
+        );
+      const stepAnimation = await overlay
+        .locator('[data-step-state="active"] .step-indicator')
+        .evaluate((indicator) => getComputedStyle(indicator).animationName);
 
       expect(styles).toHaveLength(2);
       if (reducedMotion === "reduce") {
@@ -299,6 +506,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
           "none",
           "none",
         ]);
+        expect(stepAnimation).toBe("none");
       } else {
         expect(styles[0].animationName).toContain("update-spin-clockwise");
         expect(styles[1].animationName).toContain(
@@ -308,6 +516,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
           "1.15s",
           "0.9s",
         ]);
+        expect(stepAnimation).toContain("update-step-pulse");
       }
       await expect(overlay).toContainText(
         "The trusted update is being applied and health checked",

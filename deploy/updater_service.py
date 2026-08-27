@@ -205,16 +205,41 @@ def _terminate_process_tree(
         "started",
         progress_stage,
     )
-    try:
-        if os.name != "nt":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
-    except (OSError, ProcessLookupError):
+    if os.name != "nt":
         try:
-            process.terminate()
+            os.killpg(process.pid, signal.SIGTERM)
         except OSError:
-            pass
+            try:
+                process.terminate()
+            except OSError:
+                return
+        else:
+            if _wait_for_process_group_exit(
+                process,
+                TERMINATION_GRACE_SECONDS,
+            ):
+                return
+
+            _emit_trace(
+                trace_callback,
+                "terminationForced",
+                "started",
+                progress_stage,
+            )
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+            _wait_for_process_group_exit(process, TERMINATION_GRACE_SECONDS)
+            return
+
+    try:
+        process.terminate()
+    except OSError:
+        pass
 
     try:
         process.wait(timeout=TERMINATION_GRACE_SECONDS)
@@ -244,6 +269,33 @@ def _terminate_process_tree(
     except subprocess.TimeoutExpired:
         # The service must return even if the operating system cannot reap the wrapper.
         pass
+
+
+def _process_group_exists(process_group_id: int) -> bool:
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _wait_for_process_group_exit(
+    process: subprocess.Popen[str],
+    timeout: float,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        process.poll()
+        if not _process_group_exists(process.pid):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
 
 
 class SubprocessCommandRunner:
@@ -277,6 +329,23 @@ class SubprocessCommandRunner:
         progress_stage: str | None = None
         last_activity_at: float | None = None
         output_lock = threading.Lock()
+        callback_lock = threading.Lock()
+        callbacks_active = True
+
+        def publish_progress(stage: str) -> None:
+            with callback_lock:
+                if callbacks_active and progress_callback is not None:
+                    progress_callback(stage)
+
+        def publish_trace(code: str, outcome: str, stage: str | None) -> None:
+            with callback_lock:
+                if callbacks_active:
+                    _emit_trace(trace_callback, code, outcome, stage)
+
+        def disable_callbacks() -> None:
+            nonlocal callbacks_active
+            with callback_lock:
+                callbacks_active = False
 
         def append_output(line: str) -> None:
             nonlocal output_length
@@ -301,8 +370,7 @@ class SubprocessCommandRunner:
                     stage = marker[len(PROGRESS_MARKER_PREFIX) :]
                     if stage in PROGRESS_STAGES:
                         progress_stage = stage
-                        if progress_callback is not None:
-                            progress_callback(stage)
+                        publish_progress(stage)
                     continue
                 if marker.startswith(TRACE_MARKER_PREFIX):
                     payload = marker[len(TRACE_MARKER_PREFIX) :]
@@ -311,8 +379,7 @@ class SubprocessCommandRunner:
                         separator
                         and outcome in EVENT_OUTCOMES.get(code, frozenset())
                     ):
-                        _emit_trace(
-                            trace_callback,
+                        publish_trace(
                             code,
                             outcome,
                             progress_stage,
@@ -325,8 +392,7 @@ class SubprocessCommandRunner:
                     or now - last_activity_at >= TRACE_ACTIVITY_INTERVAL_SECONDS
                 ):
                     last_activity_at = now
-                    _emit_trace(
-                        trace_callback,
+                    publish_trace(
                         "hostActivity",
                         "activity",
                         progress_stage,
@@ -339,27 +405,29 @@ class SubprocessCommandRunner:
         )
         reader.start()
         try:
-            returncode = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _emit_trace(
-                trace_callback,
-                "commandTimedOut",
-                "timedOut",
-                progress_stage,
-            )
-            _terminate_process_tree(
-                process,
-                trace_callback=trace_callback,
-                progress_stage=progress_stage,
-            )
+            try:
+                returncode = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                publish_trace(
+                    "commandTimedOut",
+                    "timedOut",
+                    progress_stage,
+                )
+                _terminate_process_tree(
+                    process,
+                    trace_callback=publish_trace,
+                    progress_stage=progress_stage,
+                )
+                reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
+                if process.stdout is not None and not reader.is_alive():
+                    process.stdout.close()
+                raise CommandTimedOut(timeout, captured_output())
             reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
             if process.stdout is not None and not reader.is_alive():
                 process.stdout.close()
-            raise CommandTimedOut(timeout, captured_output())
-        reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
-        if process.stdout is not None and not reader.is_alive():
-            process.stdout.close()
-        return CommandResult(returncode, captured_output())
+            return CommandResult(returncode, captured_output())
+        finally:
+            disable_callbacks()
 
 
 class GitHubLatestReleaseProvider:
@@ -513,20 +581,28 @@ class AtomicUpdateJournal:
         stage: str,
         now: dt.datetime,
     ) -> dict[str, object]:
-        current = operation.get("progressStage")
-        if (
-            operation.get("phase") != "applying"
-            or stage not in PROGRESS_STAGES
-            or stage not in PROGRESS_TRANSITIONS.get(current, frozenset())
-        ):
+        operation_id = operation.get("operationId")
+        if not isinstance(operation_id, str) or stage not in PROGRESS_STAGES:
             return dict(operation)
-        value = {
-            **dict(operation),
-            "schemaVersion": JOURNAL_SCHEMA,
-            "progressStage": stage,
-            "updatedAt": _iso_utc(now),
-        }
         with self._lock:
+            persisted = self._read_optional_unlocked()
+            if (
+                persisted is None
+                or persisted.get("operationId") != operation_id
+                or persisted.get("phase") != "applying"
+                or stage
+                not in PROGRESS_TRANSITIONS.get(
+                    persisted.get("progressStage"),
+                    frozenset(),
+                )
+            ):
+                return dict(operation)
+            value = {
+                **persisted,
+                "schemaVersion": JOURNAL_SCHEMA,
+                "progressStage": stage,
+                "updatedAt": _iso_utc(now),
+            }
             self._write_unlocked(value)
         return value
 
@@ -790,38 +866,44 @@ class UpdaterRuntime:
     ) -> None:
         operation_state = dict(operation)
         trace_codes: set[str] = set()
+        callback_lock = threading.Lock()
+        callbacks_active = True
 
         def record_progress(stage: str) -> None:
-            nonlocal operation_state
-            try:
-                operation_state = self._journal.advance(
-                    operation_state,
-                    stage,
-                    self._clock(),
-                )
-            except JournalError:
-                # Progress is observational and must not change the update result.
-                print(
-                    "ReachCommander updater could not persist update progress.",
-                    file=sys.stderr,
-                )
+            nonlocal operation_state, callbacks_active
+            with callback_lock:
+                if not callbacks_active:
+                    return
+                try:
+                    operation_state = self._journal.advance(
+                        operation_state,
+                        stage,
+                        self._clock(),
+                    )
+                except JournalError:
+                    # Progress is observational and must not change the update result.
+                    print(
+                        "ReachCommander updater could not persist update progress.",
+                        file=sys.stderr,
+                    )
 
         def record_trace(code: str, outcome: str, stage: str | None) -> None:
-            nonlocal trace_active
-            if not trace_active:
-                return
-            if self._append_trace(
-                operation_state,
-                code,
-                outcome,
-                stage=stage,
-                timeout_seconds=COMMAND_TIMEOUT_SECONDS
-                if code == "commandTimedOut"
-                else None,
-            ):
-                trace_codes.add(code)
-            else:
-                trace_active = False
+            nonlocal trace_active, callbacks_active
+            with callback_lock:
+                if not callbacks_active or not trace_active:
+                    return
+                if self._append_trace(
+                    operation_state,
+                    code,
+                    outcome,
+                    stage=stage,
+                    timeout_seconds=COMMAND_TIMEOUT_SECONDS
+                    if code == "commandTimedOut"
+                    else None,
+                ):
+                    trace_codes.add(code)
+                else:
+                    trace_active = False
 
         exit_code: int | None = None
         reason_code: str | None = None
@@ -851,6 +933,9 @@ class UpdaterRuntime:
                 )
         except Exception:
             phase = "failed"
+        finally:
+            with callback_lock:
+                callbacks_active = False
         try:
             finished = self._journal.finish(
                 operation_state,

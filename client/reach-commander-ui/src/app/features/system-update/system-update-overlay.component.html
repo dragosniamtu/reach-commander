@@ -33,15 +33,16 @@
       <p>The candidate did not pass its health check, so the previous version was restored.</p>
     } @else {
       <p>
-        The update could not be recovered automatically. Run <code>reachcommander doctor</code> on
-        the Ubuntu host.
+        The update could not be recovered automatically. On the Ubuntu host, inspect the trace with
+        <code>sudo reachcommander update-log</code>, then run
+        <code>sudo reachcommander doctor</code>.
       </p>
     }
     <div class="progress-copy" aria-live="polite" aria-atomic="true">
       {{
         trace().stale
           ? 'No host activity has been confirmed for at least 60 seconds.'
-          : trace().latestEventLabel ?? progress().currentLabel
+          : (trace().latestEventLabel ?? progress().currentLabel)
       }}
     </div>
     <ol class="update-progress" aria-label="Update progress">

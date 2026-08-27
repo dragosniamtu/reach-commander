@@ -71,7 +71,7 @@ describe('SystemUpdateOverlayComponent', () => {
 
   it.each([
     ['rolledBack', 'previous version was restored'],
-    ['failed', 'reachcommander doctor'],
+    ['failed', 'sudo reachcommander doctor'],
   ] as const)('shows dismissible %s guidance', (phase, text) => {
     const dismissed = vi.spyOn(fixture.componentInstance.dismissed, 'emit');
     fixture.componentRef.setInput('status', status({ phase }));
@@ -83,23 +83,36 @@ describe('SystemUpdateOverlayComponent', () => {
     expect(dismissed).toHaveBeenCalledOnce();
   });
 
+  it('shows the root-only trace and health commands after an update failure', () => {
+    fixture.componentRef.setInput('status', status({ phase: 'failed' }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('sudo reachcommander update-log');
+    expect(fixture.nativeElement.textContent).toContain('sudo reachcommander doctor');
+  });
+
   it('opens keyboard-accessible technical details after sixty silent seconds', () => {
-    fixture.componentRef.setInput('status', status({
-      protocolVersion: 3,
-      trace: {
-        startedAt: '2000-01-01T00:00:00Z',
-        elapsedSeconds: 65,
-        lastActivityAt: null,
-        events: [{
-          sequence: 1,
-          timestamp: '2000-01-01T00:00:00Z',
-          elapsedSeconds: 0,
-          code: 'operationAccepted',
-          stage: null,
-          outcome: 'started',
-        }],
-      },
-    }));
+    fixture.componentRef.setInput(
+      'status',
+      status({
+        protocolVersion: 3,
+        trace: {
+          startedAt: '2000-01-01T00:00:00Z',
+          elapsedSeconds: 65,
+          lastActivityAt: null,
+          events: [
+            {
+              sequence: 1,
+              timestamp: '2000-01-01T00:00:00Z',
+              elapsedSeconds: 0,
+              code: 'operationAccepted',
+              stage: null,
+              outcome: 'started',
+            },
+          ],
+        },
+      }),
+    );
     fixture.detectChanges();
 
     const details = fixture.nativeElement.querySelector('details') as HTMLDetailsElement;

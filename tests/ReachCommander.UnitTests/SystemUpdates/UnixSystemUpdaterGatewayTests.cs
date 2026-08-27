@@ -48,7 +48,7 @@ public sealed class UnixSystemUpdaterGatewayTests
     public async Task Gateway_falls_back_to_v2_only_for_exact_protocol_incompatibility()
     {
         var transport = new SequenceUpdaterTransport(
-            LegacyProtocolIncompatibleResponse(),
+            DetailedProtocolIncompatibleResponse(),
             Response("applying", protocolVersion: 2, progressStage: "downloading"));
         var gateway = new SystemUpdaterGateway(transport, new FixedRequestId());
 
@@ -56,6 +56,23 @@ public sealed class UnixSystemUpdaterGatewayTests
 
         Assert.Null(result.Trace);
         Assert.Equal([3, 2], transport.ProtocolVersions);
+    }
+
+    [Fact]
+    public async Task Gateway_does_not_fallback_for_a_malformed_v2_incompatibility_response()
+    {
+        var malformed = DetailedProtocolIncompatibleResponse().Replace(
+            "\"progressStage\":null",
+            "\"progressStage\":\"downloading\"",
+            StringComparison.Ordinal);
+        var transport = new SequenceUpdaterTransport(
+            malformed,
+            Response("applying", protocolVersion: 2, progressStage: "downloading"));
+        var gateway = new SystemUpdaterGateway(transport, new FixedRequestId());
+
+        await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() => gateway.CheckAsync(default));
+
+        Assert.Equal([3], transport.ProtocolVersions);
     }
 
     [Fact]
@@ -394,6 +411,10 @@ public sealed class UnixSystemUpdaterGatewayTests
 
     private static string LegacyProtocolIncompatibleResponse() => """
         {"protocolVersion":1,"requestId":null,"supported":true,"channel":null,"currentVersion":null,"targetVersion":null,"currentDigest":null,"targetDigest":null,"phase":"unavailable","reasonCode":"protocol_incompatible","detail":"The host updater protocol is incompatible.","operationId":null,"lastCheckedAt":null,"updatedAt":null}
+        """;
+
+    private static string DetailedProtocolIncompatibleResponse() => """
+        {"protocolVersion":2,"requestId":null,"supported":true,"channel":null,"currentVersion":null,"targetVersion":null,"currentDigest":null,"targetDigest":null,"phase":"unavailable","reasonCode":"protocol_incompatible","detail":"The host updater protocol is incompatible.","operationId":null,"lastCheckedAt":null,"updatedAt":null,"progressStage":null}
         """;
 
     private static string ReasonFor(string phase) => phase switch

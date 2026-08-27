@@ -333,9 +333,20 @@ internal sealed class SystemUpdateCoordinator(
                         _activeMonitorOperationId,
                         StringComparison.Ordinal))
                 {
-                    _status = result.TerminalSnapshot is { } terminal
-                        ? Map(terminal, clock.GetUtcNow())
-                        : MonitorFailedStatus(_status);
+                    if (result.TerminalSnapshot is { } terminal)
+                    {
+                        var candidate = Map(terminal, clock.GetUtcNow());
+                        if (IsTraceOlder(candidate.Trace, _status.Trace))
+                        {
+                            candidate = candidate with { Trace = _status.Trace };
+                        }
+
+                        _status = candidate;
+                    }
+                    else
+                    {
+                        _status = MonitorFailedStatus(_status);
+                    }
                 }
 
                 releaseDrain = _activeMonitorOwnsDrain;

@@ -161,6 +161,20 @@ class TimeoutRunner(RecordingRunner):
         raise CommandTimedOut(300, "/private updater output")
 
 
+class LateProgressRunner(RecordingRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.progress_callback: Callable[[str], None] | None = None
+
+    def run(self, *args, **kwargs) -> CommandResult:  # type: ignore[no-untyped-def]
+        self.progress_callback = kwargs.get("progress_callback")
+        return super().run(*args, **kwargs)
+
+    def publish_late_progress(self, stage: str) -> None:
+        assert self.progress_callback is not None
+        self.progress_callback(stage)
+
+
 class SequenceRunner:
     def __init__(self, results: list[CommandResult]) -> None:
         self.results = list(results)
@@ -442,6 +456,19 @@ class UpdaterRuntimeTests(unittest.TestCase):
 
             self.assertEqual("completed", journal.read_optional()["phase"])
 
+    def test_late_progress_callback_cannot_restore_a_terminal_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = LateProgressRunner()
+            runtime = self.runtime(root, runner=runner)
+
+            runtime.handle(request("applyConfiguredChannel"))
+            runtime.wait_for_worker()
+            runner.publish_late_progress("downloading")
+
+            journal = AtomicUpdateJournal(root / "system-update.json").read_optional()
+            self.assertEqual("completed", journal["phase"])
+
     def test_spawn_failure_is_sanitized_and_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -579,6 +606,21 @@ class AtomicUpdateJournalTests(unittest.TestCase):
                 operation,
                 journal.advance(operation, "notAStage", NOW),
             )
+
+    def test_stale_progress_cannot_replace_a_terminal_or_newer_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AtomicUpdateJournal(Path(directory) / "system-update.json")
+            first = journal.begin(snapshot(), NOW)
+            journal.finish(first, "completed", NOW)
+
+            journal.advance(first, "downloading", NOW)
+            self.assertEqual("completed", journal.read_optional()["phase"])
+
+            second = journal.begin(snapshot(), NOW)
+            journal.advance(first, "downloading", NOW)
+            persisted = journal.read_optional()
+            self.assertEqual(second["operationId"], persisted["operationId"])
+            self.assertIsNone(persisted["progressStage"])
 
     def test_reads_legacy_journal_without_progress_and_upgrades_on_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -726,28 +768,67 @@ class UpdaterSocketServerTests(unittest.TestCase):
         self.assertFalse(self.server.socket_path.exists())
 
 
+def _process_is_running(process_id: int) -> bool:
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+    stat_path = Path(f"/proc/{process_id}/stat")
+    if stat_path.exists():
+        fields = stat_path.read_text(encoding="utf-8").split()
+        if len(fields) > 2 and fields[2] == "Z":
+            return False
+    return True
+
+
 class ServiceProcessContractTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "Linux process groups are required")
     def test_timeout_kills_descendant_and_never_waits_forever_for_output_pipe(self) -> None:
         import sys
 
+        descendant = (
+            "import signal,time;"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+            "print('descendant-ready', flush=True);time.sleep(60)"
+        )
         child = (
             "import subprocess,sys,time;"
-            "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);"
-            "print('ready', flush=True);time.sleep(60)"
+            f"process=subprocess.Popen([sys.executable,'-c',{descendant!r}]);"
+            "print(f'descendant={process.pid}', flush=True);time.sleep(60)"
         )
         started = time.monotonic()
 
-        with self.assertRaises(CommandTimedOut) as raised:
-            SubprocessCommandRunner().run(
-                (sys.executable, "-c", child),
-                env=os.environ,
-                timeout=1,
-                shell=False,
+        descendant_pid: int | None = None
+        try:
+            with self.assertRaises(CommandTimedOut) as raised:
+                SubprocessCommandRunner().run(
+                    (sys.executable, "-c", child),
+                    env=os.environ,
+                    timeout=1,
+                    shell=False,
+                )
+            descendant_pid = int(
+                next(
+                    line.split("=", 1)[1]
+                    for line in raised.exception.output.splitlines()
+                    if line.startswith("descendant=")
+                )
             )
 
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and _process_is_running(descendant_pid):
+                time.sleep(0.05)
+
+            self.assertFalse(_process_is_running(descendant_pid))
+        finally:
+            if descendant_pid is not None and _process_is_running(descendant_pid):
+                os.kill(descendant_pid, signal.SIGKILL)
+
         self.assertLess(time.monotonic() - started, 8)
-        self.assertIn("ready", raised.exception.output)
+        self.assertIn("descendant-ready", raised.exception.output)
 
     def test_subprocess_runner_emits_only_valid_trace_markers_and_coalesces_activity(self) -> None:
         import sys
@@ -796,6 +877,10 @@ class ServiceProcessContractTests(unittest.TestCase):
         with (
             mock.patch("deploy.updater_service.os.name", "posix"),
             mock.patch("deploy.updater_service.os.killpg", create=True) as killpg,
+            mock.patch(
+                "deploy.updater_service._wait_for_process_group_exit",
+                side_effect=(False, True),
+            ),
             mock.patch.object(signal, "SIGKILL", 9, create=True),
         ):
             updater_service._terminate_process_tree(
@@ -856,6 +941,49 @@ class ServiceProcessContractTests(unittest.TestCase):
         reader.join.assert_called_once_with(
             timeout=updater_service.READER_JOIN_TIMEOUT_SECONDS
         )
+
+    def test_subprocess_runner_disables_callbacks_before_returning(self) -> None:
+        released = threading.Event()
+        stages: list[str] = []
+        real_thread = threading.Thread
+        process = mock.Mock()
+        process.stdout = iter(("REACHCOMMANDER_UPDATE_STAGE=installing\n",))
+        process.wait.return_value = 0
+
+        class DelayedReader:
+            def __init__(self, *, target, **_kwargs):  # type: ignore[no-untyped-def]
+                self.thread = real_thread(
+                    target=lambda: (released.wait(timeout=2), target()),
+                    daemon=True,
+                )
+
+            def start(self) -> None:
+                self.thread.start()
+
+            def join(self, timeout: float) -> None:
+                self.thread.join(timeout)
+
+            def is_alive(self) -> bool:
+                return self.thread.is_alive()
+
+        with (
+            mock.patch("deploy.updater_service.subprocess.Popen", return_value=process),
+            mock.patch("deploy.updater_service.threading.Thread", DelayedReader),
+            mock.patch("deploy.updater_service.READER_JOIN_TIMEOUT_SECONDS", 0),
+        ):
+            result = SubprocessCommandRunner().run(
+                ("/fixed", "update"),
+                env=SANITIZED_ENVIRONMENT,
+                timeout=5,
+                shell=False,
+                progress_callback=stages.append,
+            )
+
+        released.set()
+        time.sleep(0.05)
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual([], stages)
 
     def test_subprocess_runner_streams_only_valid_markers_and_bounds_output(self) -> None:
         import sys

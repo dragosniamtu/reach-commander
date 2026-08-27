@@ -79,7 +79,7 @@ Add independent tests for duplicate/out-of-order sequences, unknown event/outcom
 
 - [ ] **Step 2: Run the tests and verify RED**
 
-Run: `python -m unittest tests.installer.test_updater_trace -v`  
+Run: `python -m unittest tests.installer.test_updater_trace -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'deploy.updater_trace'`.
 
 - [ ] **Step 3: Implement the minimal protected trace module**
@@ -130,10 +130,10 @@ Implement `ProtectedUpdateTraceStore` with the exact signatures in **Interfaces*
 
 Add `updater_trace.py` to installer input validation, staging, deterministic archive manifests, and mode assertions as `0644`.
 
-Run: `python -m unittest tests.installer.test_updater_trace -v`  
+Run: `python -m unittest tests.installer.test_updater_trace -v`
 Expected: all trace tests PASS.
 
-Run: `bash tests/installer/test_package.sh`  
+Run: `bash tests/installer/test_package.sh`
 Expected: all checks PASS and the archive contains `reachcommander-installer/updater_trace.py` mode `0644`.
 
 - [ ] **Step 5: Commit**
@@ -173,7 +173,7 @@ Add tests for valid `REACHCOMMANDER_UPDATE_EVENT=<code>:<outcome>` callbacks, in
 
 - [ ] **Step 2: Run the regression and verify RED**
 
-Run: `python -m unittest tests.installer.test_updater_service.ServiceProcessContractTests.test_timeout_kills_descendant_and_never_waits_forever_for_output_pipe -v`  
+Run: `python -m unittest tests.installer.test_updater_service.ServiceProcessContractTests.test_timeout_kills_descendant_and_never_waits_forever_for_output_pipe -v`
 Expected: FAIL because `CommandTimedOut` and process-group supervision do not exist.
 
 - [ ] **Step 3: Implement bounded process supervision**
@@ -206,7 +206,7 @@ Launch with `start_new_session=os.name != "nt"`. After termination, close the pa
 
 - [ ] **Step 4: Verify GREEN**
 
-Run: `python -m unittest tests.installer.test_updater_service -v`  
+Run: `python -m unittest tests.installer.test_updater_service -v`
 Expected: all tests PASS; the POSIX regression completes in under eight seconds.
 
 - [ ] **Step 5: Commit**
@@ -241,7 +241,7 @@ Add separate tests for mismatched candidate image rollback, previous-image verif
 
 - [ ] **Step 2: Run and verify RED**
 
-Run: `bash tests/installer/test_command.sh`  
+Run: `bash tests/installer/test_command.sh`
 Expected: FAIL because event markers and image verification are absent.
 
 - [ ] **Step 3: Implement fixed event and identity functions**
@@ -280,10 +280,10 @@ Verify the candidate immediately after Compose recreation and the previous image
 
 - [ ] **Step 4: Verify GREEN**
 
-Run: `bash tests/installer/test_command.sh`  
+Run: `bash tests/installer/test_command.sh`
 Expected: all command tests PASS.
 
-Run on Ubuntu: `shellcheck deploy/reachcommander`  
+Run on Ubuntu: `shellcheck deploy/reachcommander`
 Expected: zero findings.
 
 - [ ] **Step 5: Commit**
@@ -323,7 +323,7 @@ Add exact-shape tests: v1 has neither `progressStage` nor `trace`, v2 has `progr
 
 - [ ] **Step 2: Run and verify RED**
 
-Run: `python -m unittest tests.installer.test_updater_protocol tests.installer.test_updater_service -v`  
+Run: `python -m unittest tests.installer.test_updater_protocol tests.installer.test_updater_service -v`
 Expected: FAIL because v3 and trace wiring are absent.
 
 - [ ] **Step 3: Implement v3 and runtime trace wiring**
@@ -340,7 +340,7 @@ Start the trace after `AtomicUpdateJournal.begin`; append validated marker/activ
 
 - [ ] **Step 4: Verify GREEN**
 
-Run: `python -m unittest tests.installer.test_updater_protocol tests.installer.test_updater_trace tests.installer.test_updater_service -v`  
+Run: `python -m unittest tests.installer.test_updater_protocol tests.installer.test_updater_trace tests.installer.test_updater_service -v`
 Expected: all tests PASS, including exact legacy shapes.
 
 - [ ] **Step 5: Commit**
@@ -380,7 +380,7 @@ Also test no-trace success, chronological output, terminal follow exit, unsafe s
 
 - [ ] **Step 2: Run and verify RED**
 
-Run: `bash tests/installer/test_command.sh && bash tests/installer/test_install.sh && bash tests/installer/test_package.sh`  
+Run: `bash tests/installer/test_command.sh && bash tests/installer/test_install.sh && bash tests/installer/test_package.sh`
 Expected: FAIL because the CLI does not exist.
 
 - [ ] **Step 3: Implement the fixed CLI**
@@ -405,7 +405,7 @@ The management shell supplies the fixed root; no user path is accepted. Print va
 
 Install `update_trace_cli.py` mode `0755` in `bin` and `updater_trace.py` mode `0644` in `lib`. Include both in backup/rollback lists and doctor validation without changing durable data.
 
-Run: `bash tests/installer/test_command.sh && bash tests/installer/test_install.sh && bash tests/installer/test_package.sh`  
+Run: `bash tests/installer/test_command.sh && bash tests/installer/test_install.sh && bash tests/installer/test_package.sh`
 Expected: all suites PASS.
 
 - [ ] **Step 5: Commit**
@@ -456,7 +456,7 @@ Add rejection tests for unknown/duplicate fields, over 32 events, non-increasing
 
 - [ ] **Step 2: Run and verify RED**
 
-Run: `dotnet test tests/ReachCommander.UnitTests/ReachCommander.UnitTests.csproj -c Release --filter "FullyQualifiedName~SystemUpdate"`  
+Run: `dotnet test tests/ReachCommander.UnitTests/ReachCommander.UnitTests.csproj -c Release --filter "FullyQualifiedName~SystemUpdate"`
 Expected: FAIL because trace contracts are absent.
 
 - [ ] **Step 3: Add immutable public models**
@@ -487,7 +487,7 @@ Request v3, then v2, then v1 only on exact v1-shaped incompatibility. Validate e
 
 - [ ] **Step 5: Verify GREEN**
 
-Run: `dotnet test ReachCommander.slnx -c Release`  
+Run: `dotnet test ReachCommander.slnx -c Release`
 Expected: all .NET tests PASS.
 
 - [ ] **Step 6: Commit**
@@ -538,7 +538,7 @@ Add v1/v2 guidance, timeout, no-trace, keyboard, live-region, compact, themes, r
 
 - [ ] **Step 2: Run and verify RED**
 
-Run from `client/reach-commander-ui`: `npm test -- --watch=false --include='src/app/features/system-update/system-update-trace.spec.ts' --include='src/app/features/system-update/system-update-overlay.component.spec.ts'`  
+Run from `client/reach-commander-ui`: `npm test -- --watch=false --include='src/app/features/system-update/system-update-trace.spec.ts' --include='src/app/features/system-update/system-update-overlay.component.spec.ts'`
 Expected: FAIL because the trace UI does not exist.
 
 - [ ] **Step 3: Add API types and pure view model**
@@ -610,10 +610,10 @@ Require copy that the installer upgrades v3 helpers, old stuck events cannot be 
 
 - [ ] **Step 2: Run and verify RED**
 
-Run: `node --test tests/installer/docs-contract.test.mjs`  
+Run: `node --test tests/installer/docs-contract.test.mjs`
 Expected: FAIL on missing trace docs.
 
-Run from `tests/e2e`: `npx playwright test specs/system-update.spec.ts`  
+Run from `tests/e2e`: `npx playwright test specs/system-update.spec.ts`
 Expected: FAIL until fixtures/UI include traces.
 
 - [ ] **Step 3: Complete fixtures and docs**

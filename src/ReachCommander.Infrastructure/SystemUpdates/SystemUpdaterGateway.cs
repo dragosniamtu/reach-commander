@@ -205,7 +205,8 @@ internal sealed class SystemUpdaterGateway(
                 TraceProtocolVersion,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!IsLegacyProtocolIncompatible(traced.Response))
+        if (!IsProtocolIncompatible(traced.Response, DetailedProtocolVersion) &&
+            !IsProtocolIncompatible(traced.Response, LegacyProtocolVersion))
         {
             return Parse(
                 traced.Response,
@@ -218,7 +219,7 @@ internal sealed class SystemUpdaterGateway(
                 DetailedProtocolVersion,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!IsLegacyProtocolIncompatible(detailed.Response))
+        if (!IsProtocolIncompatible(detailed.Response, LegacyProtocolVersion))
         {
             return Parse(
                 detailed.Response,
@@ -446,14 +447,23 @@ internal sealed class SystemUpdaterGateway(
         }
     }
 
-    private static bool IsLegacyProtocolIncompatible(string response)
+    private static bool IsProtocolIncompatible(
+        string response,
+        int responseProtocolVersion)
     {
         try
         {
             using var document = ParseDocument(response);
             var root = document.RootElement;
-            ValidateFields(root, V1ResponseFields);
-            return RequiredInt(root, "protocolVersion") == LegacyProtocolVersion &&
+            var expectedFields = responseProtocolVersion switch
+            {
+                LegacyProtocolVersion => V1ResponseFields,
+                DetailedProtocolVersion => V2ResponseFields,
+                _ => throw new SystemUpdaterProtocolException(
+                    "The updater protocol version is incompatible."),
+            };
+            ValidateFields(root, expectedFields);
+            return RequiredInt(root, "protocolVersion") == responseProtocolVersion &&
                    root.GetProperty("requestId").ValueKind == JsonValueKind.Null &&
                    RequiredBoolean(root, "supported") &&
                    IsNull(root, "channel") &&
@@ -467,7 +477,9 @@ internal sealed class SystemUpdaterGateway(
                    "The host updater protocol is incompatible." &&
                    IsNull(root, "operationId") &&
                    IsNull(root, "lastCheckedAt") &&
-                   IsNull(root, "updatedAt");
+                   IsNull(root, "updatedAt") &&
+                   (responseProtocolVersion != DetailedProtocolVersion ||
+                    IsNull(root, "progressStage"));
         }
         catch (SystemUpdaterProtocolException)
         {

@@ -78,7 +78,7 @@ internal sealed class SystemUpdateOperationMonitor(
                 continue;
             }
 
-            if (snapshot.ProtocolVersion is not (1 or 2) ||
+            if (snapshot.ProtocolVersion is not (1 or 2 or 3) ||
                 !snapshot.Supported ||
                 !string.Equals(snapshot.OperationId, operationId, StringComparison.Ordinal))
             {

@@ -1,7 +1,7 @@
 # ReachCommander update traceability and bounded execution design
 
-**Status:** Approved for implementation  
-**Date:** 2026-08-27  
+**Status:** Approved for implementation
+**Date:** 2026-08-27
 **Scope:** Ubuntu installer-managed system updates
 
 ## Problem

@@ -27,6 +27,25 @@ public sealed class SystemUpdateOperationMonitorTests
     }
 
     [Fact]
+    public async Task Returns_matching_v3_terminal_snapshot()
+    {
+        var clock = new AdjustableTimeProvider(StartedAt);
+        var gateway = new SequenceGateway(
+            Applying("operation-1") with { ProtocolVersion = 3 },
+            Terminal("completed", "operation-1") with { ProtocolVersion = 3 });
+        var monitor = CreateMonitor(gateway, clock);
+
+        var result = await monitor.WaitForTerminalAsync(
+            Applying("operation-1") with { ProtocolVersion = 3 },
+            _ => { },
+            default);
+
+        Assert.False(result.TimedOut);
+        Assert.Equal("completed", result.TerminalSnapshot!.Phase);
+        Assert.Equal(2, gateway.CheckCount);
+    }
+
+    [Fact]
     public async Task Retries_transient_unavailability_without_leaking_it_as_a_result()
     {
         var clock = new AdjustableTimeProvider(StartedAt);

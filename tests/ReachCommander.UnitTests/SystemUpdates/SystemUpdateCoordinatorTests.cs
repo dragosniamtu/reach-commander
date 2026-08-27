@@ -352,6 +352,44 @@ public sealed class SystemUpdateCoordinatorTests
     }
 
     [Fact]
+    public async Task Terminal_result_preserves_a_newer_trace_for_the_same_operation()
+    {
+        var available = CurrentSnapshot with
+        {
+            ProtocolVersion = 3,
+            Phase = "available",
+            ReasonCode = "update_available",
+        };
+        var applying = available with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+            ProgressStage = "downloading",
+            Trace = Trace(sequence: 5, elapsedSeconds: 2),
+        };
+        var terminal = applying with
+        {
+            Phase = "completed",
+            ReasonCode = "update_completed",
+            Trace = Trace(sequence: 6, elapsedSeconds: 3),
+        };
+        var monitor = new ControlledOperationMonitor();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available, applying),
+            monitor: monitor);
+        await coordinator.CheckAsync(default);
+        await coordinator.ApplyAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        monitor.Publish(applying with { Trace = Trace(sequence: 7, elapsedSeconds: 4) });
+
+        monitor.Complete(new SystemUpdateMonitorResult(terminal));
+        var completed = await WaitForPhaseAsync(coordinator, SystemUpdatePhase.Completed);
+
+        Assert.Equal(7, completed.Trace!.Events[^1].Sequence);
+    }
+
+    [Fact]
     public async Task Applying_discovered_at_start_resumes_one_monitor_without_owning_a_drain()
     {
         var applying = CurrentSnapshot with

@@ -167,15 +167,30 @@ describe('SystemUpdateStore', () => {
 
   it('retains the latest confirmed stage through a connection failure', async () => {
     store.capture(status({
+      protocolVersion: 3,
       phase: 'applying',
       operationId: 'operation-1',
       progressStage: 'installing',
+      trace: {
+        startedAt: '2026-08-25T10:00:00Z',
+        elapsedSeconds: 12,
+        lastActivityAt: '2026-08-25T10:00:12Z',
+        events: [{
+          sequence: 3,
+          timestamp: '2026-08-25T10:00:12Z',
+          elapsedSeconds: 12,
+          code: 'installStarted',
+          stage: 'installing',
+          outcome: 'started',
+        }],
+      },
     }));
     api.getResults.push(() => Promise.reject(new TypeError('offline')));
 
     await scheduler.runNext();
 
     expect(store.status()?.progressStage).toBe('installing');
+    expect(store.status()?.trace?.events.at(-1)?.code).toBe('installStarted');
     expect(store.reconnecting()).toBe(true);
   });
 
@@ -355,6 +370,7 @@ function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDt
     operationId: null,
     lastCheckedAt: '2026-08-25T10:00:00Z',
     updatedAt: '2026-08-25T10:00:00Z',
+    trace: null,
     ...overrides,
   };
 }

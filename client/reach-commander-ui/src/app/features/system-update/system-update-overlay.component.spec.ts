@@ -82,6 +82,44 @@ describe('SystemUpdateOverlayComponent', () => {
     (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
     expect(dismissed).toHaveBeenCalledOnce();
   });
+
+  it('opens keyboard-accessible technical details after sixty silent seconds', () => {
+    fixture.componentRef.setInput('status', status({
+      protocolVersion: 3,
+      trace: {
+        startedAt: '2000-01-01T00:00:00Z',
+        elapsedSeconds: 65,
+        lastActivityAt: null,
+        events: [{
+          sequence: 1,
+          timestamp: '2000-01-01T00:00:00Z',
+          elapsedSeconds: 0,
+          code: 'operationAccepted',
+          stage: null,
+          outcome: 'started',
+        }],
+      },
+    }));
+    fixture.detectChanges();
+
+    const details = fixture.nativeElement.querySelector('details') as HTMLDetailsElement;
+    const summary = details.querySelector('summary') as HTMLElement;
+    expect(details.open).toBe(true);
+    expect(summary.tabIndex).toBeGreaterThanOrEqual(0);
+    expect(fixture.nativeElement.textContent).toContain('Elapsed');
+    expect(fixture.nativeElement.textContent).toContain('Update accepted');
+  });
+
+  it('announces the latest safe host trace event and guides legacy helpers', () => {
+    fixture.componentRef.setInput('status', status({ protocolVersion: 2, trace: null }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      'Applying trusted update',
+    );
+    expect(fixture.nativeElement.textContent).toContain('refresh the Ubuntu installer bundle');
+    expect(fixture.nativeElement.textContent).not.toMatch(/docker|sha256:|\/opt\/|exitCode/i);
+  });
 });
 
 function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDto {
@@ -100,6 +138,7 @@ function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDt
     operationId: 'operation-1',
     lastCheckedAt: '2026-08-25T10:00:00Z',
     updatedAt: new Date().toISOString(),
+    trace: null,
     ...overrides,
   };
 }

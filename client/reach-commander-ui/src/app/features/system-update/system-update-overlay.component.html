@@ -38,7 +38,11 @@
       </p>
     }
     <div class="progress-copy" aria-live="polite" aria-atomic="true">
-      {{ progress().stale ? 'Update still in progress.' : progress().currentLabel }}
+      {{
+        trace().stale
+          ? 'No host activity has been confirmed for at least 60 seconds.'
+          : trace().latestEventLabel ?? progress().currentLabel
+      }}
     </div>
     <ol class="update-progress" aria-label="Update progress">
       @for (step of progress().standard; track step.id) {
@@ -61,6 +65,45 @@
         </ol>
       </div>
     }
+    <details
+      class="technical-details"
+      [attr.open]="trace().autoOpen ? '' : null"
+      [attr.data-stale]="trace().stale"
+    >
+      <summary>
+        <span>Technical details</span>
+        @if (trace().available) {
+          <span class="trace-elapsed">Elapsed {{ trace().elapsedLabel }}</span>
+        }
+      </summary>
+      <div class="trace-content">
+        @if (trace().available) {
+          <dl class="trace-summary">
+            <div>
+              <dt>Elapsed</dt>
+              <dd>{{ trace().elapsedLabel }}</dd>
+            </div>
+            <div>
+              <dt>Last host activity</dt>
+              <dd>{{ trace().lastActivityLabel ?? 'Not reported' }}</dd>
+            </div>
+          </dl>
+          <ol class="trace-events" aria-label="Sanitized update events">
+            @for (event of trace().events; track event.sequence) {
+              <li [attr.data-outcome]="event.outcome">
+                <span class="trace-time">{{ event.elapsedLabel }}</span>
+                <span class="trace-event-label">{{ event.label }}</span>
+                <span class="trace-outcome">{{ event.outcomeLabel }}</span>
+              </li>
+            } @empty {
+              <li class="trace-empty">Waiting for the first host update event.</li>
+            }
+          </ol>
+        } @else if (trace().guidance; as guidance) {
+          <p class="trace-guidance">{{ guidance }}</p>
+        }
+      </div>
+    </details>
     @if (error(); as safeError) {
       <p class="error">{{ safeError.detail }}</p>
     }

@@ -18,7 +18,7 @@
 .update-state {
   display: grid;
   justify-items: center;
-  width: min(560px, 100%);
+  width: min(680px, 100%);
   gap: 17px;
   padding-block: 12px;
   text-align: center;
@@ -126,6 +126,112 @@ code {
   text-align: left;
   text-transform: uppercase;
 }
+.technical-details {
+  width: min(560px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text-2);
+  background: var(--surface-1);
+  text-align: left;
+  overflow: hidden;
+}
+.technical-details[data-stale='true'] {
+  border-color: var(--warning);
+}
+.technical-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 40px;
+  padding: 9px 12px;
+  color: var(--text-1);
+  font: 700 11px/1.3 var(--font-ui);
+  cursor: pointer;
+}
+.technical-details summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.trace-elapsed,
+.trace-time,
+.trace-outcome {
+  color: var(--text-3);
+  font: 600 10px/1.3 var(--font-mono);
+}
+.trace-content {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--line);
+}
+.trace-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.trace-summary > div {
+  min-width: 0;
+  padding: 8px;
+  background: var(--surface-2);
+}
+.trace-summary dt,
+.trace-summary dd {
+  margin: 0;
+}
+.trace-summary dt {
+  color: var(--text-3);
+  font: 600 9px/1.3 var(--font-ui);
+  text-transform: uppercase;
+}
+.trace-summary dd {
+  margin-top: 3px;
+  color: var(--text-1);
+  font: 700 11px/1.3 var(--font-mono);
+}
+.trace-events {
+  display: grid;
+  max-height: min(260px, 34dvh);
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  scrollbar-gutter: stable;
+}
+.trace-events li {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.trace-event-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+  font: 600 10px/1.35 var(--font-ui);
+}
+.trace-events [data-outcome='failed'] .trace-outcome,
+.trace-events [data-outcome='timedOut'] .trace-outcome {
+  color: var(--danger-text);
+}
+.trace-events [data-outcome='succeeded'] .trace-outcome {
+  color: var(--success);
+}
+.trace-empty,
+.trace-guidance {
+  color: var(--text-3);
+  font: 500 10px/1.5 var(--font-ui);
+}
+.trace-guidance {
+  max-width: none;
+  padding-top: 10px;
+}
 .spinner {
   position: relative;
   display: block;
@@ -212,4 +318,23 @@ button {
 :host-context([data-theme='norton']) :is(.terminal-icon, button, .step-indicator) {
   border-radius: 0;
   box-shadow: none;
+}
+:host-context([data-theme='norton']) .technical-details {
+  border-radius: 0;
+  border-color: #55ffff;
+  background: #0000aa;
+}
+@media (max-width: 520px) {
+  .system-update-overlay {
+    padding: 14px;
+  }
+  .update-state {
+    gap: 13px;
+  }
+  .trace-events li {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+  .trace-outcome {
+    grid-column: 2;
+  }
 }

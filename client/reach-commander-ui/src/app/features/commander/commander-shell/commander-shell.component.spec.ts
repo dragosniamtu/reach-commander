@@ -1014,6 +1014,7 @@ function systemUpdateStatus(
     operationId: null,
     lastCheckedAt: '2026-08-25T10:00:00Z',
     updatedAt: '2026-08-25T10:00:00Z',
+    trace: null,
     ...overrides,
   };
 }

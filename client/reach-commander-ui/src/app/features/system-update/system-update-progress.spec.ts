@@ -172,6 +172,7 @@ function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDt
     operationId: 'operation-1',
     lastCheckedAt: '2026-08-27T09:59:00Z',
     updatedAt: '2026-08-27T10:00:00Z',
+    trace: null,
     ...overrides,
   };
 }

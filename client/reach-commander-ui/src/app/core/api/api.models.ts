@@ -456,6 +456,61 @@ export type SystemUpdateProgressStage =
   | 'restartingPrevious'
   | 'verifyingRecovery';
 
+export type SystemUpdateTraceEventCode =
+  | 'operationAccepted'
+  | 'downloadStarted'
+  | 'hostActivity'
+  | 'downloadCompleted'
+  | 'backupStarted'
+  | 'backupCompleted'
+  | 'installStarted'
+  | 'installCompleted'
+  | 'candidateRestartStarted'
+  | 'candidateRestartCompleted'
+  | 'candidateImageVerified'
+  | 'candidateHealthStarted'
+  | 'candidateHealthActivity'
+  | 'candidateHealthSucceeded'
+  | 'candidateHealthFailed'
+  | 'rollbackStarted'
+  | 'rollbackStateRestored'
+  | 'previousRestartStarted'
+  | 'previousRestartCompleted'
+  | 'previousImageVerified'
+  | 'recoveryHealthStarted'
+  | 'recoveryHealthActivity'
+  | 'recoveryHealthSucceeded'
+  | 'recoveryHealthFailed'
+  | 'commandTimedOut'
+  | 'terminationRequested'
+  | 'terminationForced'
+  | 'operationCompleted'
+  | 'operationRolledBack'
+  | 'operationFailed';
+
+export type SystemUpdateTraceOutcome =
+  | 'started'
+  | 'activity'
+  | 'succeeded'
+  | 'failed'
+  | 'timedOut';
+
+export interface SystemUpdateTraceEventDto {
+  readonly sequence: number;
+  readonly timestamp: string;
+  readonly elapsedSeconds: number;
+  readonly code: SystemUpdateTraceEventCode;
+  readonly stage: SystemUpdateProgressStage | null;
+  readonly outcome: SystemUpdateTraceOutcome;
+}
+
+export interface SystemUpdateTraceDto {
+  readonly startedAt: string;
+  readonly elapsedSeconds: number;
+  readonly lastActivityAt: string | null;
+  readonly events: readonly SystemUpdateTraceEventDto[];
+}
+
 export interface SystemUpdateStatusDto {
   readonly protocolVersion: number;
   readonly supported: boolean;
@@ -471,6 +526,7 @@ export interface SystemUpdateStatusDto {
   readonly operationId: string | null;
   readonly lastCheckedAt: string | null;
   readonly updatedAt: string;
+  readonly trace: SystemUpdateTraceDto | null;
 }
 
 export abstract class CommanderApiPort {

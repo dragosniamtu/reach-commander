@@ -11,6 +11,7 @@ import {
 import { SystemUpdateStatusDto } from '../../core/api/api.models';
 import { SystemUpdateClientError } from '../../core/state/system-update.store';
 import { buildSystemUpdateProgress } from './system-update-progress';
+import { buildSystemUpdateTrace } from './system-update-trace';
 
 @Component({
   selector: 'app-system-update-overlay',
@@ -31,6 +32,9 @@ export class SystemUpdateOverlayComponent {
   );
   readonly progress = computed(() =>
     buildSystemUpdateProgress(this.status(), this.reconnecting(), this.nowMilliseconds()),
+  );
+  readonly trace = computed(() =>
+    buildSystemUpdateTrace(this.status(), this.nowMilliseconds()),
   );
   readonly title = computed(() => {
     if (this.status().phase === 'rolledBack') {

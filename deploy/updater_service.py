@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import uuid
 from pathlib import Path
@@ -54,6 +55,13 @@ except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_pr
         UpdaterRequest,
     )
 
+try:
+    from .updater_trace import EVENT_OUTCOMES
+except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_trace.py
+    library_directory = Path(__file__).resolve().parents[1] / "lib"
+    sys.path.insert(0, str(library_directory))
+    from updater_trace import EVENT_OUTCOMES  # type: ignore[no-redef]
+
 
 FIXED_COMMAND = ("/usr/local/bin/reachcommander", "update")
 DOCKER_COMMAND = "/usr/bin/docker"
@@ -69,6 +77,10 @@ MAX_COMMAND_OUTPUT_CHARS = 16_384
 MAX_JOURNAL_BYTES = 32_768
 RESULT_RETENTION_SECONDS = 600
 PROGRESS_MARKER_PREFIX = "REACHCOMMANDER_UPDATE_STAGE="
+TRACE_MARKER_PREFIX = "REACHCOMMANDER_UPDATE_EVENT="
+TRACE_ACTIVITY_INTERVAL_SECONDS = 15
+TERMINATION_GRACE_SECONDS = 5
+READER_JOIN_TIMEOUT_SECONDS = 1
 
 SANITIZED_ENVIRONMENT = {
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -140,13 +152,97 @@ class JournalError(ValueError):
     pass
 
 
+class CommandTimedOut(TimeoutError):
+    def __init__(self, timeout_seconds: int, output: str) -> None:
+        super().__init__(f"the fixed updater command exceeded {timeout_seconds} seconds")
+        self.timeout_seconds = timeout_seconds
+        self.output = output
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class CommandResult:
     returncode: int
     output: str
 
 
+TraceCallback = Callable[[str, str, str | None], None]
+
+
+def _emit_trace(
+    callback: TraceCallback | None,
+    code: str,
+    outcome: str,
+    progress_stage: str | None,
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(code, outcome, progress_stage)
+    except Exception:
+        # Trace persistence is observational and must not change the update result.
+        print(
+            "ReachCommander updater could not persist an update trace event.",
+            file=sys.stderr,
+        )
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    trace_callback: TraceCallback | None = None,
+    progress_stage: str | None = None,
+) -> None:
+    _emit_trace(
+        trace_callback,
+        "terminationRequested",
+        "started",
+        progress_stage,
+    )
+    try:
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+    except (OSError, ProcessLookupError):
+        try:
+            process.terminate()
+        except OSError:
+            pass
+
+    try:
+        process.wait(timeout=TERMINATION_GRACE_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    _emit_trace(
+        trace_callback,
+        "terminationForced",
+        "started",
+        progress_stage,
+    )
+    try:
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+    except (OSError, ProcessLookupError):
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+    try:
+        process.wait(timeout=TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        # The service must return even if the operating system cannot reap the wrapper.
+        pass
+
+
 class SubprocessCommandRunner:
+    def __init__(self, *, monotonic: Callable[[], float] = time.monotonic) -> None:
+        self._monotonic = monotonic
+
     def run(
         self,
         argv: tuple[str, ...] | list[str],
@@ -155,6 +251,7 @@ class SubprocessCommandRunner:
         timeout: int,
         shell: bool,
         progress_callback: Callable[[str], None] | None = None,
+        trace_callback: TraceCallback | None = None,
     ) -> CommandResult:
         if shell:
             raise ValueError("shell execution is not supported")
@@ -166,26 +263,67 @@ class SubprocessCommandRunner:
             text=True,
             env=dict(env),
             shell=False,
+            start_new_session=os.name != "nt",
         )
         output_parts: list[str] = []
         output_length = 0
+        progress_stage: str | None = None
+        last_activity_at: float | None = None
+        output_lock = threading.Lock()
+
+        def append_output(line: str) -> None:
+            nonlocal output_length
+            with output_lock:
+                remaining = MAX_COMMAND_OUTPUT_CHARS - output_length
+                if remaining > 0:
+                    bounded = line[:remaining]
+                    output_parts.append(bounded)
+                    output_length += len(bounded)
+
+        def captured_output() -> str:
+            with output_lock:
+                return "".join(output_parts)
 
         def read_output() -> None:
-            nonlocal output_length
+            nonlocal last_activity_at, progress_stage
             if process.stdout is None:
                 return
             for line in process.stdout:
                 marker = line.rstrip("\r\n")
                 if marker.startswith(PROGRESS_MARKER_PREFIX):
                     stage = marker[len(PROGRESS_MARKER_PREFIX) :]
-                    if stage in PROGRESS_STAGES and progress_callback is not None:
-                        progress_callback(stage)
+                    if stage in PROGRESS_STAGES:
+                        progress_stage = stage
+                        if progress_callback is not None:
+                            progress_callback(stage)
                     continue
-                remaining = MAX_COMMAND_OUTPUT_CHARS - output_length
-                if remaining > 0:
-                    bounded = line[:remaining]
-                    output_parts.append(bounded)
-                    output_length += len(bounded)
+                if marker.startswith(TRACE_MARKER_PREFIX):
+                    payload = marker[len(TRACE_MARKER_PREFIX) :]
+                    code, separator, outcome = payload.partition(":")
+                    if (
+                        separator
+                        and outcome in EVENT_OUTCOMES.get(code, frozenset())
+                    ):
+                        _emit_trace(
+                            trace_callback,
+                            code,
+                            outcome,
+                            progress_stage,
+                        )
+                        continue
+                append_output(line)
+                now = self._monotonic()
+                if (
+                    last_activity_at is None
+                    or now - last_activity_at >= TRACE_ACTIVITY_INTERVAL_SECONDS
+                ):
+                    last_activity_at = now
+                    _emit_trace(
+                        trace_callback,
+                        "hostActivity",
+                        "activity",
+                        progress_stage,
+                    )
 
         reader = threading.Thread(
             target=read_output,
@@ -196,20 +334,25 @@ class SubprocessCommandRunner:
         try:
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            reader.join()
-            if process.stdout is not None:
-                process.stdout.close()
-            raise subprocess.TimeoutExpired(
-                list(argv),
-                timeout,
-                output="".join(output_parts),
+            _emit_trace(
+                trace_callback,
+                "commandTimedOut",
+                "timedOut",
+                progress_stage,
             )
-        reader.join()
-        if process.stdout is not None:
+            _terminate_process_tree(
+                process,
+                trace_callback=trace_callback,
+                progress_stage=progress_stage,
+            )
+            reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
+            if process.stdout is not None and not reader.is_alive():
+                process.stdout.close()
+            raise CommandTimedOut(timeout, captured_output())
+        reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
+        if process.stdout is not None and not reader.is_alive():
             process.stdout.close()
-        return CommandResult(returncode, "".join(output_parts))
+        return CommandResult(returncode, captured_output())
 
 
 class GitHubLatestReleaseProvider:

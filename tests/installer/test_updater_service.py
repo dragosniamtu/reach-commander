@@ -3,8 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import signal
 import socket
 import stat
+import subprocess
 import tempfile
 import threading
 import time
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 from unittest import mock
 
+import deploy.updater_service as updater_service
 from deploy.updater_protocol import (
     MAX_MESSAGE_BYTES,
     TRUSTED_IMAGE_REPOSITORY,
@@ -22,6 +25,7 @@ from deploy.updater_protocol import (
     UpdaterRequest,
 )
 from deploy.updater_service import (
+    CommandTimedOut,
     FIXED_COMMAND,
     JOURNAL_SCHEMA,
     SANITIZED_ENVIRONMENT,
@@ -547,6 +551,136 @@ class UpdaterSocketServerTests(unittest.TestCase):
 
 
 class ServiceProcessContractTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Linux process groups are required")
+    def test_timeout_kills_descendant_and_never_waits_forever_for_output_pipe(self) -> None:
+        import sys
+
+        child = (
+            "import subprocess,sys,time;"
+            "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);"
+            "print('ready', flush=True);time.sleep(60)"
+        )
+        started = time.monotonic()
+
+        with self.assertRaises(CommandTimedOut) as raised:
+            SubprocessCommandRunner().run(
+                (sys.executable, "-c", child),
+                env=os.environ,
+                timeout=1,
+                shell=False,
+            )
+
+        self.assertLess(time.monotonic() - started, 8)
+        self.assertIn("ready", raised.exception.output)
+
+    def test_subprocess_runner_emits_only_valid_trace_markers_and_coalesces_activity(self) -> None:
+        import sys
+
+        script = "\n".join(
+            (
+                "print('REACHCOMMANDER_UPDATE_STAGE=downloading')",
+                "print('REACHCOMMANDER_UPDATE_EVENT=downloadStarted:started')",
+                "print('download output one')",
+                "print('download output two')",
+                "print('REACHCOMMANDER_UPDATE_EVENT=notAllowed:succeeded')",
+            )
+        )
+        times = iter((0.0, 10.0, 16.0))
+        events: list[tuple[str, str, str | None]] = []
+
+        result = SubprocessCommandRunner(monotonic=lambda: next(times)).run(
+            (sys.executable, "-c", script),
+            env=os.environ,
+            timeout=5,
+            shell=False,
+            trace_callback=lambda code, outcome, stage: events.append(
+                (code, outcome, stage)
+            ),
+        )
+
+        self.assertEqual(
+            [
+                ("downloadStarted", "started", "downloading"),
+                ("hostActivity", "activity", "downloading"),
+                ("hostActivity", "activity", "downloading"),
+            ],
+            events,
+        )
+        self.assertNotIn("downloadStarted", result.output)
+        self.assertIn("REACHCOMMANDER_UPDATE_EVENT=notAllowed:succeeded", result.output)
+
+    def test_posix_termination_requests_term_before_forcing_kill(self) -> None:
+        process = mock.Mock(pid=4321)
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(["fixed"], 5),
+            0,
+        ]
+        events: list[tuple[str, str, str | None]] = []
+
+        with (
+            mock.patch("deploy.updater_service.os.name", "posix"),
+            mock.patch("deploy.updater_service.os.killpg", create=True) as killpg,
+            mock.patch.object(signal, "SIGKILL", 9, create=True),
+        ):
+            updater_service._terminate_process_tree(
+                process,
+                trace_callback=lambda code, outcome, stage: events.append(
+                    (code, outcome, stage)
+                ),
+                progress_stage="installing",
+            )
+
+        self.assertEqual(
+            [
+                mock.call(4321, signal.SIGTERM),
+                mock.call(4321, 9),
+            ],
+            killpg.call_args_list,
+        )
+        self.assertEqual(
+            [
+                ("terminationRequested", "started", "installing"),
+                ("terminationForced", "started", "installing"),
+            ],
+            events,
+        )
+
+    def test_windows_termination_falls_back_to_the_fixed_wrapper_process(self) -> None:
+        process = mock.Mock(pid=4321)
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(["fixed"], 5),
+            0,
+        ]
+
+        with mock.patch("deploy.updater_service.os.name", "nt"):
+            updater_service._terminate_process_tree(process)
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        self.assertEqual(2, process.wait.call_count)
+
+    def test_subprocess_runner_bounds_reader_completion_after_process_exit(self) -> None:
+        process = mock.Mock()
+        process.stdout = []
+        process.wait.return_value = 0
+        reader = mock.Mock()
+
+        with (
+            mock.patch("deploy.updater_service.subprocess.Popen", return_value=process),
+            mock.patch("deploy.updater_service.threading.Thread", return_value=reader),
+        ):
+            result = SubprocessCommandRunner().run(
+                ("/fixed", "update"),
+                env=SANITIZED_ENVIRONMENT,
+                timeout=5,
+                shell=False,
+            )
+
+        self.assertEqual(0, result.returncode)
+        reader.join.assert_called_once_with(
+            timeout=updater_service.READER_JOIN_TIMEOUT_SECONDS
+        )
+
     def test_subprocess_runner_streams_only_valid_markers_and_bounds_output(self) -> None:
         import sys
 

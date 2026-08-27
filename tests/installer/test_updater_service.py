@@ -40,6 +40,7 @@ from deploy.updater_service import (
     install_signal_handlers,
     read_runtime_gid,
 )
+from deploy.updater_trace import ProtectedUpdateTraceStore, TraceError
 
 
 NOW = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
@@ -48,6 +49,7 @@ TARGET_DIGEST = "sha256:" + "2" * 64
 TARGET_REFERENCE = f"{TRUSTED_IMAGE_REPOSITORY}:v1.4.0"
 LEGACY_PROTOCOL_VERSION = 1
 DETAILED_PROTOCOL_VERSION = 2
+TRACE_PROTOCOL_VERSION = 3
 
 
 def snapshot(phase: str = "available") -> UpdateSnapshot:
@@ -99,10 +101,12 @@ class RecordingRunner:
         exit_code: int = 0,
         output: str = "sensitive output",
         progress_stages: tuple[str, ...] = (),
+        trace_events: tuple[tuple[str, str, str | None], ...] = (),
     ) -> None:
         self.exit_code = exit_code
         self.output = output
         self.progress_stages = progress_stages
+        self.trace_events = trace_events
         self.argv: list[list[str]] = []
         self.environments: list[dict[str, str]] = []
         self.timeouts: list[int] = []
@@ -116,6 +120,7 @@ class RecordingRunner:
         timeout: int,
         shell: bool,
         progress_callback: Callable[[str], None] | None = None,
+        trace_callback: Callable[[str, str, str | None], None] | None = None,
     ) -> CommandResult:
         self.argv.append(list(argv))
         self.environments.append(dict(env))
@@ -124,6 +129,9 @@ class RecordingRunner:
         if progress_callback is not None:
             for stage in self.progress_stages:
                 progress_callback(stage)
+        if trace_callback is not None:
+            for code, outcome, stage in self.trace_events:
+                trace_callback(code, outcome, stage)
         return CommandResult(self.exit_code, self.output)
 
 
@@ -142,6 +150,15 @@ class BlockingRunner(RecordingRunner):
 class RaisingRunner(RecordingRunner):
     def run(self, *args, **kwargs) -> CommandResult:  # type: ignore[no-untyped-def]
         raise OSError("/opt/reachcommander must not be public")
+
+
+class TimeoutRunner(RecordingRunner):
+    def run(self, *args, **kwargs) -> CommandResult:  # type: ignore[no-untyped-def]
+        trace_callback = kwargs.get("trace_callback")
+        if trace_callback is not None:
+            trace_callback("commandTimedOut", "timedOut", "downloading")
+            trace_callback("terminationRequested", "started", "downloading")
+        raise CommandTimedOut(300, "/private updater output")
 
 
 class SequenceRunner:
@@ -167,6 +184,10 @@ class UpdaterRuntimeTests(unittest.TestCase):
             AtomicUpdateJournal(root / "system-update.json"),
             runner=runner or RecordingRunner(),
             clock=lambda: NOW,
+            trace_store=ProtectedUpdateTraceStore(
+                root / "update-traces",
+                clock=lambda: NOW,
+            ),
         )
 
     def test_apply_uses_only_fixed_command_and_sanitized_environment(self) -> None:
@@ -185,18 +206,173 @@ class UpdaterRuntimeTests(unittest.TestCase):
             self.assertEqual([False], runner.shell_values)
             self.assertNotIn("stable", runner.argv[0])
 
-    def test_v1_response_has_exact_legacy_shape_and_v2_adds_progress(self) -> None:
+    def test_protocol_responses_preserve_v1_v2_shapes_and_v3_adds_trace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = self.runtime(Path(directory))
 
             legacy = runtime.handle(request("check", LEGACY_PROTOCOL_VERSION))
             detailed = runtime.handle(request("check", DETAILED_PROTOCOL_VERSION))
+            traced = runtime.handle(request("check", TRACE_PROTOCOL_VERSION))
 
         self.assertEqual(LEGACY_PROTOCOL_VERSION, legacy["protocolVersion"])
+        legacy_fields = {
+            "protocolVersion",
+            "requestId",
+            "supported",
+            "channel",
+            "currentVersion",
+            "targetVersion",
+            "currentDigest",
+            "targetDigest",
+            "phase",
+            "reasonCode",
+            "detail",
+            "operationId",
+            "lastCheckedAt",
+            "updatedAt",
+        }
+        self.assertEqual(legacy_fields, set(legacy))
         self.assertNotIn("progressStage", legacy)
         self.assertEqual(DETAILED_PROTOCOL_VERSION, detailed["protocolVersion"])
+        self.assertEqual(legacy_fields | {"progressStage"}, set(detailed))
         self.assertIn("progressStage", detailed)
         self.assertIsNone(detailed["progressStage"])
+        self.assertNotIn("trace", detailed)
+        self.assertEqual(TRACE_PROTOCOL_VERSION, traced["protocolVersion"])
+        self.assertEqual(
+            legacy_fields | {"progressStage", "trace"},
+            set(traced),
+        )
+        self.assertIn("progressStage", traced)
+        self.assertIn("trace", traced)
+        self.assertIsNone(traced["trace"])
+
+    def test_v3_response_contains_only_the_bounded_public_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = self.runtime(
+                root,
+                runner=RecordingRunner(
+                    trace_events=(
+                        ("downloadStarted", "started", "downloading"),
+                        ("hostActivity", "activity", "downloading"),
+                        ("downloadCompleted", "succeeded", "downloading"),
+                    )
+                ),
+            )
+
+            runtime.handle(request("applyConfiguredChannel", TRACE_PROTOCOL_VERSION))
+            runtime.wait_for_worker()
+            response = runtime.handle(request("check", TRACE_PROTOCOL_VERSION))
+
+        trace = response["trace"]
+        self.assertIsInstance(trace, dict)
+        self.assertEqual(
+            {"startedAt", "elapsedSeconds", "lastActivityAt", "events"},
+            set(trace),
+        )
+        self.assertLessEqual(len(trace["events"]), 32)
+        self.assertEqual("operationAccepted", trace["events"][0]["code"])
+        self.assertEqual("operationCompleted", trace["events"][-1]["code"])
+        encoded = json.dumps(trace)
+        self.assertNotIn("exitCode", encoded)
+        self.assertNotIn("timeoutSeconds", encoded)
+        self.assertNotIn("sha256:", encoded)
+        self.assertNotIn("/private", encoded)
+        self.assertLessEqual(len(json.dumps(response).encode()), 65_536)
+
+    def test_timeout_is_terminal_traceable_and_uses_a_fixed_public_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = self.runtime(root, runner=TimeoutRunner())
+
+            runtime.handle(request("applyConfiguredChannel", TRACE_PROTOCOL_VERSION))
+            runtime.wait_for_worker()
+            response = runtime.handle(request("check", TRACE_PROTOCOL_VERSION))
+
+        self.assertEqual("failed", response["phase"])
+        self.assertEqual("update_command_timeout", response["reasonCode"])
+        self.assertEqual(
+            [
+                "operationAccepted",
+                "commandTimedOut",
+                "terminationRequested",
+                "operationFailed",
+            ],
+            [event["code"] for event in response["trace"]["events"]],
+        )
+        self.assertNotIn("private updater output", json.dumps(response))
+
+    def test_v3_trace_is_scoped_to_the_journal_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = RecordingRunner(
+                trace_events=(("downloadStarted", "started", "downloading"),)
+            )
+            runtime = self.runtime(root, runner=runner)
+
+            first = runtime.handle(
+                request("applyConfiguredChannel", TRACE_PROTOCOL_VERSION)
+            )
+            runtime.wait_for_worker()
+            runner.trace_events = (("backupStarted", "started", "installing"),)
+            second = runtime.handle(
+                request("applyConfiguredChannel", TRACE_PROTOCOL_VERSION)
+            )
+            runtime.wait_for_worker()
+            current = runtime.handle(request("check", TRACE_PROTOCOL_VERSION))
+
+        self.assertNotEqual(first["operationId"], second["operationId"])
+        codes = [event["code"] for event in current["trace"]["events"]]
+        self.assertIn("backupStarted", codes)
+        self.assertNotIn("downloadStarted", codes)
+
+    def test_interrupted_service_closes_only_the_matching_operation_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = AtomicUpdateJournal(root / "system-update.json")
+            operation = journal.begin(snapshot(), NOW)
+            traces = ProtectedUpdateTraceStore(root / "update-traces", clock=lambda: NOW)
+            traces.start(str(operation["operationId"]), NOW)
+            runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                journal,
+                runner=RecordingRunner(),
+                clock=lambda: NOW,
+                trace_store=traces,
+            )
+
+            response = runtime.handle(request("check", TRACE_PROTOCOL_VERSION))
+
+        self.assertEqual("update_interrupted", response["reasonCode"])
+        self.assertEqual("operationFailed", response["trace"]["events"][-1]["code"])
+
+    def test_trace_persistence_failure_does_not_change_the_update_result(self) -> None:
+        class FailingTraceStore:
+            def start(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                raise TraceError("trace unavailable")
+
+            def public_snapshot(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                raise TraceError("trace unavailable")
+
+            def prune(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                raise TraceError("trace unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = AtomicUpdateJournal(root / "system-update.json")
+            runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                journal,
+                runner=RecordingRunner(),
+                clock=lambda: NOW,
+                trace_store=FailingTraceStore(),
+            )
+
+            runtime.handle(request("applyConfiguredChannel", TRACE_PROTOCOL_VERSION))
+            runtime.wait_for_worker()
+
+            self.assertEqual("completed", journal.read_optional()["phase"])
 
     def test_apply_is_idempotent_while_operation_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

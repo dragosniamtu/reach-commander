@@ -23,6 +23,7 @@ from typing import Callable, Mapping
 try:
     from .updater_protocol import (
         DIGEST,
+        DETAILED_PROTOCOL_VERSION,
         LEGACY_PROTOCOL_VERSION,
         MAX_MESSAGE_BYTES,
         PROTOCOL_VERSION,
@@ -41,6 +42,7 @@ except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_pr
     sys.path.insert(0, str(library_directory))
     from updater_protocol import (  # type: ignore[no-redef]
         DIGEST,
+        DETAILED_PROTOCOL_VERSION,
         LEGACY_PROTOCOL_VERSION,
         MAX_MESSAGE_BYTES,
         PROTOCOL_VERSION,
@@ -56,11 +58,14 @@ except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_pr
     )
 
 try:
-    from .updater_trace import EVENT_OUTCOMES
+    from .updater_trace import EVENT_OUTCOMES, ProtectedUpdateTraceStore
 except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_trace.py
     library_directory = Path(__file__).resolve().parents[1] / "lib"
     sys.path.insert(0, str(library_directory))
-    from updater_trace import EVENT_OUTCOMES  # type: ignore[no-redef]
+    from updater_trace import (  # type: ignore[no-redef]
+        EVENT_OUTCOMES,
+        ProtectedUpdateTraceStore,
+    )
 
 
 FIXED_COMMAND = ("/usr/local/bin/reachcommander", "update")
@@ -105,6 +110,7 @@ _PUBLIC_DETAILS = {
     "update_completed": "ReachCommander was updated successfully.",
     "candidate_rolled_back": "The candidate was unhealthy and the previous version was restored.",
     "update_failed": "The update requires administrator attention.",
+    "update_command_timeout": "The host update command timed out and was stopped.",
     "update_interrupted": "The host update service restarted during an update.",
     "updater_journal_invalid": "The host update journal is invalid.",
 }
@@ -144,6 +150,7 @@ V1_RESPONSE_FIELDS = (
     "updatedAt",
 )
 V2_RESPONSE_FIELDS = (*V1_RESPONSE_FIELDS, "progressStage")
+V3_RESPONSE_FIELDS = (*V2_RESPONSE_FIELDS, "trace")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _EDGE_REFERENCE = f"{TRUSTED_IMAGE_REPOSITORY}:edge"
 
@@ -622,11 +629,13 @@ class UpdaterRuntime:
         *,
         runner: object | None = None,
         clock: Callable[[], dt.datetime] | None = None,
+        trace_store: object | None = None,
     ) -> None:
         self._discovery = discovery
         self._journal = journal
         self._runner = runner or SubprocessCommandRunner()
         self._clock = clock or (lambda: dt.datetime.now(dt.timezone.utc))
+        self._trace_store = trace_store
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
 
@@ -635,36 +644,38 @@ class UpdaterRuntime:
             try:
                 current = self._journal.read_optional()
             except JournalError:
-                return protocol_response(request, _journal_failure(self._clock()))
+                return self._response(request, _journal_failure(self._clock()))
 
             if current and current.get("phase") == "applying":
                 if self._worker is not None and self._worker.is_alive():
-                    return protocol_response(request, current)
+                    return self._response(request, current)
                 interrupted = self._journal.finish(
                     current,
                     "failed",
                     self._clock(),
                     reason_code="update_interrupted",
                 )
-                return protocol_response(request, interrupted)
+                self._finish_trace(interrupted, "failed")
+                return self._response(request, interrupted)
 
             if request.action == "check":
                 if current and current.get("phase") in _TERMINAL_PHASES and _is_recent(
                     current.get("updatedAt"), self._clock()
                 ):
-                    return protocol_response(request, current)
-                return protocol_response(request, self._check_and_store())
+                    return self._response(request, current)
+                return self._response(request, self._check_and_store())
 
             checked = self._discovery.check()
             if checked.phase != "available":
-                return protocol_response(
+                return self._response(
                     request,
                     self._journal.write_snapshot(checked),
                 )
             operation = self._journal.begin(checked, self._clock())
+            trace_active = self._start_trace(operation)
             self._worker = threading.Thread(
                 target=self._apply_worker,
-                args=(operation,),
+                args=(operation, trace_active),
                 name="reachcommander-update",
                 daemon=True,
             )
@@ -672,8 +683,9 @@ class UpdaterRuntime:
                 self._worker.start()
             except RuntimeError:
                 failed = self._journal.finish(operation, "failed", self._clock())
-                return protocol_response(request, failed)
-            return protocol_response(request, operation)
+                self._finish_trace(failed, "failed")
+                return self._response(request, failed)
+            return self._response(request, operation)
 
     def wait_for_worker(self, timeout: float = 5) -> None:
         worker = self._worker
@@ -686,8 +698,98 @@ class UpdaterRuntime:
         checked = self._discovery.check()
         return self._journal.write_snapshot(checked)
 
-    def _apply_worker(self, operation: Mapping[str, object]) -> None:
+    def _response(
+        self,
+        request: UpdaterRequest,
+        value: Mapping[str, object],
+    ) -> dict[str, object]:
+        return protocol_response(
+            request,
+            value,
+            trace_store=self._trace_store,
+            now=self._clock(),
+        )
+
+    def _start_trace(self, operation: Mapping[str, object]) -> bool:
+        operation_id = operation.get("operationId")
+        if self._trace_store is None or not isinstance(operation_id, str):
+            return False
+        try:
+            self._trace_store.start(operation_id, self._clock())  # type: ignore[attr-defined]
+            return True
+        except Exception:
+            self._trace_warning()
+            return False
+
+    def _append_trace(
+        self,
+        operation: Mapping[str, object],
+        code: str,
+        outcome: str,
+        *,
+        stage: str | None = None,
+        exit_code: int | None = None,
+        timeout_seconds: int | None = None,
+    ) -> bool:
+        operation_id = operation.get("operationId")
+        if self._trace_store is None or not isinstance(operation_id, str):
+            return False
+        try:
+            self._trace_store.append(  # type: ignore[attr-defined]
+                operation_id,
+                code,
+                outcome,
+                self._clock(),
+                stage=stage,
+                exit_code=exit_code,
+                timeout_seconds=timeout_seconds,
+            )
+            return True
+        except Exception:
+            self._trace_warning()
+            return False
+
+    def _finish_trace(
+        self,
+        operation: Mapping[str, object],
+        phase: str,
+        *,
+        exit_code: int | None = None,
+    ) -> None:
+        terminal = {
+            "completed": ("operationCompleted", "succeeded"),
+            "rolledBack": ("operationRolledBack", "succeeded"),
+            "failed": ("operationFailed", "failed"),
+        }[phase]
+        if not self._append_trace(
+            operation,
+            terminal[0],
+            terminal[1],
+            stage=operation.get("progressStage")
+            if isinstance(operation.get("progressStage"), str)
+            else None,
+            exit_code=exit_code,
+        ):
+            return
+        try:
+            self._trace_store.prune(None)  # type: ignore[union-attr]
+        except Exception:
+            self._trace_warning()
+
+    @staticmethod
+    def _trace_warning() -> None:
+        print(
+            "ReachCommander updater could not persist update trace data.",
+            file=sys.stderr,
+        )
+
+    def _apply_worker(
+        self,
+        operation: Mapping[str, object],
+        trace_active: bool,
+    ) -> None:
         operation_state = dict(operation)
+        trace_codes: set[str] = set()
 
         def record_progress(stage: str) -> None:
             nonlocal operation_state
@@ -704,6 +806,25 @@ class UpdaterRuntime:
                     file=sys.stderr,
                 )
 
+        def record_trace(code: str, outcome: str, stage: str | None) -> None:
+            nonlocal trace_active
+            if not trace_active:
+                return
+            if self._append_trace(
+                operation_state,
+                code,
+                outcome,
+                stage=stage,
+                timeout_seconds=COMMAND_TIMEOUT_SECONDS
+                if code == "commandTimedOut"
+                else None,
+            ):
+                trace_codes.add(code)
+            else:
+                trace_active = False
+
+        exit_code: int | None = None
+        reason_code: str | None = None
         try:
             completed = self._runner.run(
                 FIXED_COMMAND,
@@ -711,14 +832,34 @@ class UpdaterRuntime:
                 timeout=COMMAND_TIMEOUT_SECONDS,
                 shell=False,
                 progress_callback=record_progress,
+                trace_callback=record_trace,
             )
+            exit_code = completed.returncode
             phase = {0: "completed", 2: "rolledBack"}.get(
                 completed.returncode, "failed"
             )
+        except CommandTimedOut:
+            phase = "failed"
+            reason_code = "update_command_timeout"
+            if trace_active and "commandTimedOut" not in trace_codes:
+                record_trace(
+                    "commandTimedOut",
+                    "timedOut",
+                    operation_state.get("progressStage")
+                    if isinstance(operation_state.get("progressStage"), str)
+                    else None,
+                )
         except Exception:
             phase = "failed"
         try:
-            self._journal.finish(operation_state, phase, self._clock())
+            finished = self._journal.finish(
+                operation_state,
+                phase,
+                self._clock(),
+                reason_code=reason_code,
+            )
+            if trace_active:
+                self._finish_trace(finished, phase, exit_code=exit_code)
         except JournalError:
             # The service log remains fixed; command output and physical paths are omitted.
             print("ReachCommander updater could not persist the update result.", file=sys.stderr)
@@ -727,17 +868,36 @@ class UpdaterRuntime:
 def protocol_response(
     request: UpdaterRequest,
     value: Mapping[str, object],
+    *,
+    trace_store: object | None = None,
+    now: dt.datetime | None = None,
 ) -> dict[str, object]:
-    fields = (
-        V1_RESPONSE_FIELDS
-        if request.protocol_version == LEGACY_PROTOCOL_VERSION
-        else V2_RESPONSE_FIELDS
-    )
+    if request.protocol_version == LEGACY_PROTOCOL_VERSION:
+        fields = V1_RESPONSE_FIELDS
+    elif request.protocol_version == DETAILED_PROTOCOL_VERSION:
+        fields = V2_RESPONSE_FIELDS
+    else:
+        fields = V3_RESPONSE_FIELDS
     response: dict[str, object] = {
         "protocolVersion": request.protocol_version,
         "requestId": request.request_id,
     }
-    response.update({field: value.get(field) for field in fields})
+    response.update(
+        {field: value.get(field) for field in fields if field != "trace"}
+    )
+    if request.protocol_version == PROTOCOL_VERSION:
+        response["trace"] = None
+        operation_id = value.get("operationId")
+        if trace_store is not None and isinstance(operation_id, str):
+            try:
+                snapshot = trace_store.public_snapshot(  # type: ignore[attr-defined]
+                    operation_id,
+                    now,
+                )
+                if snapshot is not None:
+                    response["trace"] = snapshot.to_protocol()
+            except Exception:
+                UpdaterRuntime._trace_warning()
     reason = response.get("reasonCode")
     response["detail"] = _detail_for(str(reason or ""))
     return response
@@ -1046,6 +1206,8 @@ def _error_response(reason_code: str) -> dict[str, object]:
         "operationId": None,
         "lastCheckedAt": None,
         "updatedAt": None,
+        "progressStage": None,
+        "trace": None,
     }
 
 
@@ -1086,6 +1248,9 @@ def main() -> int:
     runtime = UpdaterRuntime(
         discovery,
         AtomicUpdateJournal(install_root / "state" / "system-update.json"),
+        trace_store=ProtectedUpdateTraceStore(
+            install_root / "state" / "update-traces"
+        ),
     )
     server = UpdaterSocketServer(
         runtime,

@@ -13,6 +13,17 @@ public enum SystemUpdatePhase
     Failed,
 }
 
+public enum SystemUpdateProgressStage
+{
+    Downloading,
+    Installing,
+    Restarting,
+    HealthChecking,
+    Restoring,
+    RestartingPrevious,
+    VerifyingRecovery,
+}
+
 public sealed record SystemUpdateStatus(
     int ProtocolVersion,
     bool Supported,
@@ -20,6 +31,7 @@ public sealed record SystemUpdateStatus(
     string? CurrentVersion,
     string? TargetVersion,
     SystemUpdatePhase Phase,
+    SystemUpdateProgressStage? ProgressStage,
     bool UpdateAvailable,
     bool CanApply,
     string? ReasonCode,
@@ -177,7 +189,8 @@ public static class SystemUpdateStatusFactory
         string targetVersion,
         string operationId,
         DateTimeOffset? lastCheckedAt,
-        DateTimeOffset now) =>
+        DateTimeOffset now,
+        SystemUpdateProgressStage? progressStage = null) =>
         Create(
             supported: true,
             channel,
@@ -190,7 +203,8 @@ public static class SystemUpdateStatusFactory
             "ReachCommander is applying the trusted update.",
             Required(operationId, nameof(operationId)),
             lastCheckedAt,
-            now);
+            now,
+            progressStage);
 
     public static SystemUpdateStatus Completed(
         string channel,
@@ -198,7 +212,8 @@ public static class SystemUpdateStatusFactory
         string targetVersion,
         string operationId,
         DateTimeOffset? lastCheckedAt,
-        DateTimeOffset now) =>
+        DateTimeOffset now,
+        SystemUpdateProgressStage? progressStage = null) =>
         Create(
             supported: true,
             channel,
@@ -211,7 +226,8 @@ public static class SystemUpdateStatusFactory
             "ReachCommander was updated successfully.",
             Required(operationId, nameof(operationId)),
             lastCheckedAt,
-            now);
+            now,
+            progressStage);
 
     public static SystemUpdateStatus RolledBack(
         string channel,
@@ -219,7 +235,8 @@ public static class SystemUpdateStatusFactory
         string targetVersion,
         string operationId,
         DateTimeOffset? lastCheckedAt,
-        DateTimeOffset now) =>
+        DateTimeOffset now,
+        SystemUpdateProgressStage? progressStage = null) =>
         Create(
             supported: true,
             channel,
@@ -232,7 +249,8 @@ public static class SystemUpdateStatusFactory
             "The candidate was unhealthy and the previous version was restored.",
             Required(operationId, nameof(operationId)),
             lastCheckedAt,
-            now);
+            now,
+            progressStage);
 
     public static SystemUpdateStatus Failed(
         string? channel,
@@ -241,7 +259,8 @@ public static class SystemUpdateStatusFactory
         string? operationId,
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now,
-        string detail = "The update requires administrator attention.") =>
+        string detail = "The update requires administrator attention.",
+        SystemUpdateProgressStage? progressStage = null) =>
         Create(
             supported: true,
             channel,
@@ -254,7 +273,8 @@ public static class SystemUpdateStatusFactory
             detail,
             operationId,
             lastCheckedAt,
-            now);
+            now,
+            progressStage);
 
     private static SystemUpdateStatus Create(
         bool supported,
@@ -268,7 +288,8 @@ public static class SystemUpdateStatusFactory
         string detail,
         string? operationId,
         DateTimeOffset? lastCheckedAt,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        SystemUpdateProgressStage? progressStage = null)
     {
         if (canApply &&
             (phase != SystemUpdatePhase.Available ||
@@ -279,6 +300,15 @@ public static class SystemUpdateStatusFactory
             throw new ArgumentException("Only a resolved available update can be applied.");
         }
 
+        if (progressStage is not null && phase is not (
+                SystemUpdatePhase.Applying or
+                SystemUpdatePhase.Completed or
+                SystemUpdatePhase.RolledBack or
+                SystemUpdatePhase.Failed))
+        {
+            throw new ArgumentException("Update progress requires an active or terminal operation.");
+        }
+
         return new SystemUpdateStatus(
             ProtocolVersion,
             supported,
@@ -286,6 +316,7 @@ public static class SystemUpdateStatusFactory
             Optional(currentVersion),
             Optional(targetVersion),
             phase,
+            progressStage,
             updateAvailable,
             canApply,
             reasonCode,

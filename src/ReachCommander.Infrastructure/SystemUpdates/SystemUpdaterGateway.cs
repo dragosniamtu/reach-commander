@@ -14,7 +14,8 @@ internal sealed record UpdaterSnapshot(
     string Detail,
     string? OperationId,
     DateTimeOffset? LastCheckedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? ProgressStage = null);
 
 internal interface ISystemUpdaterGateway
 {
@@ -47,8 +48,10 @@ internal sealed class SystemUpdaterGateway(
     ISystemUpdateRequestIdGenerator requestIds) : ISystemUpdaterGateway
 {
     public const int MaximumMessageBytes = 65_536;
+    private const int LegacyProtocolVersion = 1;
+    private const int DetailedProtocolVersion = 2;
 
-    private static readonly HashSet<string> ResponseFields =
+    private static readonly HashSet<string> V1ResponseFields =
     [
         "protocolVersion",
         "requestId",
@@ -64,6 +67,20 @@ internal sealed class SystemUpdaterGateway(
         "operationId",
         "lastCheckedAt",
         "updatedAt",
+    ];
+
+    private static readonly HashSet<string> V2ResponseFields =
+        [.. V1ResponseFields, "progressStage"];
+
+    private static readonly HashSet<string> ProgressStages =
+    [
+        "downloading",
+        "installing",
+        "restarting",
+        "healthChecking",
+        "restoring",
+        "restartingPrevious",
+        "verifyingRecovery",
     ];
 
     private static readonly HashSet<string> Phases =
@@ -113,10 +130,36 @@ internal sealed class SystemUpdaterGateway(
         string action,
         CancellationToken cancellationToken)
     {
+        var detailed = await ExchangeAsync(
+                action,
+                DetailedProtocolVersion,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!IsLegacyProtocolIncompatible(detailed.Response))
+        {
+            return Parse(
+                detailed.Response,
+                detailed.RequestId,
+                DetailedProtocolVersion);
+        }
+
+        var legacy = await ExchangeAsync(
+                action,
+                LegacyProtocolVersion,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return Parse(legacy.Response, legacy.RequestId, LegacyProtocolVersion);
+    }
+
+    private async Task<(string Response, Guid RequestId)> ExchangeAsync(
+        string action,
+        int protocolVersion,
+        CancellationToken cancellationToken)
+    {
         var requestId = requestIds.NewId();
         var request = JsonSerializer.Serialize(new
         {
-            protocolVersion = 1,
+            protocolVersion,
             requestId,
             action,
         }) + "\n";
@@ -126,15 +169,77 @@ internal sealed class SystemUpdaterGateway(
             throw new SystemUpdaterProtocolException("The updater response is too large.");
         }
 
-        return Parse(response, requestId);
+        return (response, requestId);
     }
 
-    private static UpdaterSnapshot Parse(string response, Guid expectedRequestId)
+    private static UpdaterSnapshot Parse(
+        string response,
+        Guid expectedRequestId,
+        int expectedProtocolVersion)
     {
-        JsonDocument document;
+        using var document = ParseDocument(response);
+        var root = document.RootElement;
+        var expectedFields = expectedProtocolVersion == LegacyProtocolVersion
+            ? V1ResponseFields
+            : V2ResponseFields;
+        ValidateFields(root, expectedFields);
+
+        var protocolVersion = RequiredInt(root, "protocolVersion");
+        if (protocolVersion != expectedProtocolVersion)
+        {
+            throw new SystemUpdaterProtocolException("The updater protocol version is incompatible.");
+        }
+
+        var requestId = RequiredString(root, "requestId");
+        if (!Guid.TryParseExact(requestId, "D", out var parsedRequestId) ||
+            parsedRequestId != expectedRequestId)
+        {
+            throw new SystemUpdaterProtocolException("The updater response identifier does not match.");
+        }
+
+        var phase = RequiredString(root, "phase");
+        if (!Phases.Contains(phase))
+        {
+            throw new SystemUpdaterProtocolException("The updater phase is incompatible.");
+        }
+
+        var reasonCode = RequiredLogicalString(root, "reasonCode");
+        if (!ReasonsByPhase[phase].Contains(reasonCode))
+        {
+            throw new SystemUpdaterProtocolException("The updater phase and reason are incompatible.");
+        }
+
+        var progressStage = expectedProtocolVersion == DetailedProtocolVersion
+            ? OptionalProgressStage(root)
+            : null;
+        if (progressStage is not null && phase is not (
+                "applying" or "completed" or "rolledBack" or "failed"))
+        {
+            throw new SystemUpdaterProtocolException(
+                "The updater phase and progress stage are incompatible.");
+        }
+
+        var updatedAt = RequiredTimestamp(root, "updatedAt");
+        return new UpdaterSnapshot(
+            protocolVersion,
+            RequiredBoolean(root, "supported"),
+            OptionalLogicalString(root, "channel"),
+            OptionalLogicalString(root, "currentVersion"),
+            OptionalLogicalString(root, "targetVersion"),
+            phase,
+            reasonCode,
+            RequiredBoundedString(root, "detail"),
+            OptionalLogicalString(root, "operationId"),
+            OptionalTimestamp(root, "lastCheckedAt"),
+            updatedAt,
+            progressStage);
+    }
+
+    private static JsonDocument ParseDocument(string response)
+    {
         try
         {
-            document = JsonDocument.Parse(response, new JsonDocumentOptions
+            return JsonDocument.Parse(response, new JsonDocumentOptions
             {
                 CommentHandling = JsonCommentHandling.Disallow,
                 AllowTrailingCommas = false,
@@ -143,76 +248,90 @@ internal sealed class SystemUpdaterGateway(
         }
         catch (JsonException exception)
         {
-            throw new SystemUpdaterProtocolException($"The updater returned invalid JSON: {exception.GetType().Name}.");
+            throw new SystemUpdaterProtocolException(
+                $"The updater returned invalid JSON: {exception.GetType().Name}.");
         }
+    }
 
-        using (document)
+    private static void ValidateFields(JsonElement root, HashSet<string> expectedFields)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
         {
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                throw new SystemUpdaterProtocolException("The updater response must be an object.");
-            }
-
-            var fields = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (!ResponseFields.Contains(property.Name) || !fields.Add(property.Name))
-                {
-                    throw new SystemUpdaterProtocolException("The updater response schema is incompatible.");
-                }
-            }
-
-            if (!ResponseFields.SetEquals(fields))
-            {
-                throw new SystemUpdaterProtocolException("The updater response is incomplete.");
-            }
-
-            var root = document.RootElement;
-            var protocolVersion = RequiredInt(root, "protocolVersion");
-            if (protocolVersion != 1)
-            {
-                throw new SystemUpdaterProtocolException("The updater protocol version is incompatible.");
-            }
-
-            var requestId = RequiredString(root, "requestId");
-            if (!Guid.TryParseExact(requestId, "D", out var parsedRequestId) ||
-                parsedRequestId != expectedRequestId)
-            {
-                throw new SystemUpdaterProtocolException("The updater response identifier does not match.");
-            }
-
-            var phase = RequiredString(root, "phase");
-            if (!Phases.Contains(phase))
-            {
-                throw new SystemUpdaterProtocolException("The updater phase is incompatible.");
-            }
-
-            var reasonCode = RequiredLogicalString(root, "reasonCode");
-            if (!ReasonsByPhase[phase].Contains(reasonCode))
-            {
-                throw new SystemUpdaterProtocolException("The updater phase and reason are incompatible.");
-            }
-
-            var updatedAt = RequiredTimestamp(root, "updatedAt");
-            return new UpdaterSnapshot(
-                protocolVersion,
-                RequiredBoolean(root, "supported"),
-                OptionalLogicalString(root, "channel"),
-                OptionalLogicalString(root, "currentVersion"),
-                OptionalLogicalString(root, "targetVersion"),
-                phase,
-                reasonCode,
-                RequiredBoundedString(root, "detail"),
-                OptionalLogicalString(root, "operationId"),
-                OptionalTimestamp(root, "lastCheckedAt"),
-                updatedAt);
+            throw new SystemUpdaterProtocolException("The updater response must be an object.");
         }
+
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!expectedFields.Contains(property.Name) || !fields.Add(property.Name))
+            {
+                throw new SystemUpdaterProtocolException("The updater response schema is incompatible.");
+            }
+        }
+
+        if (!expectedFields.SetEquals(fields))
+        {
+            throw new SystemUpdaterProtocolException("The updater response is incomplete.");
+        }
+    }
+
+    private static bool IsLegacyProtocolIncompatible(string response)
+    {
+        try
+        {
+            using var document = ParseDocument(response);
+            var root = document.RootElement;
+            ValidateFields(root, V1ResponseFields);
+            return RequiredInt(root, "protocolVersion") == LegacyProtocolVersion &&
+                   root.GetProperty("requestId").ValueKind == JsonValueKind.Null &&
+                   RequiredBoolean(root, "supported") &&
+                   IsNull(root, "channel") &&
+                   IsNull(root, "currentVersion") &&
+                   IsNull(root, "targetVersion") &&
+                   IsNull(root, "currentDigest") &&
+                   IsNull(root, "targetDigest") &&
+                   RequiredString(root, "phase") == "unavailable" &&
+                   RequiredLogicalString(root, "reasonCode") == "protocol_incompatible" &&
+                   RequiredBoundedString(root, "detail") ==
+                   "The host updater protocol is incompatible." &&
+                   IsNull(root, "operationId") &&
+                   IsNull(root, "lastCheckedAt") &&
+                   IsNull(root, "updatedAt");
+        }
+        catch (SystemUpdaterProtocolException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsNull(JsonElement root, string name) =>
+        root.GetProperty(name).ValueKind == JsonValueKind.Null;
+
+    private static string? OptionalProgressStage(JsonElement root)
+    {
+        var property = root.GetProperty("progressStage");
+        if (property.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var value = property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+        if (value is null || !ProgressStages.Contains(value))
+        {
+            throw new SystemUpdaterProtocolException(
+                "The updater progress stage is incompatible.");
+        }
+
+        return value;
     }
 
     private static int RequiredInt(JsonElement root, string name)
     {
         var property = root.GetProperty(name);
-        if (!property.TryGetInt32(out var value))
+        if (property.ValueKind != JsonValueKind.Number ||
+            !property.TryGetInt32(out var value))
         {
             throw new SystemUpdaterProtocolException($"The updater field '{name}' is invalid.");
         }

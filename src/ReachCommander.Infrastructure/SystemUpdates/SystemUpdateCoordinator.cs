@@ -462,7 +462,7 @@ internal sealed class SystemUpdateCoordinator(
 
     private static SystemUpdateStatus Map(UpdaterSnapshot snapshot, DateTimeOffset now)
     {
-        if (snapshot.ProtocolVersion != SystemUpdateStatusFactory.ProtocolVersion)
+        if (snapshot.ProtocolVersion is not (1 or 2))
         {
             return SystemUpdateStatusFactory.Incompatible(now);
         }
@@ -504,28 +504,32 @@ internal sealed class SystemUpdateCoordinator(
                 Required(snapshot.TargetVersion),
                 Required(snapshot.OperationId),
                 snapshot.LastCheckedAt,
-                snapshot.UpdatedAt),
+                snapshot.UpdatedAt,
+                Progress(snapshot.ProgressStage)),
             "completed" => SystemUpdateStatusFactory.Completed(
                 Required(snapshot.Channel),
                 Required(snapshot.CurrentVersion),
                 Required(snapshot.TargetVersion),
                 Required(snapshot.OperationId),
                 snapshot.LastCheckedAt,
-                snapshot.UpdatedAt),
+                snapshot.UpdatedAt,
+                Progress(snapshot.ProgressStage)),
             "rolledBack" => SystemUpdateStatusFactory.RolledBack(
                 Required(snapshot.Channel),
                 Required(snapshot.CurrentVersion),
                 Required(snapshot.TargetVersion),
                 Required(snapshot.OperationId),
                 snapshot.LastCheckedAt,
-                snapshot.UpdatedAt),
+                snapshot.UpdatedAt,
+                Progress(snapshot.ProgressStage)),
             "failed" => SystemUpdateStatusFactory.Failed(
                 snapshot.Channel,
                 snapshot.CurrentVersion,
                 snapshot.TargetVersion,
                 snapshot.OperationId,
                 snapshot.LastCheckedAt,
-                snapshot.UpdatedAt),
+                snapshot.UpdatedAt,
+                progressStage: Progress(snapshot.ProgressStage)),
             _ => SystemUpdateStatusFactory.Incompatible(now),
         };
     }
@@ -578,6 +582,20 @@ internal sealed class SystemUpdateCoordinator(
         string.IsNullOrWhiteSpace(value)
             ? throw new SystemUpdaterProtocolException("The updater response is incomplete.")
             : value;
+
+    private static SystemUpdateProgressStage? Progress(string? stage) => stage switch
+    {
+        null => null,
+        "downloading" => SystemUpdateProgressStage.Downloading,
+        "installing" => SystemUpdateProgressStage.Installing,
+        "restarting" => SystemUpdateProgressStage.Restarting,
+        "healthChecking" => SystemUpdateProgressStage.HealthChecking,
+        "restoring" => SystemUpdateProgressStage.Restoring,
+        "restartingPrevious" => SystemUpdateProgressStage.RestartingPrevious,
+        "verifyingRecovery" => SystemUpdateProgressStage.VerifyingRecovery,
+        _ => throw new SystemUpdaterProtocolException(
+            "The updater progress stage is incompatible."),
+    };
 
     private static string PublicReason(string reasonCode) => reasonCode switch
     {

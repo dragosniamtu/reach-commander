@@ -33,6 +33,25 @@ public sealed class SystemUpdateContractTests
     }
 
     [Fact]
+    public void Applying_status_serializes_only_the_logical_progress_stage()
+    {
+        var status = SystemUpdateStatusFactory.Applying(
+            "stable",
+            "v1.3.0",
+            "v1.4.0",
+            "operation-1",
+            Now,
+            Now,
+            SystemUpdateProgressStage.Downloading);
+
+        var json = JsonSerializer.Serialize(status, JsonOptions);
+
+        Assert.Contains("\"progressStage\":\"downloading\"", json);
+        Assert.DoesNotContain("docker", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sha256:", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Apply_contract_accepts_no_target_input()
     {
         var method = typeof(ISystemUpdateService).GetMethod(nameof(ISystemUpdateService.ApplyAsync));

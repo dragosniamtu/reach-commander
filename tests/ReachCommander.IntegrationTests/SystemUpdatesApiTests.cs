@@ -26,6 +26,24 @@ public sealed class SystemUpdatesApiTests
     }
 
     [Fact]
+    public async Task Get_returns_only_the_logical_applying_progress_stage()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        factory.SystemUpdates.SetApplying(SystemUpdateProgressStage.HealthChecking);
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.GetAsync("/api/system-update");
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"phase\":\"applying\"", json);
+        Assert.Contains("\"progressStage\":\"healthChecking\"", json);
+        Assert.DoesNotContain("sha256:", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/opt/", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Public detail", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Apply_has_no_body_and_returns_accepted_operation()
     {
         await using var factory = new ReachCommanderApiFactory();

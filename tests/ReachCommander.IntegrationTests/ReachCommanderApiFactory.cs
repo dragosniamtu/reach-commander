@@ -472,7 +472,10 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 Now,
                 Now,
                 progressStage,
-                trace);
+                trace) with
+            {
+                ProtocolVersion = trace is null ? 2 : 3,
+            };
 
         public void SetBackgroundOperationsActive(bool value) =>
             _backgroundOperationsActive = value;

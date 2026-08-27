@@ -337,6 +337,7 @@ public sealed class SystemUpdateCoordinatorTests
         });
 
         var status = await coordinator.GetAsync(default);
+        Assert.Equal(3, status.ProtocolVersion);
         Assert.Equal("operation-1", status.OperationId);
         Assert.Equal(6, status.Trace!.Events[^1].Sequence);
     }

@@ -516,7 +516,7 @@ internal sealed class SystemUpdateCoordinator(
             return SystemUpdateStatusFactory.Unavailable(now);
         }
 
-        return snapshot.Phase switch
+        var mapped = snapshot.Phase switch
         {
             "unavailable" when snapshot.ReasonCode == "version_pinned" =>
                 SystemUpdateStatusFactory.Pinned(
@@ -580,6 +580,7 @@ internal sealed class SystemUpdateCoordinator(
                 trace: snapshot.Trace),
             _ => SystemUpdateStatusFactory.Incompatible(now),
         };
+        return mapped with { ProtocolVersion = snapshot.ProtocolVersion };
     }
 
     private async Task<SystemUpdateStatus> WithOperationEligibilityAsync(

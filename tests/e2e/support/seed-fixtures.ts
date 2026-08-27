@@ -45,6 +45,23 @@ export type SystemUpdateProgressStage =
   | "restartingPrevious"
   | "verifyingRecovery";
 
+export interface SystemUpdateTraceEventFixture {
+  readonly sequence: number;
+  readonly timestamp: string;
+  readonly elapsedSeconds: number;
+  readonly code: string;
+  readonly stage: SystemUpdateProgressStage | null;
+  readonly outcome:
+    "started" | "activity" | "succeeded" | "failed" | "timedOut";
+}
+
+export interface SystemUpdateTraceFixture {
+  readonly startedAt: string;
+  readonly elapsedSeconds: number;
+  readonly lastActivityAt: string | null;
+  readonly events: readonly SystemUpdateTraceEventFixture[];
+}
+
 export interface SystemUpdateFixture {
   readonly protocolVersion: number;
   readonly supported: boolean;
@@ -60,6 +77,7 @@ export interface SystemUpdateFixture {
   readonly operationId: string | null;
   readonly lastCheckedAt: string | null;
   readonly updatedAt: string;
+  readonly trace: SystemUpdateTraceFixture | null;
 }
 
 export function systemUpdateFixture(
@@ -80,6 +98,7 @@ export function systemUpdateFixture(
     operationId: null,
     lastCheckedAt: "2026-08-25T10:00:00Z",
     updatedAt: "2026-08-25T10:00:00Z",
+    trace: null,
     ...overrides,
   };
 }

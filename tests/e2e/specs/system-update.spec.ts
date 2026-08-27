@@ -70,6 +70,38 @@ const available = () =>
     detail: "A verified ReachCommander update is available.",
   });
 
+function tracedStatus(
+  overrides: Partial<SystemUpdateFixture> = {},
+): SystemUpdateFixture {
+  const startedAt = new Date(Date.now() - 5_000).toISOString();
+  return systemUpdateFixture({
+    protocolVersion: 3,
+    targetVersion: "v1.4.0",
+    phase: "applying",
+    progressStage: "downloading",
+    updateAvailable: true,
+    reasonCode: "update_applying",
+    operationId: "operation-traced",
+    updatedAt: new Date().toISOString(),
+    trace: {
+      startedAt,
+      elapsedSeconds: 5,
+      lastActivityAt: startedAt,
+      events: [
+        {
+          sequence: 1,
+          timestamp: startedAt,
+          elapsedSeconds: 0,
+          code: "operationAccepted",
+          stage: null,
+          outcome: "started",
+        },
+      ],
+    },
+    ...overrides,
+  });
+}
+
 test("system update enables only a discovered update and recovers after restart", async ({
   page,
 }) => {
@@ -192,6 +224,119 @@ test("system update advances through host-confirmed stages and activates the app
   expect(routes.applyBodies).toEqual([null]);
 });
 
+test("system update grows a sanitized technical timeline while polling", async ({
+  page,
+}) => {
+  const initial = tracedStatus();
+  const routes = await routeSystemUpdates(page, available());
+  routes.applyWith(initial);
+  await page.goto("/");
+  await page.getByTestId("system-update-trigger").click();
+  await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+  const details = page.locator("details.technical-details");
+  await details.locator("summary").click();
+  await expect(details).toContainText("Update accepted");
+  await expect(details).toContainText("Elapsed");
+
+  const activityAt = new Date().toISOString();
+  routes.publish(
+    tracedStatus({
+      trace: {
+        ...initial.trace!,
+        elapsedSeconds: 8,
+        lastActivityAt: activityAt,
+        events: [
+          ...initial.trace!.events,
+          {
+            sequence: 2,
+            timestamp: activityAt,
+            elapsedSeconds: 8,
+            code: "hostActivity",
+            stage: "downloading",
+            outcome: "activity",
+          },
+        ],
+      },
+    }),
+  );
+
+  await expect(details).toContainText("Host download activity confirmed", {
+    timeout: 15_000,
+  });
+  await expect(
+    details
+      .getByRole("list", { name: "Sanitized update events" })
+      .locator("li"),
+  ).toHaveCount(2);
+  await expect(details).not.toContainText(
+    /docker|sha256:|\/opt\/|exitCode|timeoutSeconds/i,
+  );
+});
+
+test("system update auto-opens stale and timed-out technical details", async ({
+  page,
+}) => {
+  const staleAt = "2000-01-01T00:00:00Z";
+  const routes = await routeSystemUpdates(page, available());
+  routes.applyWith(
+    tracedStatus({
+      progressStage: "downloading",
+      trace: {
+        startedAt: staleAt,
+        elapsedSeconds: 120,
+        lastActivityAt: null,
+        events: [
+          {
+            sequence: 4,
+            timestamp: staleAt,
+            elapsedSeconds: 0,
+            code: "operationAccepted",
+            stage: null,
+            outcome: "started",
+          },
+        ],
+      },
+    }),
+  );
+
+  await page.goto("/");
+  await page.getByTestId("system-update-trigger").click();
+  await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+  const details = page.locator("details.technical-details");
+  await expect(details).toHaveAttribute("open", "");
+  await expect(
+    page.getByText(/No host activity has been confirmed/),
+  ).toBeVisible();
+
+  routes.publish(
+    tracedStatus({
+      phase: "failed",
+      progressStage: "downloading",
+      reasonCode: "update_failed",
+      detail: "The update requires administrator attention.",
+      trace: {
+        startedAt: staleAt,
+        elapsedSeconds: 120,
+        lastActivityAt: null,
+        events: [
+          {
+            sequence: 5,
+            timestamp: staleAt,
+            elapsedSeconds: 120,
+            code: "commandTimedOut",
+            stage: "downloading",
+            outcome: "timedOut",
+          },
+        ],
+      },
+    }),
+  );
+  await expect(details).toContainText("Update command timed out");
+  await expect(details).toContainText("Timed out");
+});
+
 test("system update shows automatic recovery and the restored result", async ({
   page,
 }) => {
@@ -263,14 +408,15 @@ test("system update shows automatic recovery and the restored result", async ({
   ).toHaveCount(3);
 });
 
-test("system update uses generic progress with a protocol-v1 helper", async ({
+test("system update uses generic progress and refresh guidance with a protocol-v2 helper", async ({
   page,
 }) => {
   const routes = await routeSystemUpdates(page, available());
   routes.applyWith(
     systemUpdateFixture({
+      protocolVersion: 2,
       phase: "applying",
-      operationId: "operation-v1",
+      operationId: "operation-v2",
       progressStage: null,
       reasonCode: "update_applying",
       updatedAt: new Date().toISOString(),
@@ -287,6 +433,10 @@ test("system update uses generic progress with a protocol-v1 helper", async ({
       .getByText("Applying trusted update"),
   ).toBeVisible();
   await expect(page.getByText("Downloading verified image")).toHaveCount(0);
+  await page.locator("details.technical-details summary").click();
+  await expect(
+    page.getByText(/refresh the Ubuntu installer bundle/),
+  ).toBeVisible();
 });
 
 test("system update confirmation is immutable, cancellable, and returns focus", async ({

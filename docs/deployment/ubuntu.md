@@ -234,6 +234,8 @@ sudo reachcommander status
 sudo reachcommander doctor
 sudo reachcommander logs
 sudo reachcommander logs --follow
+sudo reachcommander update-log
+sudo reachcommander update-log --follow
 sudo reachcommander start
 sudo reachcommander stop
 sudo reachcommander restart
@@ -265,9 +267,9 @@ The installer also deploys the root-owned `reachcommander-updater.service`. Reac
 
 The application is never given Docker control. Its container mounts the restricted Unix socket directory `/run/reachcommander-updater` read-only and never mounts `/var/run/docker.sock`. Browser and API requests contain no channel, image, digest, executable, arguments, or target version. The root helper owns discovery, backup, Compose activation, health validation, rollback, and its durable result journal.
 
-The protocol-v2 helper in the current installer bundle reports fixed logical stages for downloading the verified image, installing deployment state, restarting ReachCommander, checking health, and recovering the previous version. ReachCommander renders those confirmed boundaries as an ordered checklist. A protocol-v1 helper remains compatible and performs the same protected update, but the browser shows one **Applying trusted update** row because finer stages are unavailable. That generic row does not mean the transaction is stalled. Raw host logs, Docker output, physical paths, and commands are deliberately not exposed through the API or browser.
+The protocol-v3 helper in the current installer bundle adds a bounded, sanitized trace to the fixed logical stages for downloading the verified image, installing deployment state, restarting ReachCommander, verifying the selected container, checking health, handling timeouts, and recovering the previous version. Open **Technical details** to see elapsed time, last confirmed host activity, and ordered safe events. The section opens automatically after 60 seconds without a confirmed event or when a terminal result needs attention. Protocol-v2 remains compatible and reports the stage checklist without an event trace. Protocol-v1 remains compatible and shows one **Applying trusted update** row because finer stages are unavailable. Raw host logs, Docker output, physical paths, commands, digests, exit codes, and timeout values are deliberately not exposed through the API or browser.
 
-Existing installations must run the new checksum-verified installer once, using the same inspect, `SHA256SUMS`, and `sha256sum --check --strict SHA256SUMS` process described above. Rerunning it upgrades the root-owned helper, systemd unit, and Compose socket override without moving or replacing the configured sources, authentication record, Data Protection keys, durable operation state, or mounted source contents. Until the first helper installation is complete, the UI reports system updates as unavailable. Future root-helper changes still require another verified installer refresh; updating the application image cannot replace the host helper.
+Existing installations must run the new checksum-verified installer once, using the same inspect, `SHA256SUMS`, and `sha256sum --check --strict SHA256SUMS` process described above. The checksum-verified installer upgrades the deployment to the protocol-v3 helper, systemd unit, and Compose socket override without moving or replacing the configured sources, authentication record, Data Protection keys, durable operation state, protected traces, or mounted source contents. Old stuck update events cannot be reconstructed; structured capture starts with the next update after the refresh. Until the first helper installation is complete, the UI reports system updates as unavailable. Future root-helper changes still require another verified installer refresh; updating the application image cannot replace the host helper.
 
 Inspect the boundary and its journal without changing state:
 
@@ -275,10 +277,12 @@ Inspect the boundary and its journal without changing state:
 sudo systemctl status reachcommander-updater.service
 sudo journalctl -u reachcommander-updater.service --since today
 sudo reachcommander status
+sudo reachcommander update-log
+sudo reachcommander update-log --follow
 sudo reachcommander doctor
 ```
 
-During Apply, ReachCommander temporarily drains new mutations, waits for active work to finish, and restarts. Keep the browser tab open: it reconnects automatically, activates the matching PWA shell, and reloads once. If the candidate fails its health check, the helper restores the prior digest and reports the rollback. Preserve `/opt/reachcommander/state/system-update.json` and the normal update backups when investigating a failure. If the screen reaches **Update requires attention**, run `sudo reachcommander doctor` before retrying; use the root-owned service journal for operational detail rather than expecting raw logs in the browser.
+During Apply, ReachCommander temporarily drains new mutations and waits for active work to finish. Only the ReachCommander application container is recreated; Docker Engine is never restarted. Keep the browser tab open: it reconnects automatically, activates the matching PWA shell, and reloads once. If the candidate fails its identity or health check, the helper restores the prior digest and verifies the recovered container. Preserve `/opt/reachcommander/state/system-update.json`, `/opt/reachcommander/state/update-traces`, and the normal update backups when investigating a failure. Use `sudo reachcommander update-log` for the latest protected trace, `sudo reachcommander update-log --follow` while an operation is active, and `sudo journalctl -u reachcommander-updater.service --since today` for service-level diagnosis. If the screen reaches **Update requires attention**, run `sudo reachcommander doctor` before retrying.
 
 The in-app control is supported only for Ubuntu installer-managed deployments. It remains safely disabled for Windows development, macOS Docker Desktop, and manual container deployments because those environments do not have this restricted systemd boundary.
 
@@ -305,4 +309,4 @@ Keep a verified backup until you have confirmed that you no longer need the acco
 - **Writes are denied:** the source must be explicitly read-write in application policy, mounted read-write, and writable by the configured UID/GID. Do not weaken unrelated parent directories.
 - **PWA installation is not offered:** use the HTTPS hostname, not a plain HTTP LAN address, and keep the application and API on the same origin.
 - **The login screen requests first-run setup unexpectedly:** run `sudo reachcommander doctor`, confirm `/opt/reachcommander/data/auth/account.json` is present and valid, and restore the account plus `/opt/reachcommander/data/keys` together if they were lost. Do not create a replacement account until the missing state is understood.
-- **An update was interrupted:** do not edit the transaction marker. Run `sudo reachcommander doctor`, inspect logs, and use the retained update backup for recovery.
+- **An update was interrupted:** do not edit the transaction marker or protected trace. Run `sudo reachcommander update-log`, `sudo journalctl -u reachcommander-updater.service --since today`, and `sudo reachcommander doctor`; use the retained update backup for recovery.

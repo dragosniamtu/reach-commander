@@ -272,3 +272,28 @@ test('operator docs define the Ubuntu installer-managed system update boundary',
   assert.match(content, /existing installations[\s\S]*run[\s\S]*checksum-verified installer/i);
   assert.match(content, /updater helper[\s\S]*future installer/i);
 });
+
+test('operator docs explain bounded update traces and container-only restart behavior', async () => {
+  const paths = [
+    'README.md',
+    'docs/deployment/ubuntu.md',
+    'deploy/README.md',
+  ];
+  const content = (await Promise.all(paths.map(readRequired))).join('\n');
+  for (const required of [
+    'protocol-v3',
+    'Technical details',
+    'sudo reachcommander update-log',
+    'sudo reachcommander update-log --follow',
+    'sudo journalctl -u reachcommander-updater.service --since today',
+    'old stuck update events cannot be reconstructed',
+    'only the ReachCommander application container is recreated',
+    'Docker Engine is never restarted',
+  ]) {
+    assert.ok(
+      content.toLowerCase().includes(required.toLowerCase()),
+      `update trace docs are missing: ${required}`,
+    );
+  }
+  assert.match(content, /checksum-verified installer[\s\S]*upgrades[\s\S]*protocol-v3 helper/i);
+});

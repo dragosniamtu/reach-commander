@@ -50,6 +50,7 @@ required_sources=(
   "$SCRIPT_DIRECTORY/render_config.py"
   "$SCRIPT_DIRECTORY/updater_protocol.py"
   "$SCRIPT_DIRECTORY/updater_service.py"
+  "$SCRIPT_DIRECTORY/updater_trace.py"
   "$SCRIPT_DIRECTORY/lib/common.sh"
   "$SCRIPT_DIRECTORY/systemd/reachcommander-updater.service"
 )
@@ -72,6 +73,7 @@ install -m 0755 -- "$SCRIPT_DIRECTORY/reachcommander" "$PACKAGE_ROOT/reachcomman
 install -m 0644 -- "$SCRIPT_DIRECTORY/render_config.py" "$PACKAGE_ROOT/render_config.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/updater_protocol.py" "$PACKAGE_ROOT/updater_protocol.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/updater_service.py" "$PACKAGE_ROOT/updater_service.py"
+install -m 0644 -- "$SCRIPT_DIRECTORY/updater_trace.py" "$PACKAGE_ROOT/updater_trace.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/lib/common.sh" "$PACKAGE_ROOT/lib/common.sh"
 install -m 0644 -- "$SCRIPT_DIRECTORY/systemd/reachcommander-updater.service" "$PACKAGE_ROOT/systemd/reachcommander-updater.service"
 chmod 0755 -- "$PACKAGE_ROOT" "$PACKAGE_ROOT/lib" "$PACKAGE_ROOT/systemd" "$PACKAGE_ROOT/install.sh" "$PACKAGE_ROOT/reachcommander" "$PACKAGE_ROOT/updater_service.py"
@@ -83,6 +85,7 @@ chmod 0644 -- \
   "$PACKAGE_ROOT/lan_address.py" \
   "$PACKAGE_ROOT/render_config.py" \
   "$PACKAGE_ROOT/updater_protocol.py" \
+  "$PACKAGE_ROOT/updater_trace.py" \
   "$PACKAGE_ROOT/lib/common.sh" \
   "$PACKAGE_ROOT/systemd/reachcommander-updater.service"
 
@@ -115,6 +118,7 @@ tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installe
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/systemd/reachcommander-updater.service
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/updater_protocol.py
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/updater_service.py
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/updater_trace.py
 if ! gzip -n <"$TAR_TEMPORARY" >"$ARCHIVE_TEMPORARY"; then
   rm -f -- "$TAR_TEMPORARY"
   rm -f -- "$ARCHIVE_TEMPORARY"

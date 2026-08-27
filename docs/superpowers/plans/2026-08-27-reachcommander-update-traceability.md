@@ -483,7 +483,7 @@ Define `SystemUpdateTraceEventCode` with Task 1's public codes. Permit trace onl
 
 - [ ] **Step 4: Implement parsing and monotonic mapping**
 
-Request v3, then v2, then v1 only on exact v1-shaped incompatibility. Validate exact nested fields, 32-event maximum, sequences starting at one, nonnegative monotonic elapsed time, valid timestamps, and allowlisted enums. Coordinator publishes only matching-operation traces and never replaces a longer same-operation trace with a shorter one.
+Request v3, then v2, then v1 only on exact v1-shaped incompatibility. Validate exact nested fields, a 32-event maximum, positive strictly increasing sequences (the first visible sequence may be greater than one because this is the latest-event window), nonnegative monotonic elapsed time, valid timestamps, and allowlisted enums. Coordinator publishes only matching-operation traces and never replaces a newer same-operation trace with an older one.
 
 - [ ] **Step 5: Verify GREEN**
 

@@ -39,6 +39,7 @@ usage() {
 Usage:
   reachcommander status
   reachcommander logs [--follow]
+  reachcommander update-log [--follow]
   reachcommander start
   reachcommander stop
   reachcommander restart
@@ -57,6 +58,12 @@ validate_invocation() {
       (( argument_count == 1 )) || return 64
       ;;
     logs)
+      if (( argument_count == 1 )); then
+        return 0
+      fi
+      (( argument_count == 2 )) && [[ "${2:-}" == '--follow' ]] || return 64
+      ;;
+    update-log)
       if (( argument_count == 1 )); then
         return 0
       fi
@@ -115,6 +122,30 @@ command_logs() {
     rc_compose logs --tail 200 --follow reachcommander
   else
     rc_compose logs --tail 200 reachcommander
+  fi
+}
+
+run_update_trace_cli() {
+  local test_trace_root
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' ]] && ((EUID != 0)); then
+    test_trace_root="$RC_INSTALL_ROOT/state/update-traces"
+    if command -v cygpath >/dev/null 2>&1; then
+      test_trace_root="$(cygpath -w -- "$test_trace_root")"
+    fi
+    REACHCOMMANDER_TEST_TRACE_ROOT="$test_trace_root" \
+      PYTHONDONTWRITEBYTECODE=1 \
+      python3 "$RC_INSTALL_ROOT/bin/update_trace_cli.py" "$@"
+    return
+  fi
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$RC_INSTALL_ROOT/bin/update_trace_cli.py" "$@"
+}
+
+command_update_log() {
+  if [[ -n "${1:-}" ]]; then
+    run_update_trace_cli "$1"
+  else
+    run_update_trace_cli
   fi
 }
 
@@ -617,9 +648,11 @@ UNINSTALL_FILES=(
   'state/previous-version'
   'state/command.lock'
   'bin/render_config.py'
+  'bin/update_trace_cli.py'
   'bin/updater_service.py'
   'lib/common.sh'
   'lib/updater_protocol.py'
+  'lib/updater_trace.py'
 )
 
 paths_overlap() {
@@ -646,6 +679,10 @@ validate_uninstall_tree() {
     rc_die 'application data tree contains an unsafe entry'
     return 1
   fi
+  if ! run_update_trace_cli --doctor >/dev/null 2>&1; then
+    rc_die 'update trace storage contains an unsafe entry'
+    return 1
+  fi
   while IFS= read -r -d '' path; do
     if [[ -L "$path" ]]; then
       invalid=1
@@ -653,7 +690,7 @@ validate_uninstall_tree() {
     fi
     relative_path="${path#"$RC_INSTALL_ROOT"/}"
     case "$relative_path" in
-      config|state|bin|lib|backups|data|data/auth|data/keys|\
+      config|state|state/update-traces|bin|lib|backups|data|data/auth|data/keys|\
       data/file-operations|data/file-operations/plans|data/file-operations/operations|\
       .env|compose.yaml|compose.override.yaml|\
       config/sources.json|\
@@ -667,9 +704,11 @@ validate_uninstall_tree() {
       state/system-update.json|\
       state/command.lock|\
       bin/render_config.py|\
+      bin/update_trace_cli.py|\
       bin/updater_service.py|\
       lib/common.sh|\
-      lib/updater_protocol.py)
+      lib/updater_protocol.py|\
+      lib/updater_trace.py)
         ;;
       data/auth/account.json|\
       data/auth/bootstrap.json|\
@@ -679,6 +718,9 @@ validate_uninstall_tree() {
         ;;
       *)
         if [[ "$relative_path" =~ ^data/file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]] &&
+          [[ -f "$path" ]]; then
+          :
+        elif [[ "$relative_path" == state/update-traces/*.jsonl ]] &&
           [[ -f "$path" ]]; then
           :
         else
@@ -780,6 +822,7 @@ create_uninstall_backup() {
   if [[ -f "$RC_INSTALL_ROOT/state/system-update.json" ]]; then
     backup_uninstall_file 'state/system-update.json' "$backup_destination" || return 1
   fi
+  backup_update_traces "$backup_destination" || return 1
   if ! install -m 0700 -- "$RC_COMMAND_PATH" "$backup_destination/reachcommander-command" ||
     ! sync -f -- "$backup_destination/reachcommander-command" ||
     ! cmp -s -- "$RC_COMMAND_PATH" "$backup_destination/reachcommander-command"; then
@@ -811,6 +854,26 @@ backup_application_file() {
     rc_die 'application data backup verification failed'
     return 1
   fi
+}
+
+backup_update_traces() {
+  local backup_destination="$1"
+  local trace_path
+  local destination
+  if [[ ! -d "$RC_INSTALL_ROOT/state/update-traces" ]]; then
+    return 0
+  fi
+  mkdir -p -- "$backup_destination/deployment/state/update-traces"
+  chmod 0700 -- "$backup_destination/deployment/state/update-traces"
+  while IFS= read -r -d '' trace_path; do
+    destination="$backup_destination/deployment/state/update-traces/$(basename -- "$trace_path")"
+    if ! install -m 0600 -- "$trace_path" "$destination" ||
+      ! sync -f -- "$destination" ||
+      ! cmp -s -- "$trace_path" "$destination"; then
+      rc_die 'external update trace backup verification failed'
+      return 1
+    fi
+  done < <(find "$RC_INSTALL_ROOT/state/update-traces" -mindepth 1 -maxdepth 1 -type f -print0)
 }
 
 backup_application_data() {
@@ -849,12 +912,25 @@ remove_application_data() {
   rmdir -- "$RC_INSTALL_ROOT/data"
 }
 
+remove_update_traces() {
+  local trace_path
+  local trace_root="$RC_INSTALL_ROOT/state/update-traces"
+  if [[ ! -d "$trace_root" ]]; then
+    return 0
+  fi
+  while IFS= read -r -d '' trace_path; do
+    rm -f -- "$trace_path" || return 1
+  done < <(find "$trace_root" -mindepth 1 -maxdepth 1 -type f -print0)
+  rmdir -- "$trace_root"
+}
+
 remove_generated_deployment() {
   local relative_path
   local directory
   for relative_path in "${UNINSTALL_FILES[@]}" 'state/failed-image' 'state/system-update.json'; do
     rm -f -- "$RC_INSTALL_ROOT/$relative_path" || return 1
   done
+  remove_update_traces || return 1
   for directory in backups config state bin lib; do
     if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
       rmdir -- "$RC_INSTALL_ROOT/$directory" || return 1
@@ -1047,8 +1123,10 @@ doctor_required_files() {
     'state/previous-version' \
     'bin/render_config.py' \
     'bin/updater_service.py' \
+    'bin/update_trace_cli.py' \
     'lib/common.sh' \
-    'lib/updater_protocol.py'; do
+    'lib/updater_protocol.py' \
+    'lib/updater_trace.py'; do
     if [[ ! -f "$RC_INSTALL_ROOT/$required" || -L "$RC_INSTALL_ROOT/$required" ]]; then
       missing=1
       doctor_fail "Required deployment file is missing or symlinked: $required"
@@ -1201,6 +1279,13 @@ command_doctor() {
 
   doctor_required_files
 
+  local trace_detail=''
+  if trace_detail="$(run_update_trace_cli --doctor 2>/dev/null)"; then
+    doctor_pass "$trace_detail"
+  else
+    doctor_fail "${trace_detail:-Update trace storage could not be validated}"
+  fi
+
   if [[ -e "$RC_INSTALL_ROOT/state/update-transaction" ]]; then
     doctor_fail 'Incomplete update transaction requires manual review'
   else
@@ -1330,6 +1415,9 @@ case "$1" in
     ;;
   logs)
     command_logs "${2:-}"
+    ;;
+  update-log)
+    command_update_log "${2:-}"
     ;;
   start)
     command_start

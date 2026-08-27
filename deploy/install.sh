@@ -10,8 +10,10 @@ LAN_ADDRESS_HELPER="$SCRIPT_DIRECTORY/lan_address.py"
 COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
 UPDATER_COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.updater.yaml"
 MANAGEMENT_COMMAND="$SCRIPT_DIRECTORY/reachcommander"
+UPDATE_TRACE_CLI="$SCRIPT_DIRECTORY/update_trace_cli.py"
 UPDATER_PROTOCOL="$SCRIPT_DIRECTORY/updater_protocol.py"
 UPDATER_SERVICE="$SCRIPT_DIRECTORY/updater_service.py"
+UPDATER_TRACE="$SCRIPT_DIRECTORY/updater_trace.py"
 UPDATER_UNIT="$SCRIPT_DIRECTORY/systemd/reachcommander-updater.service"
 BUNDLE_VERSION_FILE="$SCRIPT_DIRECTORY/VERSION"
 WORK_ROOT=''
@@ -493,8 +495,10 @@ UPDATER_DEPLOYMENT_FILES=(
   'compose.override.yaml'
   'state/current-version'
   'state/previous-version'
+  'bin/update_trace_cli.py'
   'bin/updater_service.py'
   'lib/updater_protocol.py'
+  'lib/updater_trace.py'
 )
 
 DEPLOYMENT_FILES=(
@@ -510,7 +514,7 @@ file_mode() {
     config/sources.json)
       printf '0644\n'
       ;;
-    lib/updater_protocol.py)
+    lib/updater_protocol.py | lib/updater_trace.py)
       printf '0644\n'
       ;;
     *)
@@ -1011,9 +1015,11 @@ fi
 python3 "$RENDERER" set-image --env "$STAGE_ROOT/.env" --image "$RESOLVED_IMAGE"
 mkdir -p -- "$STAGE_ROOT/bin" "$STAGE_ROOT/lib"
 install -m 0755 -- "$RENDERER" "$STAGE_ROOT/bin/render_config.py"
+install -m 0755 -- "$UPDATE_TRACE_CLI" "$STAGE_ROOT/bin/update_trace_cli.py"
 install -m 0755 -- "$UPDATER_SERVICE" "$STAGE_ROOT/bin/updater_service.py"
 install -m 0600 -- "$COMMON_LIBRARY" "$STAGE_ROOT/lib/common.sh"
 install -m 0644 -- "$UPDATER_PROTOCOL" "$STAGE_ROOT/lib/updater_protocol.py"
+install -m 0644 -- "$UPDATER_TRACE" "$STAGE_ROOT/lib/updater_trace.py"
 rc_atomic_write "$STAGE_ROOT/state/channel" "$INSTALL_CHANNEL"$'\n'
 rc_atomic_write "$STAGE_ROOT/state/current-image" "$RESOLVED_IMAGE"$'\n'
 rc_atomic_write "$STAGE_ROOT/state/previous-image" ''

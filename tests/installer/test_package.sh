@@ -77,6 +77,7 @@ expected_entries=(
   'reachcommander-installer/reachcommander'
   'reachcommander-installer/render_config.py'
   'reachcommander-installer/systemd/reachcommander-updater.service'
+  'reachcommander-installer/update_trace_cli.py'
   'reachcommander-installer/updater_protocol.py'
   'reachcommander-installer/updater_service.py'
   'reachcommander-installer/updater_trace.py'
@@ -114,6 +115,7 @@ archive_permissions() {
 
 assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/install.sh')" "installer mode"
 assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/reachcommander')" "command mode"
+assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/update_trace_cli.py')" "update trace CLI mode"
 assert_equal "-rwxr-xr-x" "$(archive_permissions 'reachcommander-installer/updater_service.py')" "updater service mode"
 for data_file in LICENSE VERSION compose.release.yaml compose.updater.yaml lan_address.py render_config.py updater_protocol.py updater_trace.py lib/common.sh systemd/reachcommander-updater.service; do
   assert_equal "-rw-r--r--" "$(archive_permissions "reachcommander-installer/$data_file")" "$data_file mode"

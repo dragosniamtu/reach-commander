@@ -20,7 +20,12 @@ cp -- "$REPOSITORY_ROOT/deploy/lan_address.py" "$BUNDLE/lan_address.py"
 cp -- "$REPOSITORY_ROOT/deploy/render_config.py" "$BUNDLE/render_config.py"
 cp -- "$REPOSITORY_ROOT/deploy/compose.release.yaml" "$BUNDLE/compose.release.yaml"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$BUNDLE/lib/common.sh"
-for updater_source in compose.updater.yaml updater_protocol.py updater_service.py; do
+for updater_source in \
+  compose.updater.yaml \
+  update_trace_cli.py \
+  updater_protocol.py \
+  updater_service.py \
+  updater_trace.py; do
   if [[ -f "$REPOSITORY_ROOT/deploy/$updater_source" ]]; then
     cp -- "$REPOSITORY_ROOT/deploy/$updater_source" "$BUNDLE/$updater_source"
   fi
@@ -267,7 +272,8 @@ for required_file in \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
-  bin/render_config.py bin/updater_service.py lib/common.sh lib/updater_protocol.py; do
+  bin/render_config.py bin/update_trace_cli.py bin/updater_service.py \
+  lib/common.sh lib/updater_protocol.py lib/updater_trace.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$required_file" ]] || fail "missing installed $required_file"
 done
 [[ -f "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "updater systemd unit missing"
@@ -313,7 +319,9 @@ case "$(uname -s)" in
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json")" "source configuration mode"
     assert_equal "600" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env")" "environment mode"
     assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/updater_service.py")" "updater service mode"
+    assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/update_trace_cli.py")" "update trace CLI mode"
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/updater_protocol.py")" "updater protocol mode"
+    assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/updater_trace.py")" "updater trace library mode"
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")" "updater unit mode"
     for authentication_directory in data data/auth data/keys; do
       assert_equal \
@@ -444,8 +452,10 @@ for legacy_file in \
   compose.override.yaml \
   state/current-version \
   state/previous-version \
+  bin/update_trace_cli.py \
   bin/updater_service.py \
-  lib/updater_protocol.py; do
+  lib/updater_protocol.py \
+  lib/updater_trace.py; do
   rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/$legacy_file"
 done
 rm -f -- "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" "$REACHCOMMANDER_TEST_UPDATER_SOCKET_PATH"
@@ -459,8 +469,10 @@ for migrated_file in \
   compose.override.yaml \
   state/current-version \
   state/previous-version \
+  bin/update_trace_cli.py \
   bin/updater_service.py \
-  lib/updater_protocol.py; do
+  lib/updater_protocol.py \
+  lib/updater_trace.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$migrated_file" ]] || fail "legacy migration missing $migrated_file"
 done
 [[ -f "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "legacy migration missing systemd unit"
@@ -488,10 +500,32 @@ pass "reconfiguration preserves edge and exact-version channels"
 
 printf '{"schemaVersion":1,"phase":"current"}\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json"
 journal_before="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json")"
+PYTHONDONTWRITEBYTECODE=1 python3 - \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/update-traces" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib" <<'PY'
+import datetime as dt
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[2])
+from updater_trace import ProtectedUpdateTraceStore
+
+now = dt.datetime(2026, 8, 27, 10, 0, tzinfo=dt.timezone.utc)
+operation_id = str(uuid.UUID("aaaaaaaa-1234-4234-8234-123456789abc"))
+store = ProtectedUpdateTraceStore(Path(sys.argv[1]), clock=lambda: now)
+store.start(operation_id, now)
+store.append(operation_id, "operationCompleted", "succeeded", now, exit_code=0)
+PY
+trace_before="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/update-traces/"*.jsonl)"
 run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-journal-preservation.out"
 assert_equal "0" "$last_status" "journal preservation reconfiguration status"
 assert_equal "$journal_before" "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json")" "updater journal preservation"
-pass "reconfiguration preserves the host updater journal"
+assert_equal \
+  "$trace_before" \
+  "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/update-traces/"*.jsonl)" \
+  "updater trace preservation"
+pass "reconfiguration preserves the host updater journal and traces"
 
 deployment_before="$(active_deployment_fingerprint)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
@@ -547,7 +581,8 @@ for recovery_file in \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
-  bin/render_config.py bin/updater_service.py lib/common.sh lib/updater_protocol.py; do
+  bin/render_config.py bin/update_trace_cli.py bin/updater_service.py \
+  lib/common.sh lib/updater_protocol.py lib/updater_trace.py; do
   cp -- \
     "$REACHCOMMANDER_TEST_INSTALL_ROOT/$recovery_file" \
     "$recovery_backup/deployment/$recovery_file"

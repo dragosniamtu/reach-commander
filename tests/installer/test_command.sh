@@ -9,6 +9,8 @@ TEMPLATE="$REPOSITORY_ROOT/deploy/compose.release.yaml"
 UPDATER_COMPOSE="$REPOSITORY_ROOT/deploy/compose.updater.yaml"
 UPDATER_PROTOCOL="$REPOSITORY_ROOT/deploy/updater_protocol.py"
 UPDATER_SERVICE="$REPOSITORY_ROOT/deploy/updater_service.py"
+UPDATER_TRACE="$REPOSITORY_ROOT/deploy/updater_trace.py"
+UPDATE_TRACE_CLI="$REPOSITORY_ROOT/deploy/update_trace_cli.py"
 UPDATER_UNIT="$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
 
@@ -43,7 +45,9 @@ mkdir -p \
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
+cp -- "$UPDATE_TRACE_CLI" "$INSTALL_ROOT/bin/update_trace_cli.py"
 cp -- "$UPDATER_PROTOCOL" "$INSTALL_ROOT/lib/updater_protocol.py"
+cp -- "$UPDATER_TRACE" "$INSTALL_ROOT/lib/updater_trace.py"
 cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"
 cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
 chmod +x "$COMMAND_PATH"
@@ -202,6 +206,94 @@ for invocation in \
 done
 pass "command dispatcher rejects unknown commands and extra arguments"
 
+run_command update-log --path /etc/shadow
+assert_equal "64" "$last_status" "update-log arbitrary path rejection status"
+
+run_command update-log
+assert_equal "0" "$last_status" "no-trace update-log status"
+[[ "$last_output" == *'No ReachCommander update trace is available.'* ]] ||
+  fail "no-trace update-log message missing"
+
+PYTHONDONTWRITEBYTECODE=1 python3 - "$INSTALL_ROOT/state/update-traces" <<'PY'
+import datetime as dt
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]).parents[1] / "lib"))
+from updater_trace import ProtectedUpdateTraceStore
+
+now = dt.datetime(2026, 8, 27, 10, 0, tzinfo=dt.timezone.utc)
+operation_id = str(uuid.UUID("12345678-1234-4234-8234-123456789abc"))
+store = ProtectedUpdateTraceStore(Path(sys.argv[1]), clock=lambda: now)
+store.start(operation_id, now)
+store.append(operation_id, "downloadStarted", "started", now, stage="downloading")
+store.append(
+    operation_id,
+    "commandTimedOut",
+    "timedOut",
+    now,
+    stage="downloading",
+    timeout_seconds=300,
+)
+store.append(
+    operation_id,
+    "operationFailed",
+    "failed",
+    now,
+    stage="downloading",
+    exit_code=1,
+)
+PY
+
+run_command update-log
+assert_equal "0" "$last_status" "terminal update-log status"
+[[ "$last_output" == *'Elapsed:'* ]] || fail "trace elapsed header missing"
+[[ "$last_output" == *'downloadStarted'* ]] || fail "trace event missing"
+[[ "$last_output" == *'timeout=300s'* ]] || fail "trace timeout detail missing"
+[[ "$last_output" == *'exit=1'* ]] || fail "trace exit detail missing"
+
+run_command update-log --follow
+assert_equal "0" "$last_status" "terminal update-log follow status"
+
+PYTHONDONTWRITEBYTECODE=1 python3 - "$INSTALL_ROOT/state/update-traces" <<'PY'
+import datetime as dt
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]).parents[1] / "lib"))
+from updater_trace import ProtectedUpdateTraceStore
+
+now = dt.datetime(2026, 8, 27, 10, 1, tzinfo=dt.timezone.utc)
+operation_id = str(uuid.UUID("87654321-1234-4234-8234-123456789abc"))
+ProtectedUpdateTraceStore(Path(sys.argv[1]), clock=lambda: now).start(operation_id, now)
+PY
+(
+  sleep 0.2
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$INSTALL_ROOT/state/update-traces" <<'PY'
+import datetime as dt
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]).parents[1] / "lib"))
+from updater_trace import ProtectedUpdateTraceStore
+
+now = dt.datetime(2026, 8, 27, 10, 1, 1, tzinfo=dt.timezone.utc)
+operation_id = str(uuid.UUID("87654321-1234-4234-8234-123456789abc"))
+store = ProtectedUpdateTraceStore(Path(sys.argv[1]), clock=lambda: now)
+store.append(operation_id, "operationCompleted", "succeeded", now, exit_code=0)
+PY
+) &
+trace_writer_pid=$!
+run_command update-log --follow
+wait "$trace_writer_pid"
+assert_equal "0" "$last_status" "active update-log follow status"
+[[ "$last_output" == *'operationCompleted'* ]] ||
+  fail "active update-log follow did not observe the terminal event"
+pass "update-log prints and follows only the latest validated trace"
+
 : >"$FAKE_DOCKER_LOG"
 run_command status
 assert_equal "0" "$last_status" "status command"
@@ -279,6 +371,20 @@ for container_path in \
     fail "doctor did not probe fixed container path: $container_path"
 done
 pass "doctor reports a healthy deployment without mutating it"
+
+printf 'do-not-print-/etc/shadow\n' >"$INSTALL_ROOT/state/update-traces/not-a-trace"
+run_command update-log
+assert_equal "1" "$last_status" "unsafe update-log status"
+[[ "$last_output" == *"run 'sudo reachcommander doctor'"* ]] ||
+  fail "unsafe update-log guidance missing"
+[[ "$last_output" != *'do-not-print'* ]] || fail "unsafe update-log exposed contents"
+run_command doctor
+assert_equal "1" "$last_status" "doctor unsafe trace status"
+[[ "$last_output" == *'[FAIL] Update trace storage contains an unsafe entry.'* ]] ||
+  fail "doctor unsafe trace failure missing"
+[[ "$last_output" != *'do-not-print'* ]] || fail "doctor exposed unsafe trace contents"
+rm -f -- "$INSTALL_ROOT/state/update-traces/not-a-trace"
+pass "update-log and doctor reject unsafe trace storage without exposing contents"
 
 export FAKE_DOCKER_EXEC_EXIT=1
 run_command doctor
@@ -684,6 +790,9 @@ pass "Compose-down failure preserves deployment after external backup"
 
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'backup\nuninstall ReachCommander' uninstall
+if ((last_status != 0)); then
+  printf '%s\n' "$last_output" >&2
+fi
 assert_equal "0" "$last_status" "successful uninstall status"
 [[ ! -e "$INSTALL_ROOT" ]] || fail "successful uninstall retained install root"
 [[ ! -e "$COMMAND_PATH" ]] || fail "successful uninstall retained command"
@@ -694,6 +803,8 @@ backup_destination="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxde
 [[ "$(basename -- "$backup_destination")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || fail "backup timestamp is not UTC"
 [[ -f "$backup_destination/deployment/config/sources.json" ]] || fail "backup source configuration missing"
 [[ -f "$backup_destination/deployment/state/source-mounts.json" ]] || fail "backup source metadata missing"
+[[ -f "$backup_destination/deployment/state/update-traces/12345678-1234-4234-8234-123456789abc.jsonl" ]] ||
+  fail "backup update trace missing"
 [[ -f "$backup_destination/reachcommander-command" ]] || fail "backup management command missing"
 for application_file in \
   auth/account.json \
@@ -742,8 +853,10 @@ mkdir -p \
   "$INSTALL_ROOT/data/file-operations/operations"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
+cp -- "$UPDATE_TRACE_CLI" "$INSTALL_ROOT/bin/update_trace_cli.py"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
 cp -- "$UPDATER_PROTOCOL" "$INSTALL_ROOT/lib/updater_protocol.py"
+cp -- "$UPDATER_TRACE" "$INSTALL_ROOT/lib/updater_trace.py"
 cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"
 cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
 chmod +x "$COMMAND_PATH"

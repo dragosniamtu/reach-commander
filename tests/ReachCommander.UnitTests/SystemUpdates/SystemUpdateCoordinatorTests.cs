@@ -237,6 +237,7 @@ public sealed class SystemUpdateCoordinatorTests
         await monitor.WaitUntilCalledAsync();
         monitor.Complete(new SystemUpdateMonitorResult(completed));
         await WaitForPhaseAsync(coordinator, SystemUpdatePhase.Completed);
+        await gate.WaitForCancelAsync();
 
         Assert.Equal(1, monitor.CallCount);
         Assert.Equal(1, gate.CancelCount);
@@ -390,6 +391,7 @@ public sealed class SystemUpdateCoordinatorTests
         await monitor.WaitUntilCalledAsync();
         monitor.Complete(new SystemUpdateMonitorResult(null));
         var failed = await WaitForPhaseAsync(coordinator, SystemUpdatePhase.Failed);
+        await gate.WaitForCancelAsync();
 
         Assert.Equal("update_failed", failed.ReasonCode);
         Assert.Contains("reachcommander doctor", failed.Detail, StringComparison.OrdinalIgnoreCase);
@@ -676,6 +678,9 @@ public sealed class SystemUpdateCoordinatorTests
 
     private sealed class RecordingMutationGate : ISystemMutationGate
     {
+        private readonly TaskCompletionSource _cancelled =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public bool DrainResult { get; init; } = true;
 
         public int CancelCount { get; private set; }
@@ -685,6 +690,13 @@ public sealed class SystemUpdateCoordinatorTests
         public Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
             Task.FromResult(DrainResult);
 
-        public void CancelDrain() => CancelCount++;
+        public void CancelDrain()
+        {
+            CancelCount++;
+            _cancelled.TrySetResult();
+        }
+
+        public Task WaitForCancelAsync() =>
+            _cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 }

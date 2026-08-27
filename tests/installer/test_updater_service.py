@@ -298,7 +298,7 @@ class UpdaterRuntimeTests(unittest.TestCase):
         self.assertNotIn("/private", encoded)
         self.assertLessEqual(len(json.dumps(response).encode()), 65_536)
 
-    def test_v3_response_derives_live_progress_from_the_sanitized_trace(self) -> None:
+    def test_v2_and_v3_responses_derive_live_progress_from_the_sanitized_trace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             journal = AtomicUpdateJournal(root / "system-update.json")
@@ -313,14 +313,23 @@ class UpdaterRuntimeTests(unittest.TestCase):
                 stage="installing",
             )
 
-            response = updater_service.protocol_response(
+            detailed = updater_service.protocol_response(
+                request("check", DETAILED_PROTOCOL_VERSION),
+                operation,
+                trace_store=traces,
+                now=NOW,
+            )
+            traced = updater_service.protocol_response(
                 request("check", TRACE_PROTOCOL_VERSION),
                 operation,
                 trace_store=traces,
                 now=NOW,
             )
 
-        self.assertEqual("installing", response["progressStage"])
+        self.assertEqual("installing", detailed["progressStage"])
+        self.assertNotIn("trace", detailed)
+        self.assertEqual("installing", traced["progressStage"])
+        self.assertIn("trace", traced)
 
     def test_timeout_is_terminal_traceable_and_uses_a_fixed_public_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

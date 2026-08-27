@@ -111,7 +111,7 @@ At the deadline:
 
 The output reader can never control worker completion. All waits—process, termination grace, reader shutdown, Compose recreation, and health verification—have explicit bounds covered by tests.
 
-Output-reader callbacks never write the main update journal. They advance the current stage in memory and append observational trace events; the worker alone persists the final journal, including the latest accepted stage. Protocol v3 derives live progress from the sanitized trace when necessary, and trace projection reads are non-blocking so stalled observational storage cannot delay terminal status.
+Output-reader callbacks never write the main update journal. They advance the current stage in memory and append observational trace events; the worker alone persists the final journal, including the latest accepted stage. Protocols v2 and v3 derive live progress from the sanitized trace when necessary, while only v3 exposes the trace object. Trace projection reads are non-blocking so stalled observational storage cannot delay terminal status.
 
 The service must not kill the Docker daemon. Only the fixed updater command subtree is terminated. Docker Engine remains responsible for other host containers.
 

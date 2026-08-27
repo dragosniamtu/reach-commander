@@ -1017,6 +1017,10 @@ def protocol_response(
     )
     if request.protocol_version == PROTOCOL_VERSION:
         response["trace"] = None
+    if request.protocol_version in (
+        DETAILED_PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
+    ):
         operation_id = value.get("operationId")
         if trace_store is not None and isinstance(operation_id, str):
             try:
@@ -1026,7 +1030,8 @@ def protocol_response(
                     blocking=False,
                 )
                 if snapshot is not None:
-                    response["trace"] = snapshot.to_protocol()
+                    if request.protocol_version == PROTOCOL_VERSION:
+                        response["trace"] = snapshot.to_protocol()
                     if response.get("progressStage") is None:
                         response["progressStage"] = next(
                             (

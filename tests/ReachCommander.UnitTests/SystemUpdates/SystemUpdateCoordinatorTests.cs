@@ -329,6 +329,15 @@ public sealed class SystemUpdateCoordinatorTests
         monitor.Publish(applying with { Trace = Trace(sequence: 6, elapsedSeconds: 3) });
         Assert.Equal(6, (await coordinator.GetAsync(default)).Trace!.Events[^1].Sequence);
 
+        monitor.Publish(applying with
+        {
+            ProgressStage = "installing",
+            Trace = Trace(sequence: 5, elapsedSeconds: 4),
+        });
+        var advanced = await coordinator.GetAsync(default);
+        Assert.Equal(SystemUpdateProgressStage.Installing, advanced.ProgressStage);
+        Assert.Equal(6, advanced.Trace!.Events[^1].Sequence);
+
         monitor.Publish(applying with { Trace = Trace(sequence: 5, elapsedSeconds: 4) });
         monitor.Publish(applying with
         {

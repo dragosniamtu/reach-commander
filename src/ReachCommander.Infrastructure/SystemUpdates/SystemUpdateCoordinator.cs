@@ -423,6 +423,12 @@ internal sealed class SystemUpdateCoordinator(
                 return;
             }
 
+            if (CanAdvance(_status.ProgressStage, candidate.ProgressStage) &&
+                IsTraceOlder(candidate.Trace, _status.Trace))
+            {
+                candidate = candidate with { Trace = _status.Trace };
+            }
+
             if (CanPublishProgress(_status, candidate))
             {
                 _status = candidate;

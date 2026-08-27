@@ -329,23 +329,35 @@ class SubprocessCommandRunner:
         progress_stage: str | None = None
         last_activity_at: float | None = None
         output_lock = threading.Lock()
-        callback_lock = threading.Lock()
-        callbacks_active = True
+        callback_dispatch_lock = threading.Lock()
+        callbacks_active = threading.Event()
+        callbacks_active.set()
 
         def publish_progress(stage: str) -> None:
-            with callback_lock:
-                if callbacks_active and progress_callback is not None:
-                    progress_callback(stage)
+            if (
+                callbacks_active.is_set()
+                and progress_callback is not None
+                and callback_dispatch_lock.acquire(blocking=False)
+            ):
+                try:
+                    if callbacks_active.is_set():
+                        progress_callback(stage)
+                finally:
+                    callback_dispatch_lock.release()
 
         def publish_trace(code: str, outcome: str, stage: str | None) -> None:
-            with callback_lock:
-                if callbacks_active:
-                    _emit_trace(trace_callback, code, outcome, stage)
+            if (
+                callbacks_active.is_set()
+                and callback_dispatch_lock.acquire(blocking=False)
+            ):
+                try:
+                    if callbacks_active.is_set():
+                        _emit_trace(trace_callback, code, outcome, stage)
+                finally:
+                    callback_dispatch_lock.release()
 
         def disable_callbacks() -> None:
-            nonlocal callbacks_active
-            with callback_lock:
-                callbacks_active = False
+            callbacks_active.clear()
 
         def append_output(line: str) -> None:
             nonlocal output_length
@@ -866,44 +878,42 @@ class UpdaterRuntime:
     ) -> None:
         operation_state = dict(operation)
         trace_codes: set[str] = set()
-        callback_lock = threading.Lock()
-        callbacks_active = True
+        callbacks_active = threading.Event()
+        callbacks_active.set()
 
         def record_progress(stage: str) -> None:
-            nonlocal operation_state, callbacks_active
-            with callback_lock:
-                if not callbacks_active:
-                    return
-                try:
-                    operation_state = self._journal.advance(
-                        operation_state,
-                        stage,
-                        self._clock(),
-                    )
-                except JournalError:
-                    # Progress is observational and must not change the update result.
-                    print(
-                        "ReachCommander updater could not persist update progress.",
-                        file=sys.stderr,
-                    )
+            nonlocal operation_state
+            if not callbacks_active.is_set():
+                return
+            try:
+                operation_state = self._journal.advance(
+                    operation_state,
+                    stage,
+                    self._clock(),
+                )
+            except JournalError:
+                # Progress is observational and must not change the update result.
+                print(
+                    "ReachCommander updater could not persist update progress.",
+                    file=sys.stderr,
+                )
 
         def record_trace(code: str, outcome: str, stage: str | None) -> None:
-            nonlocal trace_active, callbacks_active
-            with callback_lock:
-                if not callbacks_active or not trace_active:
-                    return
-                if self._append_trace(
-                    operation_state,
-                    code,
-                    outcome,
-                    stage=stage,
-                    timeout_seconds=COMMAND_TIMEOUT_SECONDS
-                    if code == "commandTimedOut"
-                    else None,
-                ):
-                    trace_codes.add(code)
-                else:
-                    trace_active = False
+            nonlocal trace_active
+            if not callbacks_active.is_set() or not trace_active:
+                return
+            if self._append_trace(
+                operation_state,
+                code,
+                outcome,
+                stage=stage,
+                timeout_seconds=COMMAND_TIMEOUT_SECONDS
+                if code == "commandTimedOut"
+                else None,
+            ):
+                trace_codes.add(code)
+            else:
+                trace_active = False
 
         exit_code: int | None = None
         reason_code: str | None = None
@@ -934,8 +944,7 @@ class UpdaterRuntime:
         except Exception:
             phase = "failed"
         finally:
-            with callback_lock:
-                callbacks_active = False
+            callbacks_active.clear()
         try:
             finished = self._journal.finish(
                 operation_state,

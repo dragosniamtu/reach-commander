@@ -985,6 +985,49 @@ class ServiceProcessContractTests(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         self.assertEqual([], stages)
 
+    def test_subprocess_runner_does_not_wait_for_an_in_flight_callback(self) -> None:
+        callback_started = threading.Event()
+        release_callback = threading.Event()
+        runner_returned = threading.Event()
+        process = mock.Mock()
+        process.stdout = iter(("REACHCOMMANDER_UPDATE_STAGE=installing\n",))
+
+        def wait_for_reader(*, timeout):  # type: ignore[no-untyped-def]
+            self.assertEqual(5, timeout)
+            self.assertTrue(callback_started.wait(timeout=1))
+            return 0
+
+        process.wait.side_effect = wait_for_reader
+
+        def blocking_progress(_stage: str) -> None:
+            callback_started.set()
+            release_callback.wait(timeout=5)
+
+        def run() -> None:
+            try:
+                SubprocessCommandRunner().run(
+                    ("/fixed", "update"),
+                    env=SANITIZED_ENVIRONMENT,
+                    timeout=5,
+                    shell=False,
+                    progress_callback=blocking_progress,
+                )
+            finally:
+                runner_returned.set()
+
+        with (
+            mock.patch("deploy.updater_service.subprocess.Popen", return_value=process),
+            mock.patch("deploy.updater_service.READER_JOIN_TIMEOUT_SECONDS", 0.05),
+        ):
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            try:
+                self.assertTrue(callback_started.wait(timeout=1))
+                self.assertTrue(runner_returned.wait(timeout=1))
+            finally:
+                release_callback.set()
+                worker.join(timeout=2)
+
     def test_subprocess_runner_streams_only_valid_markers_and_bounds_output(self) -> None:
         import sys
 

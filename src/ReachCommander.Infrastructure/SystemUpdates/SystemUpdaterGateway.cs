@@ -455,14 +455,16 @@ internal sealed class SystemUpdaterGateway(
         {
             using var document = ParseDocument(response);
             var root = document.RootElement;
-            var expectedFields = responseProtocolVersion switch
+            if (responseProtocolVersion is not (
+                LegacyProtocolVersion or DetailedProtocolVersion))
             {
-                LegacyProtocolVersion => V1ResponseFields,
-                DetailedProtocolVersion => V2ResponseFields,
-                _ => throw new SystemUpdaterProtocolException(
-                    "The updater protocol version is incompatible."),
-            };
-            ValidateFields(root, expectedFields);
+                throw new SystemUpdaterProtocolException(
+                    "The updater protocol version is incompatible.");
+            }
+
+            // Historical helpers emitted compatibility errors with the v1 field set,
+            // while preserving their own protocol version number.
+            ValidateFields(root, V1ResponseFields);
             return RequiredInt(root, "protocolVersion") == responseProtocolVersion &&
                    root.GetProperty("requestId").ValueKind == JsonValueKind.Null &&
                    RequiredBoolean(root, "supported") &&
@@ -477,9 +479,7 @@ internal sealed class SystemUpdaterGateway(
                    "The host updater protocol is incompatible." &&
                    IsNull(root, "operationId") &&
                    IsNull(root, "lastCheckedAt") &&
-                   IsNull(root, "updatedAt") &&
-                   (responseProtocolVersion != DetailedProtocolVersion ||
-                    IsNull(root, "progressStage"));
+                   IsNull(root, "updatedAt");
         }
         catch (SystemUpdaterProtocolException)
         {

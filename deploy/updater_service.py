@@ -160,10 +160,16 @@ class JournalError(ValueError):
 
 
 class CommandTimedOut(TimeoutError):
-    def __init__(self, timeout_seconds: int, output: str) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int,
+        output: str,
+        trace_events: tuple[tuple[str, str, str | None], ...] = (),
+    ) -> None:
         super().__init__(f"the fixed updater command exceeded {timeout_seconds} seconds")
         self.timeout_seconds = timeout_seconds
         self.output = output
+        self.trace_events = trace_events
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -420,20 +426,33 @@ class SubprocessCommandRunner:
             try:
                 returncode = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                publish_trace(
+                supervision_events: list[tuple[str, str, str | None]] = []
+
+                def record_supervision(
+                    code: str,
+                    outcome: str,
+                    stage: str | None,
+                ) -> None:
+                    supervision_events.append((code, outcome, stage))
+
+                record_supervision(
                     "commandTimedOut",
                     "timedOut",
                     progress_stage,
                 )
                 _terminate_process_tree(
                     process,
-                    trace_callback=publish_trace,
+                    trace_callback=record_supervision,
                     progress_stage=progress_stage,
                 )
                 reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
                 if process.stdout is not None and not reader.is_alive():
                     process.stdout.close()
-                raise CommandTimedOut(timeout, captured_output())
+                raise CommandTimedOut(
+                    timeout,
+                    captured_output(),
+                    tuple(supervision_events),
+                )
             reader.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
             if process.stdout is not None and not reader.is_alive():
                 process.stdout.close()
@@ -877,6 +896,7 @@ class UpdaterRuntime:
         trace_active: bool,
     ) -> None:
         operation_state = dict(operation)
+        operation_state_lock = threading.Lock()
         trace_codes: set[str] = set()
         callbacks_active = threading.Event()
         callbacks_active.set()
@@ -885,25 +905,29 @@ class UpdaterRuntime:
             nonlocal operation_state
             if not callbacks_active.is_set():
                 return
-            try:
-                operation_state = self._journal.advance(
-                    operation_state,
-                    stage,
-                    self._clock(),
-                )
-            except JournalError:
-                # Progress is observational and must not change the update result.
-                print(
-                    "ReachCommander updater could not persist update progress.",
-                    file=sys.stderr,
-                )
+            with operation_state_lock:
+                current = operation_state.get("progressStage")
+                if (
+                    operation_state.get("phase") != "applying"
+                    or stage not in PROGRESS_STAGES
+                    or stage
+                    not in PROGRESS_TRANSITIONS.get(current, frozenset())
+                ):
+                    return
+                operation_state = {
+                    **operation_state,
+                    "progressStage": stage,
+                    "updatedAt": _iso_utc(self._clock()),
+                }
 
         def record_trace(code: str, outcome: str, stage: str | None) -> None:
             nonlocal trace_active
             if not callbacks_active.is_set() or not trace_active:
                 return
+            with operation_state_lock:
+                trace_operation = dict(operation_state)
             if self._append_trace(
-                operation_state,
+                trace_operation,
                 code,
                 outcome,
                 stage=stage,
@@ -917,6 +941,7 @@ class UpdaterRuntime:
 
         exit_code: int | None = None
         reason_code: str | None = None
+        pending_supervision_events: tuple[tuple[str, str, str | None], ...] = ()
         try:
             completed = self._runner.run(
                 FIXED_COMMAND,
@@ -930,28 +955,39 @@ class UpdaterRuntime:
             phase = {0: "completed", 2: "rolledBack"}.get(
                 completed.returncode, "failed"
             )
-        except CommandTimedOut:
+        except CommandTimedOut as error:
             phase = "failed"
             reason_code = "update_command_timeout"
-            if trace_active and "commandTimedOut" not in trace_codes:
-                record_trace(
-                    "commandTimedOut",
-                    "timedOut",
-                    operation_state.get("progressStage")
-                    if isinstance(operation_state.get("progressStage"), str)
-                    else None,
-                )
+            pending_supervision_events = error.trace_events
         except Exception:
             phase = "failed"
         finally:
             callbacks_active.clear()
+        with operation_state_lock:
+            terminal_operation = dict(operation_state)
         try:
             finished = self._journal.finish(
-                operation_state,
+                terminal_operation,
                 phase,
                 self._clock(),
                 reason_code=reason_code,
             )
+            if trace_active:
+                for code, outcome, stage in pending_supervision_events:
+                    if code in trace_codes:
+                        continue
+                    if not self._append_trace(
+                        finished,
+                        code,
+                        outcome,
+                        stage=stage,
+                        timeout_seconds=COMMAND_TIMEOUT_SECONDS
+                        if code == "commandTimedOut"
+                        else None,
+                    ):
+                        trace_active = False
+                        break
+                    trace_codes.add(code)
             if trace_active:
                 self._finish_trace(finished, phase, exit_code=exit_code)
         except JournalError:
@@ -987,9 +1023,19 @@ def protocol_response(
                 snapshot = trace_store.public_snapshot(  # type: ignore[attr-defined]
                     operation_id,
                     now,
+                    blocking=False,
                 )
                 if snapshot is not None:
                     response["trace"] = snapshot.to_protocol()
+                    if response.get("progressStage") is None:
+                        response["progressStage"] = next(
+                            (
+                                event.stage
+                                for event in reversed(snapshot.events)
+                                if event.stage in PROGRESS_STAGES
+                            ),
+                            None,
+                        )
             except Exception:
                 UpdaterRuntime._trace_warning()
     reason = response.get("reasonCode")

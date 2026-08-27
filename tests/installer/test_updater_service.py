@@ -154,11 +154,14 @@ class RaisingRunner(RecordingRunner):
 
 class TimeoutRunner(RecordingRunner):
     def run(self, *args, **kwargs) -> CommandResult:  # type: ignore[no-untyped-def]
-        trace_callback = kwargs.get("trace_callback")
-        if trace_callback is not None:
-            trace_callback("commandTimedOut", "timedOut", "downloading")
-            trace_callback("terminationRequested", "started", "downloading")
-        raise CommandTimedOut(300, "/private updater output")
+        raise CommandTimedOut(
+            300,
+            "/private updater output",
+            (
+                ("commandTimedOut", "timedOut", "downloading"),
+                ("terminationRequested", "started", "downloading"),
+            ),
+        )
 
 
 class LateProgressRunner(RecordingRunner):
@@ -294,6 +297,30 @@ class UpdaterRuntimeTests(unittest.TestCase):
         self.assertNotIn("sha256:", encoded)
         self.assertNotIn("/private", encoded)
         self.assertLessEqual(len(json.dumps(response).encode()), 65_536)
+
+    def test_v3_response_derives_live_progress_from_the_sanitized_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = AtomicUpdateJournal(root / "system-update.json")
+            operation = journal.begin(snapshot(), NOW)
+            traces = ProtectedUpdateTraceStore(root / "update-traces", clock=lambda: NOW)
+            traces.start(str(operation["operationId"]), NOW)
+            traces.append(
+                str(operation["operationId"]),
+                "installStarted",
+                "started",
+                NOW,
+                stage="installing",
+            )
+
+            response = updater_service.protocol_response(
+                request("check", TRACE_PROTOCOL_VERSION),
+                operation,
+                trace_store=traces,
+                now=NOW,
+            )
+
+        self.assertEqual("installing", response["progressStage"])
 
     def test_timeout_is_terminal_traceable_and_uses_a_fixed_public_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -436,7 +463,7 @@ class UpdaterRuntimeTests(unittest.TestCase):
             self.assertEqual("completed", journal["phase"])
             self.assertEqual("healthChecking", journal["progressStage"])
 
-    def test_progress_persistence_failure_does_not_change_update_result(self) -> None:
+    def test_reader_progress_never_writes_the_terminal_journal(self) -> None:
         class ProgressFailingJournal(AtomicUpdateJournal):
             def advance(self, operation, stage, now):  # type: ignore[no-untyped-def]
                 raise JournalError("progress unavailable")
@@ -468,6 +495,62 @@ class UpdaterRuntimeTests(unittest.TestCase):
 
             journal = AtomicUpdateJournal(root / "system-update.json").read_optional()
             self.assertEqual("completed", journal["phase"])
+
+    def test_blocking_progress_persistence_cannot_delay_terminal_journal(self) -> None:
+        class BlockingAdvanceJournal(AtomicUpdateJournal):
+            def __init__(self, path: Path) -> None:
+                super().__init__(path)
+                self.advance_entered = threading.Event()
+                self.release_advance = threading.Event()
+
+            def advance(self, operation, stage, now):  # type: ignore[no-untyped-def]
+                with self._lock:
+                    self.advance_entered.set()
+                    self.release_advance.wait(timeout=5)
+                    return dict(operation)
+
+        class ConcurrentProgressRunner(RecordingRunner):
+            def __init__(self, advance_entered: threading.Event) -> None:
+                super().__init__()
+                self.advance_entered = advance_entered
+                self.callback_thread: threading.Thread | None = None
+
+            def run(self, *args, **kwargs) -> CommandResult:  # type: ignore[no-untyped-def]
+                callback = kwargs["progress_callback"]
+                self.callback_thread = threading.Thread(
+                    target=lambda: callback("downloading"),
+                    daemon=True,
+                )
+                self.callback_thread.start()
+                self.advance_entered.wait(timeout=0.25)
+                return CommandResult(0, "")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = BlockingAdvanceJournal(root / "system-update.json")
+            runner = ConcurrentProgressRunner(journal.advance_entered)
+            runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                journal,
+                runner=runner,
+                clock=lambda: NOW,
+            )
+            worker_finished = threading.Event()
+
+            runtime.handle(request("applyConfiguredChannel"))
+            waiter = threading.Thread(
+                target=lambda: (runtime.wait_for_worker(), worker_finished.set()),
+                daemon=True,
+            )
+            waiter.start()
+            try:
+                self.assertTrue(worker_finished.wait(timeout=1))
+                self.assertEqual("completed", journal.read_optional()["phase"])
+            finally:
+                journal.release_advance.set()
+                waiter.join(timeout=2)
+                if runner.callback_thread is not None:
+                    runner.callback_thread.join(timeout=2)
 
     def test_spawn_failure_is_sanitized_and_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1027,6 +1110,56 @@ class ServiceProcessContractTests(unittest.TestCase):
             finally:
                 release_callback.set()
                 worker.join(timeout=2)
+
+    def test_timeout_carries_ordered_supervision_events_when_callback_is_busy(self) -> None:
+        callback_started = threading.Event()
+        release_callback = threading.Event()
+        process = mock.Mock(pid=4321)
+        process.stdout = iter(("REACHCOMMANDER_UPDATE_STAGE=installing\n",))
+
+        def wait_for_reader(*, timeout):  # type: ignore[no-untyped-def]
+            self.assertEqual(5, timeout)
+            self.assertTrue(callback_started.wait(timeout=1))
+            raise subprocess.TimeoutExpired(["fixed"], timeout)
+
+        process.wait.side_effect = wait_for_reader
+
+        def blocking_progress(_stage: str) -> None:
+            callback_started.set()
+            release_callback.wait(timeout=5)
+
+        def terminate(_process, *, trace_callback, progress_stage):  # type: ignore[no-untyped-def]
+            trace_callback("terminationRequested", "started", progress_stage)
+            trace_callback("terminationForced", "started", progress_stage)
+
+        try:
+            with (
+                mock.patch("deploy.updater_service.subprocess.Popen", return_value=process),
+                mock.patch(
+                    "deploy.updater_service._terminate_process_tree",
+                    side_effect=terminate,
+                ),
+                mock.patch("deploy.updater_service.READER_JOIN_TIMEOUT_SECONDS", 0.05),
+            ):
+                with self.assertRaises(CommandTimedOut) as raised:
+                    SubprocessCommandRunner().run(
+                        ("/fixed", "update"),
+                        env=SANITIZED_ENVIRONMENT,
+                        timeout=5,
+                        shell=False,
+                        progress_callback=blocking_progress,
+                    )
+        finally:
+            release_callback.set()
+
+        self.assertEqual(
+            (
+                ("commandTimedOut", "timedOut", "installing"),
+                ("terminationRequested", "started", "installing"),
+                ("terminationForced", "started", "installing"),
+            ),
+            raised.exception.trace_events,
+        )
 
     def test_subprocess_runner_streams_only_valid_markers_and_bounds_output(self) -> None:
         import sys

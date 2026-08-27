@@ -6,6 +6,8 @@ import json
 import os
 import stat
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -32,6 +34,32 @@ class ProtectedUpdateTraceStoreTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_nonblocking_public_projection_skips_an_in_flight_trace_write(self) -> None:
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+
+        def hold_store_lock() -> None:
+            with self.store._lock:
+                lock_held.set()
+                release_lock.wait(timeout=2)
+
+        worker = threading.Thread(target=hold_store_lock, daemon=True)
+        worker.start()
+        self.assertTrue(lock_held.wait(timeout=1))
+        started = time.monotonic()
+        try:
+            snapshot = self.store.public_snapshot(
+                self.operation_id,
+                NOW,
+                blocking=False,
+            )
+        finally:
+            release_lock.set()
+            worker.join(timeout=2)
+
+        self.assertIsNone(snapshot)
+        self.assertLess(time.monotonic() - started, 0.5)
 
     def test_trace_is_private_ordered_and_public_projection_is_sanitized(self) -> None:
         self.store.start(self.operation_id, NOW)

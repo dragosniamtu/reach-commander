@@ -263,12 +263,19 @@ class ProtectedUpdateTraceStore:
         self,
         operation_id: str,
         now: dt.datetime | None = None,
+        *,
+        blocking: bool = True,
     ) -> PublicTraceSnapshot | None:
         path = _trace_path(self.root, operation_id)
-        with self._lock:
+        acquired = self._lock.acquire(blocking=blocking)
+        if not acquired:
+            return None
+        try:
             if not path.exists():
                 return None
             events = self._read_trace(path, operation_id)
+        finally:
+            self._lock.release()
         if not events:
             return None
         current = _utc(now or self._clock())  # type: ignore[operator]

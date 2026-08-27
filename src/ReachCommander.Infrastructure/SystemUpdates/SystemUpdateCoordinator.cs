@@ -423,7 +423,7 @@ internal sealed class SystemUpdateCoordinator(
                 return;
             }
 
-            if (CanAdvance(_status.ProgressStage, candidate.ProgressStage))
+            if (CanPublishProgress(_status, candidate))
             {
                 _status = candidate;
             }
@@ -447,6 +447,11 @@ internal sealed class SystemUpdateCoordinator(
                 candidate.Phase == SystemUpdatePhase.Applying)
             {
                 return _status;
+            }
+
+            if (sameOperation && IsTraceOlder(candidate.Trace, _status.Trace))
+            {
+                candidate = candidate with { Trace = _status.Trace };
             }
 
             _status = candidate;
@@ -488,7 +493,9 @@ internal sealed class SystemUpdateCoordinator(
             current.OperationId,
             current.LastCheckedAt,
             clock.GetUtcNow(),
-            "The update status could not be recovered. Run reachcommander doctor on the host.");
+            "The update status could not be recovered. Run reachcommander doctor on the host.",
+            current.ProgressStage,
+            current.Trace);
 
     private void ClearMonitorLocked()
     {
@@ -499,7 +506,7 @@ internal sealed class SystemUpdateCoordinator(
 
     private static SystemUpdateStatus Map(UpdaterSnapshot snapshot, DateTimeOffset now)
     {
-        if (snapshot.ProtocolVersion is not (1 or 2))
+        if (snapshot.ProtocolVersion is not (1 or 2 or 3))
         {
             return SystemUpdateStatusFactory.Incompatible(now);
         }
@@ -542,7 +549,8 @@ internal sealed class SystemUpdateCoordinator(
                 Required(snapshot.OperationId),
                 snapshot.LastCheckedAt,
                 snapshot.UpdatedAt,
-                Progress(snapshot.ProgressStage)),
+                Progress(snapshot.ProgressStage),
+                snapshot.Trace),
             "completed" => SystemUpdateStatusFactory.Completed(
                 Required(snapshot.Channel),
                 Required(snapshot.CurrentVersion),
@@ -550,7 +558,8 @@ internal sealed class SystemUpdateCoordinator(
                 Required(snapshot.OperationId),
                 snapshot.LastCheckedAt,
                 snapshot.UpdatedAt,
-                Progress(snapshot.ProgressStage)),
+                Progress(snapshot.ProgressStage),
+                snapshot.Trace),
             "rolledBack" => SystemUpdateStatusFactory.RolledBack(
                 Required(snapshot.Channel),
                 Required(snapshot.CurrentVersion),
@@ -558,7 +567,8 @@ internal sealed class SystemUpdateCoordinator(
                 Required(snapshot.OperationId),
                 snapshot.LastCheckedAt,
                 snapshot.UpdatedAt,
-                Progress(snapshot.ProgressStage)),
+                Progress(snapshot.ProgressStage),
+                snapshot.Trace),
             "failed" => SystemUpdateStatusFactory.Failed(
                 snapshot.Channel,
                 snapshot.CurrentVersion,
@@ -566,7 +576,8 @@ internal sealed class SystemUpdateCoordinator(
                 snapshot.OperationId,
                 snapshot.LastCheckedAt,
                 snapshot.UpdatedAt,
-                progressStage: Progress(snapshot.ProgressStage)),
+                progressStage: Progress(snapshot.ProgressStage),
+                trace: snapshot.Trace),
             _ => SystemUpdateStatusFactory.Incompatible(now),
         };
     }
@@ -649,6 +660,35 @@ internal sealed class SystemUpdateCoordinator(
             _ => false,
         };
 
+    private static bool CanPublishProgress(
+        SystemUpdateStatus current,
+        SystemUpdateStatus candidate) =>
+        CanAdvance(current.ProgressStage, candidate.ProgressStage) ||
+        (current.ProgressStage == candidate.ProgressStage &&
+         !IsTraceOlder(candidate.Trace, current.Trace) &&
+         candidate.Trace is not null);
+
+    private static bool IsTraceOlder(
+        SystemUpdateTrace? candidate,
+        SystemUpdateTrace? current)
+    {
+        if (current is null)
+        {
+            return false;
+        }
+
+        if (candidate is null || candidate.StartedAt != current.StartedAt)
+        {
+            return true;
+        }
+
+        var candidateSequence = candidate.Events.Count == 0 ? 0 : candidate.Events[^1].Sequence;
+        var currentSequence = current.Events.Count == 0 ? 0 : current.Events[^1].Sequence;
+        return candidateSequence < currentSequence ||
+               (candidateSequence == currentSequence &&
+                candidate.ElapsedSeconds < current.ElapsedSeconds);
+    }
+
     private static string PublicReason(string reasonCode) => reasonCode switch
     {
         "invalid_state" => "invalid_state",
@@ -658,6 +698,7 @@ internal sealed class SystemUpdateCoordinator(
         "manifest_invalid" => "manifest_invalid",
         "updater_journal_invalid" => "updater_journal_invalid",
         "update_interrupted" => "update_interrupted",
+        "update_command_timeout" => "update_command_timeout",
         _ => "system_update_unavailable",
     };
 
@@ -670,6 +711,7 @@ internal sealed class SystemUpdateCoordinator(
         "manifest_invalid" => "The trusted container manifest metadata is invalid.",
         "updater_journal_invalid" => "The host update journal is invalid.",
         "update_interrupted" => "The host update service restarted during an update.",
+        "update_command_timeout" => "The host update command timed out and was stopped.",
         _ => "System updates are unavailable on this installation.",
     };
 }

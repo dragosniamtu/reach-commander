@@ -24,6 +24,63 @@ public enum SystemUpdateProgressStage
     VerifyingRecovery,
 }
 
+public enum SystemUpdateTraceEventCode
+{
+    OperationAccepted,
+    DownloadStarted,
+    HostActivity,
+    DownloadCompleted,
+    BackupStarted,
+    BackupCompleted,
+    InstallStarted,
+    InstallCompleted,
+    CandidateRestartStarted,
+    CandidateRestartCompleted,
+    CandidateImageVerified,
+    CandidateHealthStarted,
+    CandidateHealthActivity,
+    CandidateHealthSucceeded,
+    CandidateHealthFailed,
+    RollbackStarted,
+    RollbackStateRestored,
+    PreviousRestartStarted,
+    PreviousRestartCompleted,
+    PreviousImageVerified,
+    RecoveryHealthStarted,
+    RecoveryHealthActivity,
+    RecoveryHealthSucceeded,
+    RecoveryHealthFailed,
+    CommandTimedOut,
+    TerminationRequested,
+    TerminationForced,
+    OperationCompleted,
+    OperationRolledBack,
+    OperationFailed,
+}
+
+public enum SystemUpdateTraceOutcome
+{
+    Started,
+    Activity,
+    Succeeded,
+    Failed,
+    TimedOut,
+}
+
+public sealed record SystemUpdateTraceEvent(
+    int Sequence,
+    DateTimeOffset Timestamp,
+    long ElapsedSeconds,
+    SystemUpdateTraceEventCode Code,
+    SystemUpdateProgressStage? Stage,
+    SystemUpdateTraceOutcome Outcome);
+
+public sealed record SystemUpdateTrace(
+    DateTimeOffset StartedAt,
+    long ElapsedSeconds,
+    DateTimeOffset? LastActivityAt,
+    IReadOnlyList<SystemUpdateTraceEvent> Events);
+
 public sealed record SystemUpdateStatus(
     int ProtocolVersion,
     bool Supported,
@@ -38,7 +95,8 @@ public sealed record SystemUpdateStatus(
     string? Detail,
     string? OperationId,
     DateTimeOffset? LastCheckedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    SystemUpdateTrace? Trace);
 
 public static class SystemUpdateStatusFactory
 {
@@ -190,7 +248,8 @@ public static class SystemUpdateStatusFactory
         string operationId,
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now,
-        SystemUpdateProgressStage? progressStage = null) =>
+        SystemUpdateProgressStage? progressStage = null,
+        SystemUpdateTrace? trace = null) =>
         Create(
             supported: true,
             channel,
@@ -204,7 +263,8 @@ public static class SystemUpdateStatusFactory
             Required(operationId, nameof(operationId)),
             lastCheckedAt,
             now,
-            progressStage);
+            progressStage,
+            trace);
 
     public static SystemUpdateStatus Completed(
         string channel,
@@ -213,7 +273,8 @@ public static class SystemUpdateStatusFactory
         string operationId,
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now,
-        SystemUpdateProgressStage? progressStage = null) =>
+        SystemUpdateProgressStage? progressStage = null,
+        SystemUpdateTrace? trace = null) =>
         Create(
             supported: true,
             channel,
@@ -227,7 +288,8 @@ public static class SystemUpdateStatusFactory
             Required(operationId, nameof(operationId)),
             lastCheckedAt,
             now,
-            progressStage);
+            progressStage,
+            trace);
 
     public static SystemUpdateStatus RolledBack(
         string channel,
@@ -236,7 +298,8 @@ public static class SystemUpdateStatusFactory
         string operationId,
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now,
-        SystemUpdateProgressStage? progressStage = null) =>
+        SystemUpdateProgressStage? progressStage = null,
+        SystemUpdateTrace? trace = null) =>
         Create(
             supported: true,
             channel,
@@ -250,7 +313,8 @@ public static class SystemUpdateStatusFactory
             Required(operationId, nameof(operationId)),
             lastCheckedAt,
             now,
-            progressStage);
+            progressStage,
+            trace);
 
     public static SystemUpdateStatus Failed(
         string? channel,
@@ -260,7 +324,8 @@ public static class SystemUpdateStatusFactory
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now,
         string detail = "The update requires administrator attention.",
-        SystemUpdateProgressStage? progressStage = null) =>
+        SystemUpdateProgressStage? progressStage = null,
+        SystemUpdateTrace? trace = null) =>
         Create(
             supported: true,
             channel,
@@ -274,7 +339,8 @@ public static class SystemUpdateStatusFactory
             operationId,
             lastCheckedAt,
             now,
-            progressStage);
+            progressStage,
+            trace);
 
     private static SystemUpdateStatus Create(
         bool supported,
@@ -289,7 +355,8 @@ public static class SystemUpdateStatusFactory
         string? operationId,
         DateTimeOffset? lastCheckedAt,
         DateTimeOffset now,
-        SystemUpdateProgressStage? progressStage = null)
+        SystemUpdateProgressStage? progressStage = null,
+        SystemUpdateTrace? trace = null)
     {
         if (canApply &&
             (phase != SystemUpdatePhase.Available ||
@@ -309,6 +376,15 @@ public static class SystemUpdateStatusFactory
             throw new ArgumentException("Update progress requires an active or terminal operation.");
         }
 
+        if (trace is not null && phase is not (
+                SystemUpdatePhase.Applying or
+                SystemUpdatePhase.Completed or
+                SystemUpdatePhase.RolledBack or
+                SystemUpdatePhase.Failed))
+        {
+            throw new ArgumentException("Update traces require an active or terminal operation.");
+        }
+
         return new SystemUpdateStatus(
             ProtocolVersion,
             supported,
@@ -323,7 +399,10 @@ public static class SystemUpdateStatusFactory
             SanitizeDetail(detail),
             Optional(operationId),
             lastCheckedAt,
-            now);
+            now,
+            trace is null
+                ? null
+                : trace with { Events = trace.Events.ToArray() });
     }
 
     private static string Required(string value, string parameterName) =>

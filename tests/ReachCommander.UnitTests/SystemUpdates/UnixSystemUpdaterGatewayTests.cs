@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.Options;
+using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Infrastructure.SystemUpdates;
 
 namespace ReachCommander.UnitTests.SystemUpdates;
@@ -24,12 +25,12 @@ public sealed class UnixSystemUpdaterGatewayTests
         Assert.Equal(
             "applyConfiguredChannel",
             request.RootElement.GetProperty("action").GetString());
-        Assert.Equal(2, request.RootElement.GetProperty("protocolVersion").GetInt32());
+        Assert.Equal(3, request.RootElement.GetProperty("protocolVersion").GetInt32());
         Assert.Equal("11111111-1111-1111-1111-111111111111", request.RootElement.GetProperty("requestId").GetString());
     }
 
     [Fact]
-    public async Task Gateway_prefers_v2_and_parses_progress()
+    public async Task Gateway_prefers_v3_and_parses_sanitized_trace()
     {
         var transport = new SequenceUpdaterTransport(
             Response("applying", progressStage: "downloading"));
@@ -38,7 +39,23 @@ public sealed class UnixSystemUpdaterGatewayTests
         var result = await gateway.CheckAsync(default);
 
         Assert.Equal("downloading", result.ProgressStage);
-        Assert.Equal([2], transport.ProtocolVersions);
+        Assert.NotNull(result.Trace);
+        Assert.Equal(SystemUpdateTraceEventCode.DownloadStarted, result.Trace.Events.Single().Code);
+        Assert.Equal([3], transport.ProtocolVersions);
+    }
+
+    [Fact]
+    public async Task Gateway_falls_back_to_v2_only_for_exact_protocol_incompatibility()
+    {
+        var transport = new SequenceUpdaterTransport(
+            LegacyProtocolIncompatibleResponse(),
+            Response("applying", protocolVersion: 2, progressStage: "downloading"));
+        var gateway = new SystemUpdaterGateway(transport, new FixedRequestId());
+
+        var result = await gateway.CheckAsync(default);
+
+        Assert.Null(result.Trace);
+        Assert.Equal([3, 2], transport.ProtocolVersions);
     }
 
     [Fact]
@@ -46,13 +63,71 @@ public sealed class UnixSystemUpdaterGatewayTests
     {
         var transport = new SequenceUpdaterTransport(
             LegacyProtocolIncompatibleResponse(),
+            LegacyProtocolIncompatibleResponse(),
             Response("applying", protocolVersion: 1, progressStage: null));
         var gateway = new SystemUpdaterGateway(transport, new FixedRequestId());
 
         var result = await gateway.CheckAsync(default);
 
         Assert.Null(result.ProgressStage);
-        Assert.Equal([2, 1], transport.ProtocolVersions);
+        Assert.Equal([3, 2, 1], transport.ProtocolVersions);
+    }
+
+    [Theory]
+    [InlineData("unknownCode", "started")]
+    [InlineData("downloadStarted", "unknownOutcome")]
+    public async Task Gateway_rejects_unknown_trace_values(string code, string outcome)
+    {
+        var response = Response("applying", progressStage: "downloading")
+            .Replace("\"code\":\"downloadStarted\"", $"\"code\":\"{code}\"", StringComparison.Ordinal)
+            .Replace("\"outcome\":\"started\"", $"\"outcome\":\"{outcome}\"", StringComparison.Ordinal);
+        var transport = new SequenceUpdaterTransport(response);
+
+        await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
+            new SystemUpdaterGateway(transport, new FixedRequestId()).CheckAsync(default));
+
+        Assert.Equal([3], transport.ProtocolVersions);
+    }
+
+    [Theory]
+    [InlineData("\"exitCode\":0,")]
+    [InlineData("\"timeoutSeconds\":7200,")]
+    [InlineData("\"command\":\"docker compose up\",")]
+    public async Task Gateway_rejects_root_only_trace_fields(string field)
+    {
+        var response = Response("applying", progressStage: "downloading")
+            .Replace("\"sequence\":7,", field + "\"sequence\":7,", StringComparison.Ordinal);
+
+        await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
+            new SystemUpdaterGateway(new SequenceUpdaterTransport(response), new FixedRequestId())
+                .CheckAsync(default));
+    }
+
+    [Fact]
+    public async Task Gateway_rejects_non_increasing_trace_sequence_elapsed_and_timestamp()
+    {
+        var invalidTrace = """
+            {"startedAt":"2026-08-25T10:00:00Z","elapsedSeconds":4,"lastActivityAt":"2026-08-25T10:00:02Z","events":[{"sequence":8,"timestamp":"2026-08-25T10:00:02Z","elapsedSeconds":2,"code":"downloadStarted","stage":"downloading","outcome":"started"},{"sequence":8,"timestamp":"2026-08-25T10:00:01Z","elapsedSeconds":1,"code":"hostActivity","stage":"downloading","outcome":"activity"}]}
+            """;
+        var response = Response("applying", progressStage: "downloading", traceJson: invalidTrace);
+
+        await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
+            new SystemUpdaterGateway(new SequenceUpdaterTransport(response), new FixedRequestId())
+                .CheckAsync(default));
+    }
+
+    [Fact]
+    public async Task Gateway_rejects_more_than_thirty_two_trace_events()
+    {
+        var events = string.Join(",", Enumerable.Range(1, 33).Select(index =>
+            $$"""{"sequence":{{index}},"timestamp":"2026-08-25T10:00:00Z","elapsedSeconds":{{index}},"code":"hostActivity","stage":"downloading","outcome":"activity"}"""));
+        var trace = $$"""{"startedAt":"2026-08-25T10:00:00Z","elapsedSeconds":33,"lastActivityAt":"2026-08-25T10:00:00Z","events":[{{events}}]}""";
+
+        await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
+            new SystemUpdaterGateway(
+                    new SequenceUpdaterTransport(Response("applying", progressStage: "downloading", traceJson: trace)),
+                    new FixedRequestId())
+                .CheckAsync(default));
     }
 
     [Fact]
@@ -168,19 +243,29 @@ public sealed class UnixSystemUpdaterGatewayTests
     }
 
     [Fact]
-    public async Task Gateway_requires_progress_field_in_v2_and_forbids_it_in_v1()
+    public async Task Gateway_requires_and_forbids_version_specific_fields()
     {
-        var missingV2 = Response("applying", progressStage: "downloading")
+        var missingV3 = Response("current")
+            .Replace(",\"trace\":null", string.Empty, StringComparison.Ordinal);
+        var missingV2 = Response("applying", protocolVersion: 2, progressStage: "downloading")
             .Replace(",\"progressStage\":\"downloading\"", string.Empty, StringComparison.Ordinal);
         var extraV1 = Response("applying", protocolVersion: 1, progressStage: null)
             .Replace("}", ",\"progressStage\":null}", StringComparison.Ordinal);
 
         await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
-            new SystemUpdaterGateway(new SequenceUpdaterTransport(missingV2), new FixedRequestId())
+            new SystemUpdaterGateway(new SequenceUpdaterTransport(missingV3), new FixedRequestId())
                 .CheckAsync(default));
         await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
             new SystemUpdaterGateway(
                     new SequenceUpdaterTransport(
+                        LegacyProtocolIncompatibleResponse(),
+                        missingV2),
+                    new FixedRequestId())
+                .CheckAsync(default));
+        await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
+            new SystemUpdaterGateway(
+                    new SequenceUpdaterTransport(
+                        LegacyProtocolIncompatibleResponse(),
                         LegacyProtocolIncompatibleResponse(),
                         extraV1),
                     new FixedRequestId())
@@ -188,7 +273,7 @@ public sealed class UnixSystemUpdaterGatewayTests
     }
 
     [Fact]
-    public async Task Gateway_does_not_fallback_for_a_malformed_v2_response()
+    public async Task Gateway_does_not_fallback_for_a_malformed_v3_response()
     {
         var malformed = Response("applying", progressStage: "downloading")
             .Replace(",\"progressStage\":\"downloading\"", string.Empty, StringComparison.Ordinal);
@@ -199,7 +284,7 @@ public sealed class UnixSystemUpdaterGatewayTests
 
         await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() => gateway.CheckAsync(default));
 
-        Assert.Equal([2], transport.ProtocolVersions);
+        Assert.Equal([3], transport.ProtocolVersions);
     }
 
     [Fact]
@@ -209,12 +294,13 @@ public sealed class UnixSystemUpdaterGatewayTests
             .Replace("\"phase\":\"applying\"", "\"phase\":\"mystery\"", StringComparison.Ordinal);
         var transport = new SequenceUpdaterTransport(
             LegacyProtocolIncompatibleResponse(),
+            LegacyProtocolIncompatibleResponse(),
             malformedV1);
         var gateway = new SystemUpdaterGateway(transport, new FixedRequestId());
 
         await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() => gateway.CheckAsync(default));
 
-        Assert.Equal([2, 1], transport.ProtocolVersions);
+        Assert.Equal([3, 2, 1], transport.ProtocolVersions);
     }
 
     [Fact]
@@ -274,17 +360,32 @@ public sealed class UnixSystemUpdaterGatewayTests
 
     private static string Response(
         string phase,
-        int protocolVersion = 2,
-        string? progressStage = null)
+        int protocolVersion = 3,
+        string? progressStage = null,
+        string? traceJson = null)
     {
+        var operationId = phase is "applying" or "completed" or "rolledBack" or "failed"
+            ? "\"operation-1\""
+            : "null";
         var response = $$"""
-            {"protocolVersion":{{protocolVersion}},"requestId":"11111111-1111-1111-1111-111111111111","supported":true,"channel":"stable","currentVersion":"v1.3.0","targetVersion":"v1.4.0","currentDigest":"sha256:{{new string('a', 64)}}","targetDigest":"sha256:{{new string('b', 64)}}","phase":"{{phase}}","reasonCode":"{{ReasonFor(phase)}}","detail":"Public detail.","operationId":null,"lastCheckedAt":"2026-08-25T10:00:00Z","updatedAt":"2026-08-25T10:00:00Z"}
+            {"protocolVersion":{{protocolVersion}},"requestId":"11111111-1111-1111-1111-111111111111","supported":true,"channel":"stable","currentVersion":"v1.3.0","targetVersion":"v1.4.0","currentDigest":"sha256:{{new string('a', 64)}}","targetDigest":"sha256:{{new string('b', 64)}}","phase":"{{phase}}","reasonCode":"{{ReasonFor(phase)}}","detail":"Public detail.","operationId":{{operationId}},"lastCheckedAt":"2026-08-25T10:00:00Z","updatedAt":"2026-08-25T10:00:00Z"}
             """;
-        if (protocolVersion == 2)
+        if (protocolVersion >= 2)
         {
             response = response.Replace(
                 "}",
                 $",\"progressStage\":{JsonSerializer.Serialize(progressStage)}}}",
+                StringComparison.Ordinal);
+        }
+
+        if (protocolVersion == 3)
+        {
+            traceJson ??= phase is "applying" or "completed" or "rolledBack" or "failed"
+                ? """{"startedAt":"2026-08-25T10:00:00Z","elapsedSeconds":2,"lastActivityAt":"2026-08-25T10:00:02Z","events":[{"sequence":7,"timestamp":"2026-08-25T10:00:00Z","elapsedSeconds":0,"code":"downloadStarted","stage":"downloading","outcome":"started"}]}"""
+                : "null";
+            response = response.Replace(
+                "}",
+                $",\"trace\":{traceJson}}}",
                 StringComparison.Ordinal);
         }
 

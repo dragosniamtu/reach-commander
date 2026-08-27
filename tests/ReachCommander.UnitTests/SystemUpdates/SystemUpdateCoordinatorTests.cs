@@ -302,6 +302,46 @@ public sealed class SystemUpdateCoordinatorTests
     }
 
     [Fact]
+    public async Task Live_trace_advances_only_for_the_matching_operation()
+    {
+        var available = CurrentSnapshot with
+        {
+            ProtocolVersion = 3,
+            Phase = "available",
+            ReasonCode = "update_available",
+        };
+        var applying = available with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+            ProgressStage = "downloading",
+            Trace = Trace(sequence: 5, elapsedSeconds: 2),
+        };
+        var monitor = new ControlledOperationMonitor();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available, applying),
+            monitor: monitor);
+        await coordinator.CheckAsync(default);
+        await coordinator.ApplyAsync(default);
+        await monitor.WaitUntilCalledAsync();
+
+        monitor.Publish(applying with { Trace = Trace(sequence: 6, elapsedSeconds: 3) });
+        Assert.Equal(6, (await coordinator.GetAsync(default)).Trace!.Events[^1].Sequence);
+
+        monitor.Publish(applying with { Trace = Trace(sequence: 5, elapsedSeconds: 4) });
+        monitor.Publish(applying with
+        {
+            OperationId = "operation-other",
+            Trace = Trace(sequence: 7, elapsedSeconds: 5),
+        });
+
+        var status = await coordinator.GetAsync(default);
+        Assert.Equal("operation-1", status.OperationId);
+        Assert.Equal(6, status.Trace!.Events[^1].Sequence);
+    }
+
+    [Fact]
     public async Task Applying_discovered_at_start_resumes_one_monitor_without_owning_a_drain()
     {
         var applying = CurrentSnapshot with
@@ -509,6 +549,18 @@ public sealed class SystemUpdateCoordinatorTests
         null,
         Now,
         Now);
+
+    private static SystemUpdateTrace Trace(int sequence, long elapsedSeconds) => new(
+        Now,
+        elapsedSeconds,
+        Now.AddSeconds(elapsedSeconds),
+        [new SystemUpdateTraceEvent(
+            sequence,
+            Now.AddSeconds(elapsedSeconds),
+            elapsedSeconds,
+            SystemUpdateTraceEventCode.HostActivity,
+            SystemUpdateProgressStage.Downloading,
+            SystemUpdateTraceOutcome.Activity)]);
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {

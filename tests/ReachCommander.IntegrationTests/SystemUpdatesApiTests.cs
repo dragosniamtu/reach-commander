@@ -44,6 +44,38 @@ public sealed class SystemUpdatesApiTests
     }
 
     [Fact]
+    public async Task Get_returns_only_the_sanitized_public_update_trace()
+    {
+        var now = DateTimeOffset.Parse("2026-08-25T10:00:00Z");
+        var trace = new SystemUpdateTrace(
+            now,
+            4,
+            now.AddSeconds(2),
+            [new SystemUpdateTraceEvent(
+                3,
+                now.AddSeconds(1),
+                1,
+                SystemUpdateTraceEventCode.DownloadStarted,
+                SystemUpdateProgressStage.Downloading,
+                SystemUpdateTraceOutcome.Started)]);
+        await using var factory = new ReachCommanderApiFactory();
+        factory.SystemUpdates.SetApplying(SystemUpdateProgressStage.Downloading, trace);
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.GetAsync("/api/system-update");
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"trace\":", json);
+        Assert.Contains("\"code\":\"downloadStarted\"", json);
+        Assert.DoesNotContain("exitCode", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("timeoutSeconds", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("docker", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sha256:", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/opt/", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Apply_has_no_body_and_returns_accepted_operation()
     {
         await using var factory = new ReachCommanderApiFactory();

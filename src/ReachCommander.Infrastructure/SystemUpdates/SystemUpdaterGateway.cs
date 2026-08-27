@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using ReachCommander.Application.SystemUpdates;
 
 namespace ReachCommander.Infrastructure.SystemUpdates;
 
@@ -15,7 +16,8 @@ internal sealed record UpdaterSnapshot(
     string? OperationId,
     DateTimeOffset? LastCheckedAt,
     DateTimeOffset UpdatedAt,
-    string? ProgressStage = null);
+    string? ProgressStage = null,
+    SystemUpdateTrace? Trace = null);
 
 internal interface ISystemUpdaterGateway
 {
@@ -50,6 +52,8 @@ internal sealed class SystemUpdaterGateway(
     public const int MaximumMessageBytes = 65_536;
     private const int LegacyProtocolVersion = 1;
     private const int DetailedProtocolVersion = 2;
+    private const int TraceProtocolVersion = 3;
+    private const int MaximumPublicTraceEvents = 32;
 
     private static readonly HashSet<string> V1ResponseFields =
     [
@@ -72,6 +76,27 @@ internal sealed class SystemUpdaterGateway(
     private static readonly HashSet<string> V2ResponseFields =
         [.. V1ResponseFields, "progressStage"];
 
+    private static readonly HashSet<string> V3ResponseFields =
+        [.. V2ResponseFields, "trace"];
+
+    private static readonly HashSet<string> TraceFields =
+    [
+        "startedAt",
+        "elapsedSeconds",
+        "lastActivityAt",
+        "events",
+    ];
+
+    private static readonly HashSet<string> TraceEventFields =
+    [
+        "sequence",
+        "timestamp",
+        "elapsedSeconds",
+        "code",
+        "stage",
+        "outcome",
+    ];
+
     private static readonly HashSet<string> ProgressStages =
     [
         "downloading",
@@ -93,6 +118,51 @@ internal sealed class SystemUpdaterGateway(
         "rolledBack",
         "failed",
     ];
+
+    private static readonly IReadOnlyDictionary<string, SystemUpdateTraceEventCode> TraceCodes =
+        new Dictionary<string, SystemUpdateTraceEventCode>(StringComparer.Ordinal)
+        {
+            ["operationAccepted"] = SystemUpdateTraceEventCode.OperationAccepted,
+            ["downloadStarted"] = SystemUpdateTraceEventCode.DownloadStarted,
+            ["hostActivity"] = SystemUpdateTraceEventCode.HostActivity,
+            ["downloadCompleted"] = SystemUpdateTraceEventCode.DownloadCompleted,
+            ["backupStarted"] = SystemUpdateTraceEventCode.BackupStarted,
+            ["backupCompleted"] = SystemUpdateTraceEventCode.BackupCompleted,
+            ["installStarted"] = SystemUpdateTraceEventCode.InstallStarted,
+            ["installCompleted"] = SystemUpdateTraceEventCode.InstallCompleted,
+            ["candidateRestartStarted"] = SystemUpdateTraceEventCode.CandidateRestartStarted,
+            ["candidateRestartCompleted"] = SystemUpdateTraceEventCode.CandidateRestartCompleted,
+            ["candidateImageVerified"] = SystemUpdateTraceEventCode.CandidateImageVerified,
+            ["candidateHealthStarted"] = SystemUpdateTraceEventCode.CandidateHealthStarted,
+            ["candidateHealthActivity"] = SystemUpdateTraceEventCode.CandidateHealthActivity,
+            ["candidateHealthSucceeded"] = SystemUpdateTraceEventCode.CandidateHealthSucceeded,
+            ["candidateHealthFailed"] = SystemUpdateTraceEventCode.CandidateHealthFailed,
+            ["rollbackStarted"] = SystemUpdateTraceEventCode.RollbackStarted,
+            ["rollbackStateRestored"] = SystemUpdateTraceEventCode.RollbackStateRestored,
+            ["previousRestartStarted"] = SystemUpdateTraceEventCode.PreviousRestartStarted,
+            ["previousRestartCompleted"] = SystemUpdateTraceEventCode.PreviousRestartCompleted,
+            ["previousImageVerified"] = SystemUpdateTraceEventCode.PreviousImageVerified,
+            ["recoveryHealthStarted"] = SystemUpdateTraceEventCode.RecoveryHealthStarted,
+            ["recoveryHealthActivity"] = SystemUpdateTraceEventCode.RecoveryHealthActivity,
+            ["recoveryHealthSucceeded"] = SystemUpdateTraceEventCode.RecoveryHealthSucceeded,
+            ["recoveryHealthFailed"] = SystemUpdateTraceEventCode.RecoveryHealthFailed,
+            ["commandTimedOut"] = SystemUpdateTraceEventCode.CommandTimedOut,
+            ["terminationRequested"] = SystemUpdateTraceEventCode.TerminationRequested,
+            ["terminationForced"] = SystemUpdateTraceEventCode.TerminationForced,
+            ["operationCompleted"] = SystemUpdateTraceEventCode.OperationCompleted,
+            ["operationRolledBack"] = SystemUpdateTraceEventCode.OperationRolledBack,
+            ["operationFailed"] = SystemUpdateTraceEventCode.OperationFailed,
+        };
+
+    private static readonly IReadOnlyDictionary<string, SystemUpdateTraceOutcome> TraceOutcomes =
+        new Dictionary<string, SystemUpdateTraceOutcome>(StringComparer.Ordinal)
+        {
+            ["started"] = SystemUpdateTraceOutcome.Started,
+            ["activity"] = SystemUpdateTraceOutcome.Activity,
+            ["succeeded"] = SystemUpdateTraceOutcome.Succeeded,
+            ["failed"] = SystemUpdateTraceOutcome.Failed,
+            ["timedOut"] = SystemUpdateTraceOutcome.TimedOut,
+        };
 
     private static readonly IReadOnlyDictionary<string, HashSet<string>> ReasonsByPhase =
         new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
@@ -117,7 +187,7 @@ internal sealed class SystemUpdaterGateway(
             ["applying"] = ["update_applying"],
             ["completed"] = ["update_completed"],
             ["rolledBack"] = ["candidate_rolled_back"],
-            ["failed"] = ["update_failed", "update_interrupted", "updater_journal_invalid"],
+            ["failed"] = ["update_failed", "update_interrupted", "updater_journal_invalid", "update_command_timeout"],
         };
 
     public Task<UpdaterSnapshot> CheckAsync(CancellationToken cancellationToken) =>
@@ -130,6 +200,19 @@ internal sealed class SystemUpdaterGateway(
         string action,
         CancellationToken cancellationToken)
     {
+        var traced = await ExchangeAsync(
+                action,
+                TraceProtocolVersion,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!IsLegacyProtocolIncompatible(traced.Response))
+        {
+            return Parse(
+                traced.Response,
+                traced.RequestId,
+                TraceProtocolVersion);
+        }
+
         var detailed = await ExchangeAsync(
                 action,
                 DetailedProtocolVersion,
@@ -143,10 +226,7 @@ internal sealed class SystemUpdaterGateway(
                 DetailedProtocolVersion);
         }
 
-        var legacy = await ExchangeAsync(
-                action,
-                LegacyProtocolVersion,
-                cancellationToken)
+        var legacy = await ExchangeAsync(action, LegacyProtocolVersion, cancellationToken)
             .ConfigureAwait(false);
         return Parse(legacy.Response, legacy.RequestId, LegacyProtocolVersion);
     }
@@ -179,9 +259,14 @@ internal sealed class SystemUpdaterGateway(
     {
         using var document = ParseDocument(response);
         var root = document.RootElement;
-        var expectedFields = expectedProtocolVersion == LegacyProtocolVersion
-            ? V1ResponseFields
-            : V2ResponseFields;
+        var expectedFields = expectedProtocolVersion switch
+        {
+            LegacyProtocolVersion => V1ResponseFields,
+            DetailedProtocolVersion => V2ResponseFields,
+            TraceProtocolVersion => V3ResponseFields,
+            _ => throw new SystemUpdaterProtocolException(
+                "The updater protocol version is incompatible."),
+        };
         ValidateFields(root, expectedFields);
 
         var protocolVersion = RequiredInt(root, "protocolVersion");
@@ -209,7 +294,7 @@ internal sealed class SystemUpdaterGateway(
             throw new SystemUpdaterProtocolException("The updater phase and reason are incompatible.");
         }
 
-        var progressStage = expectedProtocolVersion == DetailedProtocolVersion
+        var progressStage = expectedProtocolVersion >= DetailedProtocolVersion
             ? OptionalProgressStage(root)
             : null;
         if (progressStage is not null && phase is not (
@@ -219,6 +304,10 @@ internal sealed class SystemUpdaterGateway(
                 "The updater phase and progress stage are incompatible.");
         }
 
+        var operationId = OptionalLogicalString(root, "operationId");
+        var trace = expectedProtocolVersion == TraceProtocolVersion
+            ? OptionalTrace(root, phase, operationId)
+            : null;
         var updatedAt = RequiredTimestamp(root, "updatedAt");
         return new UpdaterSnapshot(
             protocolVersion,
@@ -229,10 +318,92 @@ internal sealed class SystemUpdaterGateway(
             phase,
             reasonCode,
             RequiredBoundedString(root, "detail"),
-            OptionalLogicalString(root, "operationId"),
+            operationId,
             OptionalTimestamp(root, "lastCheckedAt"),
             updatedAt,
-            progressStage);
+            progressStage,
+            trace);
+    }
+
+    private static SystemUpdateTrace? OptionalTrace(
+        JsonElement root,
+        string phase,
+        string? operationId)
+    {
+        var property = root.GetProperty("trace");
+        if (property.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (phase is not ("applying" or "completed" or "rolledBack" or "failed") ||
+            operationId is null)
+        {
+            throw new SystemUpdaterProtocolException(
+                "The updater phase and trace are incompatible.");
+        }
+
+        ValidateFields(property, TraceFields);
+        var startedAt = RequiredTimestamp(property, "startedAt");
+        var elapsedSeconds = RequiredNonNegativeLong(property, "elapsedSeconds");
+        var lastActivityAt = OptionalTimestamp(property, "lastActivityAt");
+        if (lastActivityAt is { } activity && activity < startedAt)
+        {
+            throw new SystemUpdaterProtocolException("The updater trace activity is invalid.");
+        }
+
+        var eventsProperty = property.GetProperty("events");
+        if (eventsProperty.ValueKind != JsonValueKind.Array ||
+            eventsProperty.GetArrayLength() > MaximumPublicTraceEvents)
+        {
+            throw new SystemUpdaterProtocolException("The updater trace events are invalid.");
+        }
+
+        var events = new List<SystemUpdateTraceEvent>(eventsProperty.GetArrayLength());
+        var previousSequence = 0;
+        var previousElapsed = -1L;
+        DateTimeOffset? previousTimestamp = null;
+        foreach (var item in eventsProperty.EnumerateArray())
+        {
+            ValidateFields(item, TraceEventFields);
+            var sequence = RequiredInt(item, "sequence");
+            var timestamp = RequiredTimestamp(item, "timestamp");
+            var eventElapsed = RequiredNonNegativeLong(item, "elapsedSeconds");
+            if (sequence <= 0 ||
+                sequence <= previousSequence ||
+                eventElapsed < previousElapsed ||
+                eventElapsed > elapsedSeconds ||
+                timestamp < startedAt ||
+                (previousTimestamp is not null && timestamp < previousTimestamp))
+            {
+                throw new SystemUpdaterProtocolException("The updater trace event order is invalid.");
+            }
+
+            var codeName = RequiredString(item, "code");
+            var outcomeName = RequiredString(item, "outcome");
+            if (!TraceCodes.TryGetValue(codeName, out var code) ||
+                !TraceOutcomes.TryGetValue(outcomeName, out var outcome))
+            {
+                throw new SystemUpdaterProtocolException("The updater trace event is incompatible.");
+            }
+
+            events.Add(new SystemUpdateTraceEvent(
+                sequence,
+                timestamp,
+                eventElapsed,
+                code,
+                MapProgressStage(OptionalProgressStage(item, "stage")),
+                outcome));
+            previousSequence = sequence;
+            previousElapsed = eventElapsed;
+            previousTimestamp = timestamp;
+        }
+
+        return new SystemUpdateTrace(
+            startedAt,
+            elapsedSeconds,
+            lastActivityAt,
+            events.ToArray());
     }
 
     private static JsonDocument ParseDocument(string response)
@@ -307,9 +478,11 @@ internal sealed class SystemUpdaterGateway(
     private static bool IsNull(JsonElement root, string name) =>
         root.GetProperty(name).ValueKind == JsonValueKind.Null;
 
-    private static string? OptionalProgressStage(JsonElement root)
+    private static string? OptionalProgressStage(
+        JsonElement root,
+        string name = "progressStage")
     {
-        var property = root.GetProperty("progressStage");
+        var property = root.GetProperty(name);
         if (property.ValueKind == JsonValueKind.Null)
         {
             return null;
@@ -327,11 +500,38 @@ internal sealed class SystemUpdaterGateway(
         return value;
     }
 
+    private static SystemUpdateProgressStage? MapProgressStage(string? stage) => stage switch
+    {
+        null => null,
+        "downloading" => SystemUpdateProgressStage.Downloading,
+        "installing" => SystemUpdateProgressStage.Installing,
+        "restarting" => SystemUpdateProgressStage.Restarting,
+        "healthChecking" => SystemUpdateProgressStage.HealthChecking,
+        "restoring" => SystemUpdateProgressStage.Restoring,
+        "restartingPrevious" => SystemUpdateProgressStage.RestartingPrevious,
+        "verifyingRecovery" => SystemUpdateProgressStage.VerifyingRecovery,
+        _ => throw new SystemUpdaterProtocolException(
+            "The updater progress stage is incompatible."),
+    };
+
     private static int RequiredInt(JsonElement root, string name)
     {
         var property = root.GetProperty(name);
         if (property.ValueKind != JsonValueKind.Number ||
             !property.TryGetInt32(out var value))
+        {
+            throw new SystemUpdaterProtocolException($"The updater field '{name}' is invalid.");
+        }
+
+        return value;
+    }
+
+    private static long RequiredNonNegativeLong(JsonElement root, string name)
+    {
+        var property = root.GetProperty(name);
+        if (property.ValueKind != JsonValueKind.Number ||
+            !property.TryGetInt64(out var value) ||
+            value < 0)
         {
             throw new SystemUpdaterProtocolException($"The updater field '{name}' is invalid.");
         }

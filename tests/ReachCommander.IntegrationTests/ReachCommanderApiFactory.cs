@@ -461,7 +461,9 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         public void SetAvailable() => _status = SystemUpdateStatusFactory.Available(
             "stable", "v1.3.0", "v1.4.0", Now, Now);
 
-        public void SetApplying(SystemUpdateProgressStage progressStage) =>
+        public void SetApplying(
+            SystemUpdateProgressStage progressStage,
+            SystemUpdateTrace? trace = null) =>
             _status = SystemUpdateStatusFactory.Applying(
                 "stable",
                 "v1.3.0",
@@ -469,7 +471,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 "operation-1",
                 Now,
                 Now,
-                progressStage);
+                progressStage,
+                trace);
 
         public void SetBackgroundOperationsActive(bool value) =>
             _backgroundOperationsActive = value;

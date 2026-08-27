@@ -52,6 +52,40 @@ public sealed class SystemUpdateContractTests
     }
 
     [Fact]
+    public void Trace_serialization_contains_only_sanitized_public_events()
+    {
+        var trace = new SystemUpdateTrace(
+            Now,
+            3,
+            Now.AddSeconds(2),
+            [new SystemUpdateTraceEvent(
+                4,
+                Now.AddSeconds(1),
+                1,
+                SystemUpdateTraceEventCode.DownloadStarted,
+                SystemUpdateProgressStage.Downloading,
+                SystemUpdateTraceOutcome.Started)]);
+        var status = SystemUpdateStatusFactory.Applying(
+            "stable",
+            "v1.3.0",
+            "v1.4.0",
+            "operation-1",
+            Now,
+            Now,
+            SystemUpdateProgressStage.Downloading,
+            trace);
+
+        var json = JsonSerializer.Serialize(status, JsonOptions);
+
+        Assert.Contains("\"code\":\"downloadStarted\"", json);
+        Assert.Contains("\"outcome\":\"started\"", json);
+        Assert.DoesNotContain("sha256:", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("docker", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exitCode", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("timeoutSeconds", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Apply_contract_accepts_no_target_input()
     {
         var method = typeof(ISystemUpdateService).GetMethod(nameof(ISystemUpdateService.ApplyAsync));

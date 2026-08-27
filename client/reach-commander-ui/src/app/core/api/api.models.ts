@@ -447,6 +447,15 @@ export type SystemUpdatePhase =
   | 'rolledBack'
   | 'failed';
 
+export type SystemUpdateProgressStage =
+  | 'downloading'
+  | 'installing'
+  | 'restarting'
+  | 'healthChecking'
+  | 'restoring'
+  | 'restartingPrevious'
+  | 'verifyingRecovery';
+
 export interface SystemUpdateStatusDto {
   readonly protocolVersion: number;
   readonly supported: boolean;
@@ -454,6 +463,7 @@ export interface SystemUpdateStatusDto {
   readonly currentVersion: string | null;
   readonly targetVersion: string | null;
   readonly phase: SystemUpdatePhase;
+  readonly progressStage: SystemUpdateProgressStage | null;
   readonly updateAvailable: boolean;
   readonly canApply: boolean;
   readonly reasonCode: string | null;

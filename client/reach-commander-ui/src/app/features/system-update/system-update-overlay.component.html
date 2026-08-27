@@ -9,7 +9,9 @@
     @if (!terminal()) {
       <span class="spinner" aria-hidden="true"><i></i><i></i></span>
     } @else {
-      <span class="terminal-icon" aria-hidden="true">{{ status().phase === 'rolledBack' ? '↶' : '!' }}</span>
+      <span class="terminal-icon" aria-hidden="true">{{
+        status().phase === 'rolledBack' ? '↶' : '!'
+      }}</span>
     }
     <div>
       <span class="eyebrow">ReachCommander system update</span>
@@ -17,16 +19,47 @@
     </div>
     @if (status().phase === 'applying') {
       <p>
-        {{ reconnecting()
-          ? 'The backend is restarting. Reconnecting automatically—keep this tab open.'
-          : 'The trusted update is being applied and health checked. File changes are temporarily paused.' }}
+        {{
+          reconnecting()
+            ? 'The backend is restarting. Reconnecting automatically—keep this tab open.'
+            : progress().recovery.length > 0
+              ? 'The candidate did not become healthy. The previous version is being recovered automatically.'
+              : 'The trusted update is being applied and health checked. File changes are temporarily paused.'
+        }}
       </p>
     } @else if (status().phase === 'completed') {
       <p>The backend is healthy. Activating the matching offline shell and reloading once.</p>
     } @else if (status().phase === 'rolledBack') {
       <p>The candidate did not pass its health check, so the previous version was restored.</p>
     } @else {
-      <p>The update could not be recovered automatically. Run <code>reachcommander doctor</code> on the Ubuntu host.</p>
+      <p>
+        The update could not be recovered automatically. Run <code>reachcommander doctor</code> on
+        the Ubuntu host.
+      </p>
+    }
+    <div class="progress-copy" aria-live="polite" aria-atomic="true">
+      {{ progress().stale ? 'Update still in progress.' : progress().currentLabel }}
+    </div>
+    <ol class="update-progress" aria-label="Update progress">
+      @for (step of progress().standard; track step.id) {
+        <li [attr.data-step-state]="step.state">
+          <span class="step-indicator" aria-hidden="true"></span>
+          <span>{{ step.label }}</span>
+        </li>
+      }
+    </ol>
+    @if (progress().recovery.length > 0) {
+      <div class="recovery-group">
+        <h3>Recovering previous version</h3>
+        <ol class="update-progress recovery" aria-label="Recovery progress">
+          @for (step of progress().recovery; track step.id) {
+            <li [attr.data-step-state]="step.state">
+              <span class="step-indicator" aria-hidden="true"></span>
+              <span>{{ step.label }}</span>
+            </li>
+          }
+        </ol>
+      </div>
     }
     @if (error(); as safeError) {
       <p class="error">{{ safeError.detail }}</p>

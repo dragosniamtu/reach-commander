@@ -58,6 +58,7 @@ function status(): SystemUpdateStatusDto {
     currentVersion: 'v1.3.0',
     targetVersion: 'v1.4.0',
     phase: 'available',
+    progressStage: null,
     updateAvailable: true,
     canApply: true,
     reasonCode: 'update_available',

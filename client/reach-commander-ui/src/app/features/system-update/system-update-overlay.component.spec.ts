@@ -6,7 +6,9 @@ describe('SystemUpdateOverlayComponent', () => {
   let fixture: ComponentFixture<SystemUpdateOverlayComponent>;
 
   beforeEach(async () => {
-    await TestBed.configureTestingModule({ imports: [SystemUpdateOverlayComponent] }).compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [SystemUpdateOverlayComponent],
+    }).compileComponents();
     fixture = TestBed.createComponent(SystemUpdateOverlayComponent);
   });
 
@@ -29,6 +31,42 @@ describe('SystemUpdateOverlayComponent', () => {
     expect(spinner.getAttribute('aria-hidden')).toBe('true');
     expect(spinner.querySelectorAll(':scope > i')).toHaveLength(2);
     expect(fixture.nativeElement.textContent).toContain('Updating ReachCommander');
+  });
+
+  it('renders and announces the active detailed update step', () => {
+    fixture.componentRef.setInput('status', status({ progressStage: 'installing' }));
+    fixture.componentRef.setInput('reconnecting', false);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('ol[aria-label="Update progress"]')).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-step-state="active"]')?.textContent,
+    ).toContain('Installing update');
+    expect(fixture.nativeElement.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      'Installing update',
+    );
+  });
+
+  it('keeps semantic progress text and states available without relying on motion', () => {
+    fixture.componentRef.setInput('status', status({ progressStage: 'healthChecking' }));
+    fixture.detectChanges();
+
+    const active = fixture.nativeElement.querySelector('[data-step-state="active"]');
+    expect(active?.textContent).toContain('Checking system health');
+    expect(active?.getAttribute('data-step-state')).toBe('active');
+  });
+
+  it('separates automatic recovery progress from the standard update path', () => {
+    fixture.componentRef.setInput('status', status({ progressStage: 'restoring' }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Recovering previous version');
+    expect(
+      fixture.nativeElement.querySelector('ol[aria-label="Recovery progress"]'),
+    ).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-step-state="active"]')?.textContent,
+    ).toContain('Restoring previous version');
   });
 
   it.each([
@@ -54,13 +92,14 @@ function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDt
     currentVersion: 'v1.3.0',
     targetVersion: 'v1.4.0',
     phase: 'applying',
+    progressStage: null,
     updateAvailable: false,
     canApply: false,
     reasonCode: 'update_applying',
     detail: 'ReachCommander is applying the trusted update.',
     operationId: 'operation-1',
     lastCheckedAt: '2026-08-25T10:00:00Z',
-    updatedAt: '2026-08-25T10:00:00Z',
+    updatedAt: new Date().toISOString(),
     ...overrides,
   };
 }

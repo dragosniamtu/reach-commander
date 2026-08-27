@@ -185,6 +185,7 @@ export class SystemUpdateStore {
     const applying = Object.freeze({
       ...current,
       phase: 'applying' as const,
+      progressStage: null,
       canApply: false,
       reasonCode: 'update_applying',
       detail: 'ReachCommander is applying the trusted update.',

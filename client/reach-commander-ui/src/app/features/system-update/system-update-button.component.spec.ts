@@ -126,6 +126,7 @@ function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDt
     currentVersion: 'v1.3.0',
     targetVersion: null,
     phase: 'current',
+    progressStage: null,
     updateAvailable: false,
     canApply: false,
     reasonCode: 'up_to_date',

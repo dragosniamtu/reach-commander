@@ -139,6 +139,46 @@ describe('SystemUpdateStore', () => {
     expect(scheduler.pendingCount).toBe(1);
   });
 
+  it('shows client-observed connecting while Apply has not returned', async () => {
+    let resolveApply!: (status: SystemUpdateStatusDto) => void;
+    api.applyPromise = new Promise((resolve) => {
+      resolveApply = resolve;
+    });
+    store.capture(status({
+      phase: 'available',
+      targetVersion: 'v1.4.0',
+      updateAvailable: true,
+      canApply: true,
+    }));
+
+    const apply = store.apply();
+
+    expect(store.status()?.phase).toBe('applying');
+    expect(store.status()?.operationId).toBeNull();
+    expect(store.status()?.progressStage).toBeNull();
+
+    resolveApply(status({
+      phase: 'applying',
+      operationId: 'operation-1',
+      progressStage: 'downloading',
+    }));
+    await apply;
+  });
+
+  it('retains the latest confirmed stage through a connection failure', async () => {
+    store.capture(status({
+      phase: 'applying',
+      operationId: 'operation-1',
+      progressStage: 'installing',
+    }));
+    api.getResults.push(() => Promise.reject(new TypeError('offline')));
+
+    await scheduler.runNext();
+
+    expect(store.status()?.progressStage).toBe('installing');
+    expect(store.reconnecting()).toBe(true);
+  });
+
   it('caps exponential reconnect delays', async () => {
     api.applyResult = status({
       phase: 'applying',
@@ -229,6 +269,7 @@ class FakeSystemUpdateApi {
     targetVersion: 'v1.4.0',
     operationId: 'operation-1',
   });
+  applyPromise: Promise<SystemUpdateStatusDto> | null = null;
   applyError: unknown = null;
   getCount = 0;
   checkCount = 0;
@@ -247,7 +288,7 @@ class FakeSystemUpdateApi {
   applySystemUpdate(): Promise<SystemUpdateStatusDto> {
     this.applyCount++;
     return this.applyError === null
-      ? Promise.resolve(this.applyResult)
+      ? (this.applyPromise ?? Promise.resolve(this.applyResult))
       : Promise.reject(this.applyError);
   }
 }
@@ -306,6 +347,7 @@ function status(overrides: Partial<SystemUpdateStatusDto>): SystemUpdateStatusDt
     currentVersion: 'v1.3.0',
     targetVersion: null,
     phase: 'current',
+    progressStage: null,
     updateAvailable: false,
     canApply: false,
     reasonCode: 'up_to_date',

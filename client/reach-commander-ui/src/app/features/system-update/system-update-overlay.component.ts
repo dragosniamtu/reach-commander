@@ -1,6 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { SystemUpdateStatusDto } from '../../core/api/api.models';
 import { SystemUpdateClientError } from '../../core/state/system-update.store';
+import { buildSystemUpdateProgress } from './system-update-progress';
 
 @Component({
   selector: 'app-system-update-overlay',
@@ -9,13 +19,18 @@ import { SystemUpdateClientError } from '../../core/state/system-update.store';
   styleUrl: './system-update-overlay.component.scss',
 })
 export class SystemUpdateOverlayComponent {
+  private readonly nowMilliseconds = signal(Date.now());
+
   readonly status = input.required<SystemUpdateStatusDto>();
   readonly reconnecting = input(false);
   readonly error = input<SystemUpdateClientError | null>(null);
   readonly dismissed = output<void>();
 
-  readonly terminal = computed(() =>
-    this.status().phase === 'rolledBack' || this.status().phase === 'failed',
+  readonly terminal = computed(
+    () => this.status().phase === 'rolledBack' || this.status().phase === 'failed',
+  );
+  readonly progress = computed(() =>
+    buildSystemUpdateProgress(this.status(), this.reconnecting(), this.nowMilliseconds()),
   );
   readonly title = computed(() => {
     if (this.status().phase === 'rolledBack') {
@@ -27,6 +42,14 @@ export class SystemUpdateOverlayComponent {
     if (this.status().phase === 'completed') {
       return 'Activating updated app';
     }
+    if (this.progress().recovery.length > 0) {
+      return 'Recovering previous version';
+    }
     return this.reconnecting() ? 'Reconnecting to ReachCommander' : 'Updating ReachCommander';
   });
+
+  constructor() {
+    const interval = globalThis.setInterval(() => this.nowMilliseconds.set(Date.now()), 5_000);
+    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(interval));
+  }
 }

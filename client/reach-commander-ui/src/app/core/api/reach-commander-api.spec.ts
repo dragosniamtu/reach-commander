@@ -141,6 +141,7 @@ describe('ReachCommanderApi', () => {
     });
     const applying = systemUpdateStatus({
       phase: 'applying',
+      progressStage: 'installing',
       updateAvailable: true,
       operationId: 'operation-1',
       targetVersion: 'v1.4.0',
@@ -639,6 +640,7 @@ function systemUpdateStatus(
     currentVersion: 'v1.3.0',
     targetVersion: null,
     phase: 'current',
+    progressStage: null,
     updateAvailable: false,
     canApply: false,
     reasonCode: 'up_to_date',

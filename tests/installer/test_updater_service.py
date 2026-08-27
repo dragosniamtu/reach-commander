@@ -11,6 +11,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from typing import Callable
 from unittest import mock
 
 from deploy.updater_protocol import (
@@ -89,9 +90,15 @@ class StaticDiscovery:
 
 
 class RecordingRunner:
-    def __init__(self, exit_code: int = 0, output: str = "sensitive output") -> None:
+    def __init__(
+        self,
+        exit_code: int = 0,
+        output: str = "sensitive output",
+        progress_stages: tuple[str, ...] = (),
+    ) -> None:
         self.exit_code = exit_code
         self.output = output
+        self.progress_stages = progress_stages
         self.argv: list[list[str]] = []
         self.environments: list[dict[str, str]] = []
         self.timeouts: list[int] = []
@@ -104,11 +111,15 @@ class RecordingRunner:
         env: dict[str, str],
         timeout: int,
         shell: bool,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> CommandResult:
         self.argv.append(list(argv))
         self.environments.append(dict(env))
         self.timeouts.append(timeout)
         self.shell_values.append(shell)
+        if progress_callback is not None:
+            for stage in self.progress_stages:
+                progress_callback(stage)
         return CommandResult(self.exit_code, self.output)
 
 
@@ -210,6 +221,46 @@ class UpdaterRuntimeTests(unittest.TestCase):
                 self.assertIsNotNone(journal)
                 self.assertEqual(expected, journal["phase"])
                 self.assertNotIn("sensitive output", json.dumps(journal))
+
+    def test_apply_persists_live_progress_and_retains_it_in_terminal_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = RecordingRunner(
+                progress_stages=(
+                    "downloading",
+                    "installing",
+                    "restarting",
+                    "healthChecking",
+                )
+            )
+            runtime = self.runtime(root, runner=runner)
+
+            runtime.handle(request("applyConfiguredChannel"))
+            runtime.wait_for_worker()
+
+            journal = AtomicUpdateJournal(root / "system-update.json").read_optional()
+            self.assertEqual("completed", journal["phase"])
+            self.assertEqual("healthChecking", journal["progressStage"])
+
+    def test_progress_persistence_failure_does_not_change_update_result(self) -> None:
+        class ProgressFailingJournal(AtomicUpdateJournal):
+            def advance(self, operation, stage, now):  # type: ignore[no-untyped-def]
+                raise JournalError("progress unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = ProgressFailingJournal(root / "system-update.json")
+            runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                journal,
+                runner=RecordingRunner(progress_stages=("downloading",)),
+                clock=lambda: NOW,
+            )
+
+            runtime.handle(request("applyConfiguredChannel"))
+            runtime.wait_for_worker()
+
+            self.assertEqual("completed", journal.read_optional()["phase"])
 
     def test_spawn_failure_is_sanitized_and_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -496,20 +547,40 @@ class UpdaterSocketServerTests(unittest.TestCase):
 
 
 class ServiceProcessContractTests(unittest.TestCase):
-    def test_subprocess_runner_never_uses_a_shell_and_bounds_output(self) -> None:
-        completed = mock.Mock(returncode=0, stdout="x" * 100_000)
-        with mock.patch("deploy.updater_service.subprocess.run", return_value=completed) as run:
-            result = SubprocessCommandRunner().run(
-                FIXED_COMMAND,
-                env=SANITIZED_ENVIRONMENT,
-                timeout=300,
-                shell=False,
+    def test_subprocess_runner_streams_only_valid_markers_and_bounds_output(self) -> None:
+        import sys
+
+        script = "\n".join(
+            (
+                "print('ordinary output')",
+                "print('REACHCOMMANDER_UPDATE_STAGE=downloading')",
+                "print('REACHCOMMANDER_UPDATE_STAGE=notAStage')",
+                "print('REACHCOMMANDER_UPDATE_STAGE=installing')",
+                "print('x' * 100000)",
             )
+        )
+        stages: list[str] = []
+
+        result = SubprocessCommandRunner().run(
+            (sys.executable, "-c", script),
+            env=os.environ,
+            timeout=5,
+            shell=False,
+            progress_callback=stages.append,
+        )
 
         self.assertEqual(0, result.returncode)
+        self.assertEqual(["downloading", "installing"], stages)
+        self.assertIn("ordinary output", result.output)
+        self.assertNotIn("REACHCOMMANDER_UPDATE_STAGE", result.output)
         self.assertLessEqual(len(result.output), 16_384)
-        self.assertFalse(run.call_args.kwargs["shell"])
-        self.assertIs(run.call_args.kwargs["stdin"], __import__("subprocess").DEVNULL)
+        with self.assertRaisesRegex(ValueError, "shell"):
+            SubprocessCommandRunner().run(
+                (sys.executable, "-c", "pass"),
+                env=os.environ,
+                timeout=5,
+                shell=True,
+            )
 
     def test_runtime_gid_reader_requires_one_valid_non_root_value(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

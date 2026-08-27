@@ -141,6 +141,16 @@ assert_equal() {
   [[ "$expected" == "$actual" ]] || fail "$message (expected '$expected', got '$actual')"
 }
 
+assert_update_stages() {
+  local expected="$1"
+  local actual
+  actual="$(
+    printf '%s\n' "$last_output" |
+      sed -n 's/^REACHCOMMANDER_UPDATE_STAGE=//p'
+  )"
+  assert_equal "$expected" "$actual" 'update progress stage order'
+}
+
 run_command() {
   set +e
   last_output="$(bash "$COMMAND_SOURCE" "$@" 2>&1)"
@@ -403,6 +413,7 @@ reset_update_baseline
 run_command update latest
 assert_equal "1" "$last_status" "invalid update channel status"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "invalid channel invoked Docker"
+[[ "$last_output" != *'REACHCOMMANDER_UPDATE_STAGE='* ]] || fail "invalid channel emitted update progress"
 pass "update rejects malformed channels before Docker access"
 
 export FAKE_DOCKER_DIGESTS="$digest_a"
@@ -426,6 +437,7 @@ assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/current-version"
 assert_equal "v1.3.0" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "successful previous version"
 grep -Fxq "REACHCOMMANDER_IMAGE=$digest_b" "$INSTALL_ROOT/.env" || fail "successful environment image missing"
 [[ ! -e "$INSTALL_ROOT/state/update-transaction" ]] || fail "successful update marker leaked"
+assert_update_stages $'downloading\ninstalling\nrestarting\nhealthChecking'
 pass "successful update atomically advances image, version, and channel state"
 
 export FAKE_DOCKER_DIGESTS="$digest_c"
@@ -483,6 +495,7 @@ assert_equal "$digest_c" "$(cat -- "$INSTALL_ROOT/state/current-image")" "Compos
 assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$INSTALL_ROOT/state/current-version")" "Compose rollback current version"
 assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "Compose rollback previous version"
 unset FAKE_DOCKER_COMPOSE_SEQUENCE_FILE
+assert_update_stages $'downloading\ninstalling\nrestarting\nrestoring\nrestartingPrevious\nverifyingRecovery'
 pass "Compose recreation failure restores image and version state"
 
 printf 'unhealthy\nhealthy\n' >"$TEST_ROOT/update-health-sequence"
@@ -497,6 +510,7 @@ assert_equal "edge@bbbbbbbbbbbb" "$(cat -- "$INSTALL_ROOT/state/current-version"
 assert_equal "edge@aaaaaaaaaaaa" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "rollback previous version"
 grep -Fxq "REACHCOMMANDER_IMAGE=$digest_c" "$INSTALL_ROOT/.env" || fail "rollback environment image missing"
 assert_equal "$digest_d" "$(cat -- "$INSTALL_ROOT/state/failed-image")" "failed digest record"
+assert_update_stages $'downloading\ninstalling\nrestarting\nhealthChecking\nrestoring\nrestartingPrevious\nverifyingRecovery'
 pass "unhealthy update restores the previous healthy deployment"
 
 printf 'unhealthy\nunhealthy\n' >"$TEST_ROOT/update-health-sequence"
@@ -519,6 +533,7 @@ export FAKE_FLOCK_EXIT=1
 run_command update edge
 (( last_status != 0 )) || fail "lock contention must fail update"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "contended update invoked Docker"
+[[ "$last_output" != *'REACHCOMMANDER_UPDATE_STAGE='* ]] || fail "contended update emitted update progress"
 export FAKE_FLOCK_EXIT=0
 pass "concurrent update is rejected before registry access"
 

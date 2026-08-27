@@ -68,6 +68,7 @@ NETWORK_TIMEOUT_SECONDS = 10
 MAX_COMMAND_OUTPUT_CHARS = 16_384
 MAX_JOURNAL_BYTES = 32_768
 RESULT_RETENTION_SECONDS = 600
+PROGRESS_MARKER_PREFIX = "REACHCOMMANDER_UPDATE_STAGE="
 
 SANITIZED_ENVIRONMENT = {
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -153,22 +154,62 @@ class SubprocessCommandRunner:
         env: Mapping[str, str],
         timeout: int,
         shell: bool,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> CommandResult:
         if shell:
             raise ValueError("shell execution is not supported")
-        completed = subprocess.run(
+        process = subprocess.Popen(
             list(argv),
-            check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout,
             env=dict(env),
             shell=False,
         )
-        output = completed.stdout if isinstance(completed.stdout, str) else ""
-        return CommandResult(completed.returncode, output[:MAX_COMMAND_OUTPUT_CHARS])
+        output_parts: list[str] = []
+        output_length = 0
+
+        def read_output() -> None:
+            nonlocal output_length
+            if process.stdout is None:
+                return
+            for line in process.stdout:
+                marker = line.rstrip("\r\n")
+                if marker.startswith(PROGRESS_MARKER_PREFIX):
+                    stage = marker[len(PROGRESS_MARKER_PREFIX) :]
+                    if stage in PROGRESS_STAGES and progress_callback is not None:
+                        progress_callback(stage)
+                    continue
+                remaining = MAX_COMMAND_OUTPUT_CHARS - output_length
+                if remaining > 0:
+                    bounded = line[:remaining]
+                    output_parts.append(bounded)
+                    output_length += len(bounded)
+
+        reader = threading.Thread(
+            target=read_output,
+            name="reachcommander-update-output",
+            daemon=True,
+        )
+        reader.start()
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            reader.join()
+            if process.stdout is not None:
+                process.stdout.close()
+            raise subprocess.TimeoutExpired(
+                list(argv),
+                timeout,
+                output="".join(output_parts),
+            )
+        reader.join()
+        if process.stdout is not None:
+            process.stdout.close()
+        return CommandResult(returncode, "".join(output_parts))
 
 
 class GitHubLatestReleaseProvider:
@@ -503,12 +544,30 @@ class UpdaterRuntime:
         return self._journal.write_snapshot(checked)
 
     def _apply_worker(self, operation: Mapping[str, object]) -> None:
+        operation_state = dict(operation)
+
+        def record_progress(stage: str) -> None:
+            nonlocal operation_state
+            try:
+                operation_state = self._journal.advance(
+                    operation_state,
+                    stage,
+                    self._clock(),
+                )
+            except JournalError:
+                # Progress is observational and must not change the update result.
+                print(
+                    "ReachCommander updater could not persist update progress.",
+                    file=sys.stderr,
+                )
+
         try:
             completed = self._runner.run(
                 FIXED_COMMAND,
                 env=SANITIZED_ENVIRONMENT,
                 timeout=COMMAND_TIMEOUT_SECONDS,
                 shell=False,
+                progress_callback=record_progress,
             )
             phase = {0: "completed", 2: "rolledBack"}.get(
                 completed.returncode, "failed"
@@ -516,7 +575,7 @@ class UpdaterRuntime:
         except Exception:
             phase = "failed"
         try:
-            self._journal.finish(operation, phase, self._clock())
+            self._journal.finish(operation_state, phase, self._clock())
         except JournalError:
             # The service log remains fixed; command output and physical paths are omitted.
             print("ReachCommander updater could not persist the update result.", file=sys.stderr)

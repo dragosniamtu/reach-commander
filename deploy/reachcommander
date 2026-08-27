@@ -302,6 +302,20 @@ verify_update_state() {
   fi
 }
 
+report_update_stage() {
+  local stage="${1:-}"
+  case "$stage" in
+    downloading | installing | restarting | healthChecking | \
+      restoring | restartingPrevious | verifyingRecovery)
+      printf 'REACHCOMMANDER_UPDATE_STAGE=%s\n' "$stage" >&2
+      ;;
+    *)
+      rc_die 'internal update progress stage is invalid'
+      return 1
+      ;;
+  esac
+}
+
 command_update() {
   local requested_channel="${1:-}"
   local saved_channel
@@ -326,6 +340,7 @@ command_update() {
     rc_die 'requested update channel is invalid'
     return 1
   fi
+  report_update_stage downloading
   if ! resolved_image="$(rc_pull_digest "$requested_channel")"; then
     return 1
   fi
@@ -337,6 +352,7 @@ command_update() {
     return 1
   fi
 
+  report_update_stage installing
   if ! backup_directory="$(create_update_backup)"; then
     return 1
   fi
@@ -355,24 +371,33 @@ command_update() {
   rc_atomic_write "$RC_INSTALL_ROOT/state/channel" "$requested_channel"$'\n'
   maybe_interrupt_update channel
 
-  if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
-    rm -f -- "$marker"
-    remove_update_backup "$backup_directory"
-    printf 'ReachCommander updated successfully to %s (%s).\n' "$resolved_version" "$resolved_image"
-    return 0
+  report_update_stage restarting
+  if rc_compose up -d reachcommander; then
+    report_update_stage healthChecking
+    if rc_wait_healthy reachcommander 60; then
+      rm -f -- "$marker"
+      remove_update_backup "$backup_directory"
+      printf 'ReachCommander updated successfully to %s (%s).\n' "$resolved_version" "$resolved_image"
+      return 0
+    fi
   fi
 
   rc_compose logs --tail 200 reachcommander >&2 || true
   rc_atomic_write "$RC_INSTALL_ROOT/state/failed-image" "$resolved_image"$'\n'
+  report_update_stage restoring
   if ! restore_update_backup "$backup_directory"; then
     printf 'ReachCommander: update failed and state restoration failed; manual recovery is required.\n' >&2
     return 3
   fi
   rm -f -- "$marker"
   remove_update_backup "$backup_directory" || true
-  if rc_compose up -d reachcommander && rc_wait_healthy reachcommander 60; then
-    printf 'ReachCommander: update was unhealthy; the previous deployment was restored.\n' >&2
-    return 2
+  report_update_stage restartingPrevious
+  if rc_compose up -d reachcommander; then
+    report_update_stage verifyingRecovery
+    if rc_wait_healthy reachcommander 60; then
+      printf 'ReachCommander: update was unhealthy; the previous deployment was restored.\n' >&2
+      return 2
+    fi
   fi
   printf 'ReachCommander: update and rollback were unhealthy; manual recovery is required.\n' >&2
   return 3

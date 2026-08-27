@@ -535,10 +535,10 @@ command_update() {
     report_update_event candidateRestartCompleted failed
   fi
 
+  report_update_stage restoring
   report_update_event rollbackStarted started
   rc_compose logs --tail 200 reachcommander >&2 || true
   rc_atomic_write "$RC_INSTALL_ROOT/state/failed-image" "$resolved_image"$'\n'
-  report_update_stage restoring
   if ! restore_update_backup "$backup_directory"; then
     report_update_event rollbackStateRestored failed
     printf 'ReachCommander: update failed and state restoration failed; manual recovery is required.\n' >&2
@@ -550,8 +550,8 @@ command_update() {
   report_update_stage restartingPrevious
   report_update_event previousRestartStarted started
   if rc_compose up -d reachcommander; then
-    report_update_event previousRestartCompleted succeeded
     report_update_stage verifyingRecovery
+    report_update_event previousRestartCompleted succeeded
     if verify_running_image "$current_image"; then
       report_update_event previousImageVerified succeeded
       report_update_event recoveryHealthStarted started

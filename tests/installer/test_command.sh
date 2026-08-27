@@ -170,6 +170,18 @@ assert_ordered_update_events() {
   done
 }
 
+assert_update_stage_precedes_event() {
+  local stage="$1"
+  local event="$2"
+  local stage_line
+  local event_line
+  stage_line="$(printf '%s\n' "$last_output" | grep -n -m1 -F "REACHCOMMANDER_UPDATE_STAGE=$stage" | cut -d: -f1)"
+  event_line="$(printf '%s\n' "$last_output" | grep -n -m1 -F "REACHCOMMANDER_UPDATE_EVENT=$event" | cut -d: -f1)"
+  [[ -n "$stage_line" ]] || fail "update stage is missing: $stage"
+  [[ -n "$event_line" ]] || fail "update trace event is missing: $event"
+  (( stage_line < event_line )) || fail "update stage $stage was not visible before event $event"
+}
+
 assert_update_events_are_sanitized() {
   local markers
   markers="$(printf '%s\n' "$last_output" | sed -n '/^REACHCOMMANDER_UPDATE_EVENT=/p')"
@@ -657,6 +669,8 @@ assert_ordered_update_events \
   'previousRestartCompleted:succeeded' \
   'previousImageVerified:succeeded' \
   'recoveryHealthSucceeded:succeeded'
+assert_update_stage_precedes_event restoring 'rollbackStarted:started'
+assert_update_stage_precedes_event verifyingRecovery 'previousRestartCompleted:succeeded'
 pass "update rolls back when Compose recreates the wrong container image"
 
 printf '1\n0\n' >"$TEST_ROOT/update-compose-sequence"

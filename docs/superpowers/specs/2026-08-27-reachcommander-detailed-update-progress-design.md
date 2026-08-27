@@ -69,10 +69,10 @@ The journal schema records the current `progressStage` and updates `updatedAt` a
 
 ```text
 downloading -> installing -> restarting -> healthChecking -> completed
-                                               |
-                                               +-> restoring -> restartingPrevious
-                                                               -> verifyingRecovery
-                                                               -> rolledBack | failed
+                                  |                |
+                                  +----------------+-> restoring -> restartingPrevious
+                                                                  -> verifyingRecovery
+                                                                  -> rolledBack | failed
 ```
 
 Terminal update phases remain `completed`, `rolledBack`, and `failed`. The progress stage supplements the existing broad `applying` phase; it does not replace transactional phases or reason codes.
@@ -121,7 +121,7 @@ Completed items display a checkmark. The current item uses the theme accent and 
 
 `Activating updated application` is a client-observed final step: it starts only after the backend reports a healthy completed operation and while the PWA service activates the matching shell. It is not added to the host protocol.
 
-If candidate health checking fails, the standard list stops advancing and a recovery group becomes visible:
+If candidate restart or health checking fails, the standard list stops advancing and a recovery group becomes visible:
 
 1. Restoring previous version
 2. Restarting previous version

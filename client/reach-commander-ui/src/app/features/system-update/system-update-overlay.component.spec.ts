@@ -1,14 +1,37 @@
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SystemUpdateStatusDto } from '../../core/api/api.models';
 import { SystemUpdateOverlayComponent } from './system-update-overlay.component';
+import { SystemUpdateSupportBundleService } from './system-update-support-bundle.service';
 
 describe('SystemUpdateOverlayComponent', () => {
   let fixture: ComponentFixture<SystemUpdateOverlayComponent>;
+  let downloadDiagnostics: ReturnType<typeof vi.fn>;
+  const diagnosticsPending = signal(false);
+  const diagnosticsError = signal<string | null>(null);
 
   beforeEach(async () => {
-    await TestBed.configureTestingModule({
+    TestBed.configureTestingModule({
       imports: [SystemUpdateOverlayComponent],
-    }).compileComponents();
+    });
+    TestBed.overrideComponent(SystemUpdateOverlayComponent, {
+      set: {
+        providers: [
+          {
+            provide: SystemUpdateSupportBundleService,
+            useFactory: () => ({
+              pending: diagnosticsPending.asReadonly(),
+              error: diagnosticsError.asReadonly(),
+              download: downloadDiagnostics,
+            }),
+          },
+        ],
+      },
+    });
+    await TestBed.compileComponents();
+    downloadDiagnostics = vi.fn(() => Promise.resolve());
+    diagnosticsPending.set(false);
+    diagnosticsError.set(null);
     fixture = TestBed.createComponent(SystemUpdateOverlayComponent);
   });
 
@@ -19,7 +42,7 @@ describe('SystemUpdateOverlayComponent', () => {
 
     expect(fixture.nativeElement.querySelector('[aria-modal="true"]')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Reconnecting');
-    expect(fixture.nativeElement.querySelector('button')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.return-button')).toBeNull();
   });
 
   it('renders two decorative progress rings while applying', () => {
@@ -79,8 +102,34 @@ describe('SystemUpdateOverlayComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent.toLowerCase()).toContain(text);
-    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+    (fixture.nativeElement.querySelector('.return-button') as HTMLButtonElement).click();
     expect(dismissed).toHaveBeenCalledOnce();
+  });
+
+  it('downloads sanitized diagnostics without closing the blocking update screen', () => {
+    fixture.componentRef.setInput('status', status({ phase: 'applying' }));
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector(
+      '.download-diagnostics',
+    ) as HTMLButtonElement;
+    expect(button.textContent).toContain('Download diagnostics');
+
+    button.click();
+
+    expect(downloadDiagnostics).toHaveBeenCalledOnce();
+    expect(fixture.nativeElement.querySelector('[aria-modal="true"]')).not.toBeNull();
+  });
+
+  it('keeps fixed CLI guidance visible if browser download fails', () => {
+    diagnosticsError.set(
+      'Diagnostics could not be downloaded. Run sudo reachcommander support-bundle.',
+    );
+    fixture.componentRef.setInput('status', status({ phase: 'failed' }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('sudo reachcommander support-bundle');
+    expect(fixture.nativeElement.querySelector('.download-diagnostics')).not.toBeNull();
   });
 
   it('shows the root-only trace and health commands after an update failure', () => {

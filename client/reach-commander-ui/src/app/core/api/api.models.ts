@@ -184,8 +184,13 @@ export interface ArchiveExtractionPreviewDto {
 }
 
 export type ArchiveExtractionOperationState =
-  'queued' | 'extracting' | 'finalizing' | 'completed' | 'cancelled' | 'failed' |
-  'recoveryRequired';
+  | 'queued'
+  | 'extracting'
+  | 'finalizing'
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+  | 'recoveryRequired';
 export type ArchiveExtractionCompensationState =
   'notRequired' | 'notStarted' | 'succeeded' | 'failed';
 
@@ -209,8 +214,15 @@ export type FileOperationKind =
   'copy' | 'move' | 'permanentDelete' | 'trash' | 'restore' | 'emptyTrash';
 export type FileOperationConflictDecision = 'overwrite' | 'skip' | 'createUniqueName';
 export type FileOperationPhase =
-  'queued' | 'validating' | 'running' | 'cancelling' | 'completed' |
-  'completedWithErrors' | 'cancelled' | 'failed' | 'interrupted';
+  | 'queued'
+  | 'validating'
+  | 'running'
+  | 'cancelling'
+  | 'completed'
+  | 'completedWithErrors'
+  | 'cancelled'
+  | 'failed'
+  | 'interrupted';
 export type FileOperationItemResult =
   'completed' | 'skipped' | 'failed' | 'copiedButNotRemoved' | 'notStarted';
 
@@ -488,12 +500,7 @@ export type SystemUpdateTraceEventCode =
   | 'operationRolledBack'
   | 'operationFailed';
 
-export type SystemUpdateTraceOutcome =
-  | 'started'
-  | 'activity'
-  | 'succeeded'
-  | 'failed'
-  | 'timedOut';
+export type SystemUpdateTraceOutcome = 'started' | 'activity' | 'succeeded' | 'failed' | 'timedOut';
 
 export interface SystemUpdateTraceEventDto {
   readonly sequence: number;
@@ -529,6 +536,11 @@ export interface SystemUpdateStatusDto {
   readonly trace: SystemUpdateTraceDto | null;
 }
 
+export interface SystemUpdateSupportBundleDownload {
+  readonly blob: Blob;
+  readonly fileName: string;
+}
+
 export abstract class CommanderApiPort {
   abstract getSystemMetrics(): Promise<SystemMetricsDto>;
 
@@ -537,6 +549,8 @@ export abstract class CommanderApiPort {
   abstract checkSystemUpdate(): Promise<SystemUpdateStatusDto>;
 
   abstract applySystemUpdate(): Promise<SystemUpdateStatusDto>;
+
+  abstract downloadSystemUpdateSupportBundle(): Promise<SystemUpdateSupportBundleDownload>;
 
   abstract getSources(): Promise<readonly SourceDto[]>;
 
@@ -558,9 +572,7 @@ export abstract class CommanderApiPort {
     request: BatchRenamePreviewRequestDto,
   ): Promise<BatchRenamePreviewDto>;
 
-  abstract previewRename(
-    request: ExactRenamePreviewRequestDto,
-  ): Promise<BatchRenamePreviewDto>;
+  abstract previewRename(request: ExactRenamePreviewRequestDto): Promise<BatchRenamePreviewDto>;
 
   abstract executeBatchRename(planId: string): Promise<BatchRenameOperationDto>;
 

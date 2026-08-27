@@ -87,7 +87,7 @@ jobs:
         run: python3 tools/run_with_annotations.py "Installer render configuration failed" python3 -m unittest tests/installer/test_render_config.py -v
 
       - name: Test restricted host updater contracts
-        run: python3 tools/run_with_annotations.py "Host updater contracts failed" python3 -m unittest tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py tests/installer/test_updater_trace.py -v
+        run: python3 tools/run_with_annotations.py "Host updater contracts failed" python3 -m unittest tests/installer/test_support_bundle.py tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py tests/installer/test_updater_trace.py -v
 
       - name: Verify updater systemd unit
         run: systemd-analyze verify deploy/systemd/reachcommander-updater.service

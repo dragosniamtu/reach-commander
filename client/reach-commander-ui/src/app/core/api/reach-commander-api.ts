@@ -36,6 +36,7 @@ import {
   SourceDto,
   SystemMetricsDto,
   SystemUpdateStatusDto,
+  SystemUpdateSupportBundleDownload,
   UploadEvent,
   UploadLimitsDto,
   UploadResultDto,
@@ -59,15 +60,24 @@ export class ReachCommanderApi extends CommanderApiPort {
   }
 
   checkSystemUpdate(): Promise<SystemUpdateStatusDto> {
-    return firstValueFrom(
-      this.http.post<SystemUpdateStatusDto>('/api/system-update/check', null),
-    );
+    return firstValueFrom(this.http.post<SystemUpdateStatusDto>('/api/system-update/check', null));
   }
 
   applySystemUpdate(): Promise<SystemUpdateStatusDto> {
-    return firstValueFrom(
-      this.http.post<SystemUpdateStatusDto>('/api/system-update/apply', null),
+    return firstValueFrom(this.http.post<SystemUpdateStatusDto>('/api/system-update/apply', null));
+  }
+
+  async downloadSystemUpdateSupportBundle(): Promise<SystemUpdateSupportBundleDownload> {
+    const response = await firstValueFrom(
+      this.http.post('/api/system-update/support-bundle', null, {
+        observe: 'response',
+        responseType: 'blob',
+      }),
     );
+    return {
+      blob: response.body ?? new Blob([], { type: 'application/zip' }),
+      fileName: supportBundleFileName(response.headers.get('Content-Disposition')),
+    };
   }
 
   getSources(): Promise<readonly SourceDto[]> {
@@ -161,9 +171,7 @@ export class ReachCommanderApi extends CommanderApiPort {
   }
 
   previewRename(request: ExactRenamePreviewRequestDto): Promise<BatchRenamePreviewDto> {
-    return firstValueFrom(
-      this.http.post<BatchRenamePreviewDto>('/api/renames/preview', request),
-    );
+    return firstValueFrom(this.http.post<BatchRenamePreviewDto>('/api/renames/preview', request));
   }
 
   executeBatchRename(planId: string): Promise<BatchRenameOperationDto> {
@@ -218,24 +226,18 @@ export class ReachCommanderApi extends CommanderApiPort {
     );
   }
 
-  previewFileOperation(
-    request: FileOperationPreviewRequestDto,
-  ): Promise<FileOperationPreviewDto> {
+  previewFileOperation(request: FileOperationPreviewRequestDto): Promise<FileOperationPreviewDto> {
     return firstValueFrom(
       this.http.post<FileOperationPreviewDto>('/api/file-operations/preview', request),
     );
   }
 
   submitFileOperation(request: FileOperationSubmissionDto): Promise<FileOperationStatusDto> {
-    return firstValueFrom(
-      this.http.post<FileOperationStatusDto>('/api/file-operations', request),
-    );
+    return firstValueFrom(this.http.post<FileOperationStatusDto>('/api/file-operations', request));
   }
 
   listFileOperations(): Promise<readonly FileOperationStatusDto[]> {
-    return firstValueFrom(
-      this.http.get<readonly FileOperationStatusDto[]>('/api/file-operations'),
-    );
+    return firstValueFrom(this.http.get<readonly FileOperationStatusDto[]>('/api/file-operations'));
   }
 
   getFileOperation(operationId: string): Promise<FileOperationStatusDto> {
@@ -272,35 +274,24 @@ export class ReachCommanderApi extends CommanderApiPort {
   }
 
   submitDelete(request: DeleteSubmissionDto): Promise<FileOperationStatusDto> {
-    return firstValueFrom(
-      this.http.post<FileOperationStatusDto>('/api/trash/delete', request),
-    );
+    return firstValueFrom(this.http.post<FileOperationStatusDto>('/api/trash/delete', request));
   }
 
   listTrash(sourceId?: string): Promise<readonly TrashEntryDto[]> {
-    const options = sourceId === undefined
-      ? {}
-      : { params: new HttpParams().set('sourceId', sourceId) };
-    return firstValueFrom(
-      this.http.get<readonly TrashEntryDto[]>('/api/trash', options),
-    );
+    const options =
+      sourceId === undefined ? {} : { params: new HttpParams().set('sourceId', sourceId) };
+    return firstValueFrom(this.http.get<readonly TrashEntryDto[]>('/api/trash', options));
   }
 
   previewRestore(request: RestorePreviewRequestDto): Promise<RestorePreviewDto> {
-    return firstValueFrom(
-      this.http.post<RestorePreviewDto>('/api/trash/preview-restore', request),
-    );
+    return firstValueFrom(this.http.post<RestorePreviewDto>('/api/trash/preview-restore', request));
   }
 
   submitRestore(request: RestoreSubmissionDto): Promise<FileOperationStatusDto> {
-    return firstValueFrom(
-      this.http.post<FileOperationStatusDto>('/api/trash/restore', request),
-    );
+    return firstValueFrom(this.http.post<FileOperationStatusDto>('/api/trash/restore', request));
   }
 
-  permanentlyDeleteTrash(
-    request: TrashPermanentDeleteRequestDto,
-  ): Promise<FileOperationStatusDto> {
+  permanentlyDeleteTrash(request: TrashPermanentDeleteRequestDto): Promise<FileOperationStatusDto> {
     return firstValueFrom(
       this.http.delete<FileOperationStatusDto>('/api/trash/items', { body: request }),
     );
@@ -321,6 +312,22 @@ function isUploadTransportEvent(
 
 function missingUploadResult(): never {
   throw new Error('The upload response did not contain a result.');
+}
+
+function supportBundleFileName(contentDisposition: string | null): string {
+  const fallback = `reachcommander-support-${new Date()
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z')}.zip`;
+  const encoded = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plain = contentDisposition?.match(/filename="?([^";]+)"?/i)?.[1];
+  let candidate = encoded ?? plain ?? '';
+  try {
+    candidate = decodeURIComponent(candidate);
+  } catch {
+    return fallback;
+  }
+  return /^reachcommander-support-\d{8}T\d{6}Z\.zip$/.test(candidate) ? candidate : fallback;
 }
 
 interface ArchiveDirectoryTransport {

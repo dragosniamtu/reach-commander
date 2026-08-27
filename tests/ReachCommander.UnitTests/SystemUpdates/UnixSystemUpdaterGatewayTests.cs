@@ -27,6 +27,7 @@ public sealed class UnixSystemUpdaterGatewayTests
             request.RootElement.GetProperty("action").GetString());
         Assert.Equal(3, request.RootElement.GetProperty("protocolVersion").GetInt32());
         Assert.Equal("11111111-1111-1111-1111-111111111111", request.RootElement.GetProperty("requestId").GetString());
+        Assert.Equal([SystemUpdaterGateway.MaximumMessageBytes], transport.MaximumResponseBytes);
     }
 
     [Fact]
@@ -436,6 +437,8 @@ public sealed class UnixSystemUpdaterGatewayTests
 
         public List<string> Requests { get; } = [];
 
+        public List<int> MaximumResponseBytes { get; } = [];
+
         public int[] ProtocolVersions => Requests
             .Select(ProtocolVersion)
             .ToArray();
@@ -444,6 +447,15 @@ public sealed class UnixSystemUpdaterGatewayTests
         {
             Requests.Add(request);
             return Task.FromResult(_responses.Dequeue());
+        }
+
+        public Task<string> ExchangeAsync(
+            string request,
+            int maximumResponseBytes,
+            CancellationToken cancellationToken)
+        {
+            MaximumResponseBytes.Add(maximumResponseBytes);
+            return ExchangeAsync(request, cancellationToken);
         }
 
         private static int ProtocolVersion(string request)

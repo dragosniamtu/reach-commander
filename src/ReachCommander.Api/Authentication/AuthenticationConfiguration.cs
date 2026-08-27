@@ -16,6 +16,7 @@ public static class AuthenticationConfiguration
 {
     public const string SetupPolicy = "authentication-setup";
     public const string LoginPolicy = "authentication-login";
+    public const string SupportBundlePolicy = "system-update-support-bundle";
     public const string AntiforgeryHeaderName = "X-ReachCommander-CSRF";
 
     public static IServiceCollection AddReachCommanderAuthentication(
@@ -68,15 +69,24 @@ public static class AuthenticationConfiguration
             {
                 var response = context.HttpContext.Response;
                 response.StatusCode = StatusCodes.Status429TooManyRequests;
+                var supportBundle = context.HttpContext.Request.Path.Equals(
+                    "/api/system-update/support-bundle",
+                    StringComparison.OrdinalIgnoreCase);
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
-                    Title = "Authentication rate limit exceeded",
-                    Detail = "Too many authentication attempts were submitted. Try again later.",
+                    Title = supportBundle
+                        ? "Support bundle rate limit exceeded"
+                        : "Authentication rate limit exceeded",
+                    Detail = supportBundle
+                        ? "Too many support bundles were requested. Try again later."
+                        : "Too many authentication attempts were submitted. Try again later.",
                     Type = "https://httpstatuses.io/429",
                     Instance = context.HttpContext.Request.Path,
                 };
-                problem.Extensions["code"] = "authentication_rate_limited";
+                problem.Extensions["code"] = supportBundle
+                    ? "support_bundle_rate_limited"
+                    : "authentication_rate_limited";
                 await response.WriteAsJsonAsync(
                     problem,
                     options: (System.Text.Json.JsonSerializerOptions?)null,
@@ -87,6 +97,8 @@ public static class AuthenticationConfiguration
                 FixedWindowPartition(context, permitLimit: 5));
             options.AddPolicy(LoginPolicy, context =>
                 FixedWindowPartition(context, permitLimit: 10));
+            options.AddPolicy(SupportBundlePolicy, context =>
+                FixedWindowPartition(context, permitLimit: 3));
         });
 
         return services;

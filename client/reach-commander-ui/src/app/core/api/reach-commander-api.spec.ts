@@ -61,19 +61,21 @@ describe('ReachCommanderApi', () => {
       format: 'sevenZip',
       volumeCount: 1,
       isReadOnly: true,
-      entries: [{
-        name: 'photo.jpg',
-        relativePath: '/Summer & Winter/photo.jpg',
-        type: 'file',
-        size: 12,
-        modifiedAt: null,
-        extension: 'jpg',
-        isReadOnly: true,
-        isSymbolicLink: false,
-        attributes: 'Archive',
-        archiveFormatHint: null,
-        archiveRole: null,
-      }],
+      entries: [
+        {
+          name: 'photo.jpg',
+          relativePath: '/Summer & Winter/photo.jpg',
+          type: 'file',
+          size: 12,
+          modifiedAt: null,
+          extension: 'jpg',
+          isReadOnly: true,
+          isSymbolicLink: false,
+          attributes: 'Archive',
+          archiveFormatHint: null,
+          archiveRole: null,
+        },
+      ],
     };
     const result = api.listArchive(
       'media library',
@@ -91,19 +93,23 @@ describe('ReachCommanderApi', () => {
     expect(request.request.method).toBe('GET');
     expect(request.request.params.keys().sort()).toEqual(['archivePath', 'path', 'sourceId']);
     expect(request.request.urlWithParams).toContain('sourceId=media%20library');
-    expect(request.request.urlWithParams).toContain('archivePath=/Family%20%26%20Friends/photos%202025.7z');
+    expect(request.request.urlWithParams).toContain(
+      'archivePath=/Family%20%26%20Friends/photos%202025.7z',
+    );
     expect(request.request.urlWithParams).toContain('path=/Summer%20%26%20Winter');
     request.flush({
       ...expected,
-      entries: [{
-        path: '/Summer & Winter/photo.jpg',
-        name: 'photo.jpg',
-        type: 'file',
-        size: 12,
-        modifiedAt: null,
-        extension: 'jpg',
-        attributes: 'Archive',
-      }],
+      entries: [
+        {
+          path: '/Summer & Winter/photo.jpg',
+          name: 'photo.jpg',
+          type: 'file',
+          size: 12,
+          modifiedAt: null,
+          extension: 'jpg',
+          attributes: 'Archive',
+        },
+      ],
     });
 
     await expect(result).resolves.toEqual(expected);
@@ -166,6 +172,39 @@ describe('ReachCommanderApi', () => {
     expect(applyRequest.request.body).toBeNull();
     applyRequest.flush(applying);
     await expect(apply).resolves.toEqual(applying);
+  });
+
+  it('downloads the private support bundle with a safe server filename', async () => {
+    const blob = new Blob(['sanitized'], { type: 'application/zip' });
+    const result = api.downloadSystemUpdateSupportBundle();
+    const request = http.expectOne('/api/system-update/support-bundle');
+
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+    expect(request.request.responseType).toBe('blob');
+    request.flush(blob, {
+      headers: {
+        'Content-Disposition':
+          "attachment; filename*=UTF-8''reachcommander-support-20260827T120000Z.zip",
+      },
+    });
+
+    await expect(result).resolves.toEqual({
+      blob,
+      fileName: 'reachcommander-support-20260827T120000Z.zip',
+    });
+  });
+
+  it('replaces an unsafe support-bundle filename with a local UTC name', async () => {
+    const result = api.downloadSystemUpdateSupportBundle();
+    const request = http.expectOne('/api/system-update/support-bundle');
+    request.flush(new Blob(['sanitized']), {
+      headers: { 'Content-Disposition': 'attachment; filename="../../private.zip"' },
+    });
+
+    const download = await result;
+    expect(download.fileName).toMatch(/^reachcommander-support-\d{8}T\d{6}Z\.zip$/);
+    expect(download.fileName).not.toContain('private');
   });
 
   it('requests effective upload limits from the stable API route', async () => {
@@ -369,9 +408,7 @@ describe('ReachCommanderApi', () => {
     await status;
 
     const cancel = api.cancelFileOperation(operationId);
-    const cancelRequest = http.expectOne(
-      '/api/file-operations/operation%2Fwith%20spaces/cancel',
-    );
+    const cancelRequest = http.expectOne('/api/file-operations/operation%2Fwith%20spaces/cancel');
     expect(cancelRequest.request.method).toBe('POST');
     expect(cancelRequest.request.body).toBeNull();
     cancelRequest.flush(fileOperationStatus({ phase: 'cancelled' }));
@@ -630,9 +667,7 @@ function systemMetricsResponse(): SystemMetricsDto {
   };
 }
 
-function systemUpdateStatus(
-  overrides: Partial<SystemUpdateStatusDto> = {},
-): SystemUpdateStatusDto {
+function systemUpdateStatus(overrides: Partial<SystemUpdateStatusDto> = {}): SystemUpdateStatusDto {
   return {
     protocolVersion: 1,
     supported: true,

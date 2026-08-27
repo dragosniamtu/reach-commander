@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using ReachCommander.Application.SystemUpdates;
@@ -199,5 +200,89 @@ public sealed class SystemUpdatesApiTests
         Assert.Equal(HttpStatusCode.BadRequest, check.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, apply.StatusCode);
         Assert.Equal(0, factory.SystemUpdates.ApplyCount);
+    }
+
+    [Fact]
+    public async Task Support_bundle_returns_a_private_sanitized_zip()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.PostAsync(
+            "/api/system-update/support-bundle",
+            content: null);
+        var content = await response.Content.ReadAsByteArrayAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/zip", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(
+            "reachcommander-support-20260827T120000Z.zip",
+            response.Content.Headers.ContentDisposition?.FileNameStar);
+        Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        using var archive = new ZipArchive(new MemoryStream(content));
+        Assert.Equal(
+            ["README.txt", "deployment-health.json", "manifest.json", "summary.txt", "update-trace.json"],
+            archive.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task Support_bundle_rejects_a_body_and_is_rate_limited()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        using var client = factory.CreateCookieClient();
+        using var invalidBody = new StringContent("{}", Encoding.UTF8, "application/json");
+        using var invalid = await client.PostAsync(
+            "/api/system-update/support-bundle",
+            invalidBody);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var accepted = await client.PostAsync(
+                "/api/system-update/support-bundle",
+                content: null);
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        }
+
+        using var limited = await client.PostAsync(
+            "/api/system-update/support-bundle",
+            content: null);
+        var payload = await limited.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.Equal("support_bundle_rate_limited", payload.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Support_bundle_requires_antiforgery_for_real_sessions()
+    {
+        await using var factory = new ReachCommanderApiFactory(useRealSecurity: true);
+        using var client = factory.CreateCookieClient();
+        await client.SetAntiforgeryAsync();
+        var setupCode = await factory.GetFreshSetupCodeAsync();
+        using var setup = await client.PostAsJsonAsync(
+            "/api/auth/setup",
+            new { setupCode, username = "dragos", password = "a-long-test-password" });
+        Assert.Equal(HttpStatusCode.OK, setup.StatusCode);
+        client.DefaultRequestHeaders.Remove("X-ReachCommander-CSRF");
+
+        using var response = await client.PostAsync(
+            "/api/system-update/support-bundle",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Support_bundle_requires_an_authenticated_administrator()
+    {
+        await using var factory = new ReachCommanderApiFactory(useRealSecurity: true);
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.PostAsync(
+            "/api/system-update/support-bundle",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

@@ -22,6 +22,8 @@ cp -- "$REPOSITORY_ROOT/deploy/compose.release.yaml" "$BUNDLE/compose.release.ya
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$BUNDLE/lib/common.sh"
 for updater_source in \
   compose.updater.yaml \
+  support_bundle.py \
+  support_bundle_cli.py \
   update_trace_cli.py \
   updater_protocol.py \
   updater_service.py \
@@ -272,8 +274,8 @@ for required_file in \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
-  bin/render_config.py bin/update_trace_cli.py bin/updater_service.py \
-  lib/common.sh lib/updater_protocol.py lib/updater_trace.py; do
+  bin/render_config.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
+  lib/common.sh lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$required_file" ]] || fail "missing installed $required_file"
 done
 [[ -f "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "updater systemd unit missing"
@@ -581,8 +583,8 @@ for recovery_file in \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
-  bin/render_config.py bin/update_trace_cli.py bin/updater_service.py \
-  lib/common.sh lib/updater_protocol.py lib/updater_trace.py; do
+  bin/render_config.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
+  lib/common.sh lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
   cp -- \
     "$REACHCOMMANDER_TEST_INSTALL_ROOT/$recovery_file" \
     "$recovery_backup/deployment/$recovery_file"

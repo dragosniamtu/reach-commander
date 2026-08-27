@@ -1,4 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.RateLimiting;
+using ReachCommander.Api.Authentication;
 using ReachCommander.Api.Contracts.SystemUpdates;
 using ReachCommander.Application.SystemUpdates;
 
@@ -7,7 +10,9 @@ namespace ReachCommander.Api.Controllers;
 [ApiController]
 [Route("api/system-update")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public sealed class SystemUpdatesController(ISystemUpdateService service) : ControllerBase
+public sealed class SystemUpdatesController(
+    ISystemUpdateService service,
+    ISystemUpdateSupportBundleService supportBundleService) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType<SystemUpdateStatusDto>(StatusCodes.Status200OK)]
@@ -38,8 +43,27 @@ public sealed class SystemUpdatesController(ISystemUpdateService service) : Cont
         return Accepted(SystemUpdateStatusDto.FromModel(await service.ApplyAsync(token)));
     }
 
+    [HttpPost("support-bundle")]
+    [EnableRateLimiting(AuthenticationConfiguration.SupportBundlePolicy)]
+    [Produces("application/zip")]
+    [ProducesResponseType<FileContentResult>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DownloadSupportBundle(CancellationToken token)
+    {
+        if (HasBody())
+        {
+            return InvalidBody();
+        }
+
+        var bundle = await supportBundleService.CreateAsync(token);
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.XContentTypeOptions = "nosniff";
+        return File(bundle.Content, "application/zip", bundle.FileName);
+    }
+
     private bool HasBody() =>
-        Request.ContentLength is > 0 || Request.Headers.TransferEncoding.Count > 0;
+        Request.HttpContext.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true ||
+        Request.ContentLength is > 0 ||
+        Request.Headers.TransferEncoding.Count > 0;
 
     private BadRequestObjectResult InvalidBody()
     {

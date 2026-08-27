@@ -11,6 +11,8 @@ UPDATER_PROTOCOL="$REPOSITORY_ROOT/deploy/updater_protocol.py"
 UPDATER_SERVICE="$REPOSITORY_ROOT/deploy/updater_service.py"
 UPDATER_TRACE="$REPOSITORY_ROOT/deploy/updater_trace.py"
 UPDATE_TRACE_CLI="$REPOSITORY_ROOT/deploy/update_trace_cli.py"
+SUPPORT_BUNDLE="$REPOSITORY_ROOT/deploy/support_bundle.py"
+SUPPORT_BUNDLE_CLI="$REPOSITORY_ROOT/deploy/support_bundle_cli.py"
 UPDATER_UNIT="$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
 
@@ -45,7 +47,9 @@ mkdir -p \
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
+cp -- "$SUPPORT_BUNDLE_CLI" "$INSTALL_ROOT/bin/support_bundle_cli.py"
 cp -- "$UPDATE_TRACE_CLI" "$INSTALL_ROOT/bin/update_trace_cli.py"
+cp -- "$SUPPORT_BUNDLE" "$INSTALL_ROOT/lib/support_bundle.py"
 cp -- "$UPDATER_PROTOCOL" "$INSTALL_ROOT/lib/updater_protocol.py"
 cp -- "$UPDATER_TRACE" "$INSTALL_ROOT/lib/updater_trace.py"
 cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"
@@ -217,6 +221,23 @@ for invocation in \
   assert_equal "64" "$last_status" "usage status for $invocation"
 done
 pass "command dispatcher rejects unknown commands and extra arguments"
+
+run_command support-bundle extra
+assert_equal "64" "$last_status" "support-bundle extra argument status"
+support_archive="$TEST_ROOT/reachcommander-support.zip"
+set +e
+last_output="$(bash "$COMMAND_SOURCE" support-bundle 2>&1 >"$support_archive")"
+last_status=$?
+set -e
+assert_equal "0" "$last_status" "support-bundle redirected status"
+python3 -c '
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    expected = ["README.txt", "deployment-health.json", "manifest.json", "summary.txt", "update-trace.json"]
+    assert sorted(archive.namelist()) == expected
+' "$support_archive" || fail "support-bundle ZIP contract"
+[[ "$last_output" == *'sanitized support bundle created'* ]] || fail "support-bundle completion missing"
+pass "support-bundle writes only the sanitized five-entry ZIP to stdout"
 
 run_command update-log --path /etc/shadow
 assert_equal "64" "$last_status" "update-log arbitrary path rejection status"
@@ -868,7 +889,9 @@ mkdir -p \
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
 cp -- "$UPDATE_TRACE_CLI" "$INSTALL_ROOT/bin/update_trace_cli.py"
+cp -- "$SUPPORT_BUNDLE_CLI" "$INSTALL_ROOT/bin/support_bundle_cli.py"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
+cp -- "$SUPPORT_BUNDLE" "$INSTALL_ROOT/lib/support_bundle.py"
 cp -- "$UPDATER_PROTOCOL" "$INSTALL_ROOT/lib/updater_protocol.py"
 cp -- "$UPDATER_TRACE" "$INSTALL_ROOT/lib/updater_trace.py"
 cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"

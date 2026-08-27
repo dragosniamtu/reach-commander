@@ -24,6 +24,7 @@ try:
     from .updater_protocol import (
         DIGEST,
         DETAILED_PROTOCOL_VERSION,
+        DIAGNOSTIC_PROTOCOL_VERSION,
         LEGACY_PROTOCOL_VERSION,
         MAX_MESSAGE_BYTES,
         PROTOCOL_VERSION,
@@ -43,6 +44,7 @@ except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_pr
     from updater_protocol import (  # type: ignore[no-redef]
         DIGEST,
         DETAILED_PROTOCOL_VERSION,
+        DIAGNOSTIC_PROTOCOL_VERSION,
         LEGACY_PROTOCOL_VERSION,
         MAX_MESSAGE_BYTES,
         PROTOCOL_VERSION,
@@ -56,6 +58,11 @@ except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_pr
         UpdateSnapshot,
         UpdaterRequest,
     )
+
+try:
+    from .support_bundle import HostDiagnosticCollector
+except ImportError:  # Installed helper: bin/updater_service.py + lib/support_bundle.py
+    from support_bundle import HostDiagnosticCollector  # type: ignore[no-redef]
 
 try:
     from .updater_trace import EVENT_OUTCOMES, ProtectedUpdateTraceStore
@@ -737,16 +744,27 @@ class UpdaterRuntime:
         runner: object | None = None,
         clock: Callable[[], dt.datetime] | None = None,
         trace_store: object | None = None,
+        diagnostics_collector: object | None = None,
     ) -> None:
         self._discovery = discovery
         self._journal = journal
         self._runner = runner or SubprocessCommandRunner()
         self._clock = clock or (lambda: dt.datetime.now(dt.timezone.utc))
         self._trace_store = trace_store
+        self._diagnostics_collector = diagnostics_collector
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
 
     def handle(self, request: UpdaterRequest) -> dict[str, object]:
+        if request.protocol_version == DIAGNOSTIC_PROTOCOL_VERSION:
+            if self._diagnostics_collector is None:
+                raise ValueError("the diagnostic collector is unavailable")
+            snapshot = self._diagnostics_collector.collect()  # type: ignore[attr-defined]
+            return {
+                "protocolVersion": DIAGNOSTIC_PROTOCOL_VERSION,
+                "requestId": request.request_id,
+                "diagnostics": snapshot.to_protocol(),
+            }
         with self._lock:
             try:
                 current = self._journal.read_optional()
@@ -1114,7 +1132,12 @@ class UpdaterSocketServer:
             connection.settimeout(self.request_timeout)
             response = self._handle_connection(connection)
             encoded = (json.dumps(response, separators=(",", ":")) + "\n").encode()
-            if len(encoded) > MAX_MESSAGE_BYTES:
+            maximum_response = (
+                262_144
+                if response.get("protocolVersion") == DIAGNOSTIC_PROTOCOL_VERSION
+                else MAX_MESSAGE_BYTES
+            )
+            if len(encoded) > maximum_response:
                 encoded = (
                     json.dumps(_error_response("response_too_large"), separators=(",", ":"))
                     + "\n"
@@ -1390,11 +1413,16 @@ def main() -> int:
         latest_release=GitHubLatestReleaseProvider(),
         resolve_image=DockerImageResolver(),
     )
+    trace_store = ProtectedUpdateTraceStore(
+        install_root / "state" / "update-traces"
+    )
     runtime = UpdaterRuntime(
         discovery,
         AtomicUpdateJournal(install_root / "state" / "system-update.json"),
-        trace_store=ProtectedUpdateTraceStore(
-            install_root / "state" / "update-traces"
+        trace_store=trace_store,
+        diagnostics_collector=HostDiagnosticCollector(
+            install_root,
+            trace_store=trace_store,
         ),
     )
     server = UpdaterSocketServer(

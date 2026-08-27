@@ -103,13 +103,29 @@
         } @else if (trace().guidance; as guidance) {
           <p class="trace-guidance">{{ guidance }}</p>
         }
+        <div class="diagnostics-actions">
+          <button
+            type="button"
+            class="download-diagnostics"
+            [disabled]="supportBundle.pending()"
+            (click)="supportBundle.download()"
+          >
+            {{ supportBundle.pending() ? 'Preparing diagnostics…' : 'Download diagnostics' }}
+          </button>
+          <p>Creates a sanitized ZIP on this device. Nothing is uploaded automatically.</p>
+          @if (supportBundle.error(); as diagnosticsError) {
+            <p class="diagnostics-error" role="alert">{{ diagnosticsError }}</p>
+          }
+        </div>
       </div>
     </details>
     @if (error(); as safeError) {
       <p class="error">{{ safeError.detail }}</p>
     }
     @if (terminal()) {
-      <button type="button" autofocus (click)="dismissed.emit()">Return to ReachCommander</button>
+      <button type="button" class="return-button" autofocus (click)="dismissed.emit()">
+        Return to ReachCommander
+      </button>
     }
   </div>
 </section>

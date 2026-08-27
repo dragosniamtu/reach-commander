@@ -7,12 +7,26 @@ namespace ReachCommander.Infrastructure.SystemUpdates;
 internal interface ISystemUpdaterTransport
 {
     Task<string> ExchangeAsync(string request, CancellationToken cancellationToken);
+
+    Task<string> ExchangeAsync(
+        string request,
+        int maximumResponseBytes,
+        CancellationToken cancellationToken) => ExchangeAsync(request, cancellationToken);
 }
 
 internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> options)
     : ISystemUpdaterTransport
 {
     public async Task<string> ExchangeAsync(string request, CancellationToken cancellationToken)
+        => await ExchangeAsync(
+            request,
+            SystemUpdaterGateway.MaximumMessageBytes,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<string> ExchangeAsync(
+        string request,
+        int maximumResponseBytes,
+        CancellationToken cancellationToken)
     {
         var settings = options.Value;
         var requestBytes = Encoding.UTF8.GetBytes(request);
@@ -35,7 +49,10 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
             using var responseTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             responseTimeout.CancelAfter(settings.ResponseTimeout);
             await SendAllAsync(socket, requestBytes, responseTimeout.Token).ConfigureAwait(false);
-            return await ReceiveLineAsync(socket, responseTimeout.Token).ConfigureAwait(false);
+            return await ReceiveLineAsync(
+                socket,
+                maximumResponseBytes,
+                responseTimeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -76,6 +93,7 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
 
     private static async Task<string> ReceiveLineAsync(
         Socket socket,
+        int maximumResponseBytes,
         CancellationToken cancellationToken)
     {
         var bytes = new List<byte>(4096);
@@ -97,7 +115,7 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
                 }
 
                 bytes.Add(buffer[index]);
-                if (bytes.Count > SystemUpdaterGateway.MaximumMessageBytes)
+                if (bytes.Count > maximumResponseBytes)
                 {
                     throw new SystemUpdaterProtocolException("The updater response is too large.");
                 }

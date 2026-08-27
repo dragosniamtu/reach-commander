@@ -18,12 +18,14 @@ from unittest import mock
 
 import deploy.updater_service as updater_service
 from deploy.updater_protocol import (
+    DIAGNOSTIC_PROTOCOL_VERSION,
     MAX_MESSAGE_BYTES,
     TRUSTED_IMAGE_REPOSITORY,
     ResolvedImage,
     UpdateSnapshot,
     UpdaterRequest,
 )
+from deploy.support_bundle import DiagnosticCheck, DiagnosticSnapshot
 from deploy.updater_service import (
     CommandTimedOut,
     FIXED_COMMAND,
@@ -50,6 +52,30 @@ TARGET_REFERENCE = f"{TRUSTED_IMAGE_REPOSITORY}:v1.4.0"
 LEGACY_PROTOCOL_VERSION = 1
 DETAILED_PROTOCOL_VERSION = 2
 TRACE_PROTOCOL_VERSION = 3
+
+
+class StaticDiagnosticCollector:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def collect(self) -> DiagnosticSnapshot:
+        self.calls += 1
+        return DiagnosticSnapshot(
+            "2026-08-25T12:00:00Z",
+            True,
+            DIAGNOSTIC_PROTOCOL_VERSION,
+            "stable",
+            "v1.3.0",
+            None,
+            None,
+            (
+                DiagnosticCheck(
+                    "dockerEngine",
+                    "healthy",
+                    "docker_engine_healthy",
+                ),
+            ),
+        )
 
 
 def snapshot(phase: str = "available") -> UpdateSnapshot:
@@ -195,6 +221,7 @@ class UpdaterRuntimeTests(unittest.TestCase):
         *,
         runner: object | None = None,
         discovery: StaticDiscovery | None = None,
+        diagnostics: object | None = None,
     ) -> UpdaterRuntime:
         return UpdaterRuntime(
             discovery or StaticDiscovery(snapshot()),
@@ -205,6 +232,7 @@ class UpdaterRuntimeTests(unittest.TestCase):
                 root / "update-traces",
                 clock=lambda: NOW,
             ),
+            diagnostics_collector=diagnostics,
         )
 
     def test_apply_uses_only_fixed_command_and_sanitized_environment(self) -> None:
@@ -263,6 +291,39 @@ class UpdaterRuntimeTests(unittest.TestCase):
         self.assertIn("progressStage", traced)
         self.assertIn("trace", traced)
         self.assertIsNone(traced["trace"])
+
+    def test_protocol_v4_collects_diagnostics_without_changing_status_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics = StaticDiagnosticCollector()
+            runtime = self.runtime(Path(directory), diagnostics=diagnostics)
+
+            response = runtime.handle(
+                request("collectDiagnostics", DIAGNOSTIC_PROTOCOL_VERSION)
+            )
+            legacy = runtime.handle(request("check", LEGACY_PROTOCOL_VERSION))
+
+        self.assertEqual(
+            {"protocolVersion", "requestId", "diagnostics"},
+            set(response),
+        )
+        self.assertEqual(DIAGNOSTIC_PROTOCOL_VERSION, response["protocolVersion"])
+        self.assertEqual(
+            {
+                "schemaVersion",
+                "generatedAt",
+                "complete",
+                "updaterProtocolVersion",
+                "channel",
+                "currentVersion",
+                "operationId",
+                "trace",
+                "checks",
+            },
+            set(response["diagnostics"]),
+        )
+        self.assertEqual(1, diagnostics.calls)
+        self.assertNotIn("progressStage", legacy)
+        self.assertNotIn("trace", legacy)
 
     def test_v3_response_contains_only_the_bounded_public_trace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

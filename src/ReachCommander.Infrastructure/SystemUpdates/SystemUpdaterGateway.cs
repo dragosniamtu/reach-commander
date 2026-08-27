@@ -244,7 +244,11 @@ internal sealed class SystemUpdaterGateway(
             requestId,
             action,
         }) + "\n";
-        var response = await transport.ExchangeAsync(request, cancellationToken).ConfigureAwait(false);
+        var response = await transport.ExchangeAsync(
+                request,
+                MaximumMessageBytes,
+                cancellationToken)
+            .ConfigureAwait(false);
         if (System.Text.Encoding.UTF8.GetByteCount(response) > MaximumMessageBytes)
         {
             throw new SystemUpdaterProtocolException("The updater response is too large.");
@@ -406,6 +410,10 @@ internal sealed class SystemUpdaterGateway(
             lastActivityAt,
             events.ToArray());
     }
+
+    internal static SystemUpdateTrace? ParseDiagnosticTrace(
+        JsonElement diagnostics,
+        string? operationId) => OptionalTrace(diagnostics, "applying", operationId);
 
     private static JsonDocument ParseDocument(string response)
     {

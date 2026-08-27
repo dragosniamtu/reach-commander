@@ -16,14 +16,13 @@ import {
   RestorePreviewRequestDto,
   RestoreSubmissionDto,
   SystemUpdateStatusDto,
+  SystemUpdateSupportBundleDownload,
   TrashEntryDto,
   TrashPermanentDeleteRequestDto,
 } from '../core/api/api.models';
 
 export abstract class CommanderApiTestBase extends CommanderApiPort {
-  override previewRename(
-    _request: ExactRenamePreviewRequestDto,
-  ): Promise<BatchRenamePreviewDto> {
+  override previewRename(_request: ExactRenamePreviewRequestDto): Promise<BatchRenamePreviewDto> {
     return unsupported();
   }
 
@@ -36,6 +35,10 @@ export abstract class CommanderApiTestBase extends CommanderApiPort {
   }
 
   override applySystemUpdate(): Promise<SystemUpdateStatusDto> {
+    return unsupported();
+  }
+
+  override downloadSystemUpdateSupportBundle(): Promise<SystemUpdateSupportBundleDownload> {
     return unsupported();
   }
 

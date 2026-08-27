@@ -76,6 +76,8 @@ expected_entries=(
   'reachcommander-installer/lib/common.sh'
   'reachcommander-installer/reachcommander'
   'reachcommander-installer/render_config.py'
+  'reachcommander-installer/support_bundle.py'
+  'reachcommander-installer/support_bundle_cli.py'
   'reachcommander-installer/systemd/reachcommander-updater.service'
   'reachcommander-installer/update_trace_cli.py'
   'reachcommander-installer/updater_protocol.py'

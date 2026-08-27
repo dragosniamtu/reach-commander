@@ -14,7 +14,9 @@ interface UpdateRoutes {
   publish(status: SystemUpdateFixture): void;
   applyWith(status: SystemUpdateFixture): void;
   disconnectApplyThen(status: SystemUpdateFixture): void;
+  failDiagnostics(): void;
   readonly applyBodies: unknown[];
+  readonly diagnosticsRequests: unknown[];
 }
 
 async function routeSystemUpdates(
@@ -25,10 +27,34 @@ async function routeSystemUpdates(
   let applyResult: SystemUpdateFixture | null = null;
   let disconnectApply = false;
   const applyBodies: unknown[] = [];
+  const diagnosticsRequests: unknown[] = [];
+  let diagnosticsFail = false;
 
   await page.route(endpoint, async (route: Route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
+    if (pathname === "/api/system-update/support-bundle") {
+      diagnosticsRequests.push(request.postDataJSON());
+      if (diagnosticsFail) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/problem+json",
+          json: { code: "support_bundle_unavailable" },
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition":
+              'attachment; filename="reachcommander-support-20260827T120000Z.zip"',
+            "Cache-Control": "no-store",
+          },
+          body: Buffer.from("PK sanitized support bundle"),
+        });
+      }
+      return;
+    }
     if (pathname === "/api/system-update/apply") {
       applyBodies.push(request.postDataJSON());
       if (disconnectApply) {
@@ -56,7 +82,11 @@ async function routeSystemUpdates(
       disconnectApply = true;
       current = status;
     },
+    failDiagnostics() {
+      diagnosticsFail = true;
+    },
     applyBodies,
+    diagnosticsRequests,
   };
 }
 
@@ -274,6 +304,36 @@ test("system update grows a sanitized technical timeline while polling", async (
   );
 });
 
+test("system update downloads sanitized diagnostics without closing the overlay", async ({
+  page,
+}) => {
+  const routes = await routeSystemUpdates(page, available());
+  routes.applyWith(tracedStatus());
+  await page.goto("/");
+  await page.getByTestId("system-update-trigger").click();
+  await page.getByRole("button", { name: "Update ReachCommander" }).click();
+
+  const overlay = page.getByRole("alertdialog");
+  await overlay.locator("details.technical-details summary").click();
+  const downloadPromise = page.waitForEvent("download");
+  await overlay.getByRole("button", { name: "Download diagnostics" }).click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe(
+    "reachcommander-support-20260827T120000Z.zip",
+  );
+  expect(routes.diagnosticsRequests).toEqual([null]);
+  await expect(overlay).toBeVisible();
+  await expect(
+    overlay.getByRole("button", { name: "Download diagnostics" }),
+  ).toBeEnabled();
+
+  routes.failDiagnostics();
+  await overlay.getByRole("button", { name: "Download diagnostics" }).click();
+  await expect(overlay).toContainText("sudo reachcommander support-bundle");
+  await expect(overlay).not.toContainText(/token=|sha256:|\/srv\/|\/opt\//i);
+});
+
 test("system update auto-opens stale and timed-out technical details", async ({
   page,
 }) => {
@@ -306,6 +366,9 @@ test("system update auto-opens stale and timed-out technical details", async ({
 
   const details = page.locator("details.technical-details");
   await expect(details).toHaveAttribute("open", "");
+  await expect(
+    details.getByRole("button", { name: "Download diagnostics" }),
+  ).toBeVisible();
   await expect(
     page.getByText(/No host activity has been confirmed/),
   ).toBeVisible();
@@ -401,6 +464,9 @@ test("system update shows automatic recovery and the restored result", async ({
   await expect(
     page.getByRole("alertdialog", { name: "Previous version restored" }),
   ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    overlay.getByRole("button", { name: "Download diagnostics" }),
+  ).toBeVisible();
   await expect(
     overlay
       .getByRole("list", { name: "Recovery progress" })
@@ -543,6 +609,9 @@ for (const terminal of [
     const overlay = page.getByRole("alertdialog", { name: terminal.title });
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText(terminal.safeCopy);
+    await expect(
+      overlay.getByRole("button", { name: "Download diagnostics" }),
+    ).toBeVisible();
     await overlay
       .getByRole("button", { name: "Return to ReachCommander" })
       .click();
@@ -585,6 +654,10 @@ for (const norton of [false, true]) {
     await expect(overlay).toBeVisible();
     await expect(
       overlay.getByRole("list", { name: "Update progress" }),
+    ).toBeVisible();
+    await overlay.locator("details.technical-details summary").click();
+    await expect(
+      overlay.getByRole("button", { name: "Download diagnostics" }),
     ).toBeVisible();
     expect(
       await page.evaluate(

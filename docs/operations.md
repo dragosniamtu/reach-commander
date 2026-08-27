@@ -70,7 +70,9 @@ Do not delete operation metadata to make a warning disappear. Preserve `/data` a
 
 Only an Ubuntu installer-managed deployment provides the in-app system update boundary. Its `reachcommander-updater.service` performs automatic checks at startup and every six hours, while applying a discovered digest requires administrator confirmation. Exact version pins remain pinned. Windows, macOS, and manual container deployments report the feature as unsupported and continue to use their documented platform update commands.
 
-The application can ask the helper only for status, Check, or Apply through `/run/reachcommander-updater/updater.sock`; it never mounts `/var/run/docker.sock`. Apply blocks new file mutations, drains existing request leases, and rechecks the durable Copy/Move/Trash/archive queues before the host update begins. The browser reconnects after restart. A failed candidate is rolled back to the prior healthy digest when possible.
+The application can ask the helper only for status, Check, Apply, or the fixed sanitized diagnostic snapshot through `/run/reachcommander-updater/updater.sock`; it never mounts `/var/run/docker.sock`. Apply blocks new file mutations, drains existing request leases, and rechecks the durable Copy/Move/Trash/archive queues before the host update begins. The browser reconnects after restart. A failed candidate is rolled back to the prior healthy digest when possible.
+
+From the blocking update screen, open **Technical details** and choose **Download diagnostics**. The authenticated, antiforgery-protected, rate-limited request creates a temporary ZIP in memory and downloads it directly; ReachCommander neither retains nor uploads it. Its five files contain only allowlisted deployment-health statuses and the public update trace. They exclude raw logs, secrets, source metadata, filenames, paths, network identity, environment values, Docker identifiers, and file contents. If an older helper cannot supply the host snapshot, the ZIP is partial and directs the operator to refresh the checksum-verified Ubuntu installer.
 
 For diagnosis, do not edit the helper journal or transaction state. Capture these outputs and keep physical source paths out of public reports:
 
@@ -78,8 +80,11 @@ For diagnosis, do not edit the helper journal or transaction state. Capture thes
 sudo systemctl status reachcommander-updater.service
 sudo journalctl -u reachcommander-updater.service --since today
 sudo reachcommander status
+sudo reachcommander support-bundle > reachcommander-support.zip
 sudo reachcommander doctor
 ```
+
+Review `reachcommander-support.zip` before sharing it. The root-only service journal and update-log commands below are deeper follow-up evidence and should not be treated as the sanitized shareable bundle.
 
 Existing installations must run the checksum-verified installer once to receive this boundary. Updater helper changes also require a future installer refresh because an unprivileged application update cannot replace root-owned code.
 

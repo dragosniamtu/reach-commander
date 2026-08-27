@@ -194,12 +194,16 @@ public static class DependencyInjection
         {
             services.AddSingleton<ISystemUpdaterTransport, UnixSystemUpdaterTransport>();
             services.AddSingleton<ISystemUpdaterGateway, SystemUpdaterGateway>();
+            services.AddSingleton<ISystemUpdateDiagnosticsGateway, SystemUpdateDiagnosticsGateway>();
         }
         else
         {
             services.AddSingleton<ISystemUpdaterGateway, UnavailableSystemUpdaterGateway>();
+            services.AddSingleton<ISystemUpdateDiagnosticsGateway,
+                UnavailableSystemUpdateDiagnosticsGateway>();
         }
 
+        services.AddSingleton<ISystemUpdateSupportBundleService, SystemUpdateSupportBundleService>();
         services.AddSingleton<SystemUpdateCoordinator>();
         services.AddSingleton<ISystemUpdateService>(provider =>
             provider.GetRequiredService<SystemUpdateCoordinator>());

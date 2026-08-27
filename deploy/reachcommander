@@ -40,6 +40,7 @@ Usage:
   reachcommander status
   reachcommander logs [--follow]
   reachcommander update-log [--follow]
+  reachcommander support-bundle
   reachcommander start
   reachcommander stop
   reachcommander restart
@@ -54,7 +55,7 @@ validate_invocation() {
   local command_name="${1:-}"
   local argument_count="$#"
   case "$command_name" in
-    status | start | stop | restart | doctor | uninstall)
+    status | start | stop | restart | doctor | support-bundle | uninstall)
       (( argument_count == 1 )) || return 64
       ;;
     logs)
@@ -147,6 +148,15 @@ command_update_log() {
   else
     run_update_trace_cli
   fi
+}
+
+command_support_bundle() {
+  local support_bundle_cli="$RC_INSTALL_ROOT/bin/support_bundle_cli.py"
+  [[ -f "$support_bundle_cli" && ! -L "$support_bundle_cli" ]] || {
+    rc_die 'support-bundle helper is unavailable'
+    return 1
+  }
+  PYTHONDONTWRITEBYTECODE=1 python3 "$support_bundle_cli"
 }
 
 command_start() {
@@ -648,9 +658,11 @@ UNINSTALL_FILES=(
   'state/previous-version'
   'state/command.lock'
   'bin/render_config.py'
+  'bin/support_bundle_cli.py'
   'bin/update_trace_cli.py'
   'bin/updater_service.py'
   'lib/common.sh'
+  'lib/support_bundle.py'
   'lib/updater_protocol.py'
   'lib/updater_trace.py'
 )
@@ -704,9 +716,11 @@ validate_uninstall_tree() {
       state/system-update.json|\
       state/command.lock|\
       bin/render_config.py|\
+      bin/support_bundle_cli.py|\
       bin/update_trace_cli.py|\
       bin/updater_service.py|\
       lib/common.sh|\
+      lib/support_bundle.py|\
       lib/updater_protocol.py|\
       lib/updater_trace.py)
         ;;
@@ -1122,9 +1136,11 @@ doctor_required_files() {
     'state/current-version' \
     'state/previous-version' \
     'bin/render_config.py' \
+    'bin/support_bundle_cli.py' \
     'bin/updater_service.py' \
     'bin/update_trace_cli.py' \
     'lib/common.sh' \
+    'lib/support_bundle.py' \
     'lib/updater_protocol.py' \
     'lib/updater_trace.py'; do
     if [[ ! -f "$RC_INSTALL_ROOT/$required" || -L "$RC_INSTALL_ROOT/$required" ]]; then
@@ -1418,6 +1434,9 @@ case "$1" in
     ;;
   update-log)
     command_update_log "${2:-}"
+    ;;
+  support-bundle)
+    command_support_bundle
     ;;
   start)
     command_start

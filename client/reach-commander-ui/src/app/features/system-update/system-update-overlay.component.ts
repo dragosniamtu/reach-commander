@@ -12,15 +12,18 @@ import { SystemUpdateStatusDto } from '../../core/api/api.models';
 import { SystemUpdateClientError } from '../../core/state/system-update.store';
 import { buildSystemUpdateProgress } from './system-update-progress';
 import { buildSystemUpdateTrace } from './system-update-trace';
+import { SystemUpdateSupportBundleService } from './system-update-support-bundle.service';
 
 @Component({
   selector: 'app-system-update-overlay',
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './system-update-overlay.component.html',
   styleUrl: './system-update-overlay.component.scss',
+  providers: [SystemUpdateSupportBundleService],
 })
 export class SystemUpdateOverlayComponent {
   private readonly nowMilliseconds = signal(Date.now());
+  readonly supportBundle = inject(SystemUpdateSupportBundleService);
 
   readonly status = input.required<SystemUpdateStatusDto>();
   readonly reconnecting = input(false);
@@ -33,9 +36,7 @@ export class SystemUpdateOverlayComponent {
   readonly progress = computed(() =>
     buildSystemUpdateProgress(this.status(), this.reconnecting(), this.nowMilliseconds()),
   );
-  readonly trace = computed(() =>
-    buildSystemUpdateTrace(this.status(), this.nowMilliseconds()),
-  );
+  readonly trace = computed(() => buildSystemUpdateTrace(this.status(), this.nowMilliseconds()));
   readonly title = computed(() => {
     if (this.status().phase === 'rolledBack') {
       return 'Previous version restored';

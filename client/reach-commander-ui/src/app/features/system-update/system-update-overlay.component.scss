@@ -228,6 +228,34 @@ code {
   color: var(--text-3);
   font: 500 10px/1.5 var(--font-ui);
 }
+.diagnostics-actions {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.diagnostics-actions p {
+  max-width: none;
+  font-size: 10px;
+}
+.diagnostics-actions .diagnostics-error {
+  color: var(--danger-text);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.download-diagnostics {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+.download-diagnostics:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.download-diagnostics:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 .trace-guidance {
   max-width: none;
   padding-top: 10px;

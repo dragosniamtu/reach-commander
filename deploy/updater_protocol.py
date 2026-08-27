@@ -21,8 +21,14 @@ from typing import Callable, Mapping, Sequence
 LEGACY_PROTOCOL_VERSION = 1
 DETAILED_PROTOCOL_VERSION = 2
 PROTOCOL_VERSION = 3
+DIAGNOSTIC_PROTOCOL_VERSION = 4
 SUPPORTED_PROTOCOL_VERSIONS = frozenset(
-    {LEGACY_PROTOCOL_VERSION, DETAILED_PROTOCOL_VERSION, PROTOCOL_VERSION}
+    {
+        LEGACY_PROTOCOL_VERSION,
+        DETAILED_PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
+        DIAGNOSTIC_PROTOCOL_VERSION,
+    }
 )
 MAX_MESSAGE_BYTES = 65_536
 TRUSTED_IMAGE_REPOSITORY = "ghcr.io/dragosniamtu/reach-commander"
@@ -38,7 +44,8 @@ REVISION = re.compile(r"^[0-9a-f]{40}$")
 EDGE_VERSION = re.compile(r"^edge@[0-9a-f]{12}$")
 
 _REQUEST_FIELDS = frozenset({"protocolVersion", "requestId", "action"})
-_ACTIONS = frozenset({"check", "applyConfiguredChannel"})
+_UPDATE_ACTIONS = frozenset({"check", "applyConfiguredChannel"})
+_DIAGNOSTIC_ACTION = "collectDiagnostics"
 _MAX_STATE_BYTES = 1_024
 _MAX_DETAIL_CHARS = 240
 
@@ -125,7 +132,17 @@ class UpdaterRequest:
             ) from error
 
         action = value["action"]
-        if not isinstance(action, str) or action not in _ACTIONS:
+        valid_action = isinstance(action, str) and (
+            (
+                protocol_version == DIAGNOSTIC_PROTOCOL_VERSION
+                and action == _DIAGNOSTIC_ACTION
+            )
+            or (
+                protocol_version != DIAGNOSTIC_PROTOCOL_VERSION
+                and action in _UPDATE_ACTIONS
+            )
+        )
+        if not valid_action:
             raise ProtocolError(
                 "invalid_action", "The updater action is not supported."
             )
@@ -553,6 +570,7 @@ def _iso_utc(value: dt.datetime) -> str:
 
 __all__ = [
     "DIGEST",
+    "DIAGNOSTIC_PROTOCOL_VERSION",
     "DETAILED_PROTOCOL_VERSION",
     "LEGACY_PROTOCOL_VERSION",
     "MAX_MESSAGE_BYTES",

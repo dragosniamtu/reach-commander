@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -28,6 +30,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
     private readonly TestArchiveWorkerClient _archiveWorker = new();
     private readonly TestSystemUpdateService _systemUpdates = new();
+    private readonly TestSystemUpdateSupportBundleService _systemUpdateSupportBundle = new();
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
 
@@ -226,6 +229,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IArchiveWorkerClient>(_archiveWorker);
             services.RemoveAll<ISystemUpdateService>();
             services.AddSingleton<ISystemUpdateService>(_systemUpdates);
+            services.RemoveAll<ISystemUpdateSupportBundleService>();
+            services.AddSingleton<ISystemUpdateSupportBundleService>(_systemUpdateSupportBundle);
             if (!_useRealSecurity)
             {
                 services
@@ -504,6 +509,34 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             _status = SystemUpdateStatusFactory.Applying(
                 "stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now);
             return Task.FromResult(_status);
+        }
+    }
+
+    private sealed class TestSystemUpdateSupportBundleService : ISystemUpdateSupportBundleService
+    {
+        public Task<SystemUpdateSupportBundle> CreateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var output = new MemoryStream();
+            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var name in new[]
+                {
+                    "README.txt",
+                    "deployment-health.json",
+                    "manifest.json",
+                    "summary.txt",
+                    "update-trace.json",
+                })
+                {
+                    using var entry = archive.CreateEntry(name).Open();
+                    entry.Write(Encoding.UTF8.GetBytes("sanitized\n"));
+                }
+            }
+
+            return Task.FromResult(new SystemUpdateSupportBundle(
+                "reachcommander-support-20260827T120000Z.zip",
+                output.ToArray()));
         }
     }
 }

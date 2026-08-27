@@ -316,6 +316,7 @@ internal sealed class SystemUpdateCoordinator(
         {
             var result = await operationMonitor.WaitForTerminalAsync(
                     applyingSnapshot,
+                    PublishProgressSnapshot,
                     _monitorLifetime.Token)
                 .ConfigureAwait(false);
 
@@ -390,6 +391,42 @@ internal sealed class SystemUpdateCoordinator(
         lock (_stateLock)
         {
             return _status;
+        }
+    }
+
+    private void PublishProgressSnapshot(UpdaterSnapshot snapshot)
+    {
+        lock (_stateLock)
+        {
+            if (_activeMonitor is not { IsCompleted: false } ||
+                snapshot.Phase != "applying" ||
+                _status.Phase != SystemUpdatePhase.Applying ||
+                !string.Equals(
+                    snapshot.OperationId,
+                    _activeMonitorOperationId,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    _status.OperationId,
+                    _activeMonitorOperationId,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            SystemUpdateStatus candidate;
+            try
+            {
+                candidate = Map(snapshot, clock.GetUtcNow());
+            }
+            catch (SystemUpdaterProtocolException)
+            {
+                return;
+            }
+
+            if (CanAdvance(_status.ProgressStage, candidate.ProgressStage))
+            {
+                _status = candidate;
+            }
         }
     }
 
@@ -596,6 +633,21 @@ internal sealed class SystemUpdateCoordinator(
         _ => throw new SystemUpdaterProtocolException(
             "The updater progress stage is incompatible."),
     };
+
+    private static bool CanAdvance(
+        SystemUpdateProgressStage? current,
+        SystemUpdateProgressStage? candidate) => (current, candidate) switch
+        {
+            (null, SystemUpdateProgressStage.Downloading) => true,
+            (SystemUpdateProgressStage.Downloading, SystemUpdateProgressStage.Installing) => true,
+            (SystemUpdateProgressStage.Installing, SystemUpdateProgressStage.Restarting) => true,
+            (SystemUpdateProgressStage.Restarting, SystemUpdateProgressStage.HealthChecking) => true,
+            (SystemUpdateProgressStage.Restarting, SystemUpdateProgressStage.Restoring) => true,
+            (SystemUpdateProgressStage.HealthChecking, SystemUpdateProgressStage.Restoring) => true,
+            (SystemUpdateProgressStage.Restoring, SystemUpdateProgressStage.RestartingPrevious) => true,
+            (SystemUpdateProgressStage.RestartingPrevious, SystemUpdateProgressStage.VerifyingRecovery) => true,
+            _ => false,
+        };
 
     private static string PublicReason(string reasonCode) => reasonCode switch
     {

@@ -243,6 +243,64 @@ public sealed class SystemUpdateCoordinatorTests
     }
 
     [Fact]
+    public async Task Live_progress_is_same_operation_and_monotonic()
+    {
+        var available = CurrentSnapshot with
+        {
+            ProtocolVersion = 2,
+            Phase = "available",
+            ReasonCode = "update_available",
+        };
+        var applying = available with
+        {
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+            ProgressStage = "downloading",
+        };
+        var monitor = new ControlledOperationMonitor();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(available, applying),
+            monitor: monitor);
+        await coordinator.CheckAsync(default);
+        await coordinator.ApplyAsync(default);
+        await monitor.WaitUntilCalledAsync();
+
+        Assert.Equal(
+            SystemUpdateProgressStage.Downloading,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Publish(applying with { ProgressStage = "installing" });
+        Assert.Equal(
+            SystemUpdateProgressStage.Installing,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Publish(applying with { ProgressStage = "downloading" });
+        Assert.Equal(
+            SystemUpdateProgressStage.Installing,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Publish(applying with
+        {
+            OperationId = "operation-other",
+            ProgressStage = "restarting",
+        });
+        Assert.Equal(
+            SystemUpdateProgressStage.Installing,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Publish(applying with { ProgressStage = "restarting" });
+        Assert.Equal(
+            SystemUpdateProgressStage.Restarting,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Publish(applying with { ProgressStage = "restoring" });
+        Assert.Equal(
+            SystemUpdateProgressStage.Restoring,
+            (await coordinator.GetAsync(default)).ProgressStage);
+    }
+
+    [Fact]
     public async Task Applying_discovered_at_start_resumes_one_monitor_without_owning_a_drain()
     {
         var applying = CurrentSnapshot with
@@ -263,6 +321,49 @@ public sealed class SystemUpdateCoordinatorTests
         await coordinator.CheckAsync(default);
 
         Assert.Equal(1, monitor.CallCount);
+        Assert.Equal(0, gate.CancelCount);
+        await coordinator.StopAsync(default);
+    }
+
+    [Fact]
+    public async Task Restart_recovery_publishes_rollback_progress_without_releasing_foreign_drain()
+    {
+        var applying = CurrentSnapshot with
+        {
+            ProtocolVersion = 2,
+            Phase = "applying",
+            ReasonCode = "update_applying",
+            OperationId = "operation-1",
+            ProgressStage = "healthChecking",
+        };
+        var rolledBack = applying with
+        {
+            Phase = "rolledBack",
+            ReasonCode = "candidate_rolled_back",
+            ProgressStage = "verifyingRecovery",
+        };
+        var monitor = new ControlledOperationMonitor();
+        var gate = new RecordingMutationGate();
+        var coordinator = CreateCoordinator(
+            new FakeUpdaterGateway(applying),
+            mutationGate: gate,
+            monitor: monitor);
+
+        await coordinator.StartAsync(default);
+        await monitor.WaitUntilCalledAsync();
+        Assert.Equal(
+            SystemUpdateProgressStage.HealthChecking,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Publish(applying with { ProgressStage = "restoring" });
+        Assert.Equal(
+            SystemUpdateProgressStage.Restoring,
+            (await coordinator.GetAsync(default)).ProgressStage);
+
+        monitor.Complete(new SystemUpdateMonitorResult(rolledBack));
+        var terminal = await WaitForPhaseAsync(coordinator, SystemUpdatePhase.RolledBack);
+
+        Assert.Equal(SystemUpdateProgressStage.VerifyingRecovery, terminal.ProgressStage);
         Assert.Equal(0, gate.CancelCount);
         await coordinator.StopAsync(default);
     }
@@ -541,11 +642,15 @@ public sealed class SystemUpdateCoordinatorTests
 
         public bool CancellationObserved { get; private set; }
 
+        private Action<UpdaterSnapshot>? _progress;
+
         public async Task<SystemUpdateMonitorResult> WaitForTerminalAsync(
             UpdaterSnapshot applyingSnapshot,
+            Action<UpdaterSnapshot> progress,
             CancellationToken cancellationToken)
         {
             CallCount++;
+            _progress = progress;
             _called.TrySetResult();
             try
             {
@@ -563,6 +668,10 @@ public sealed class SystemUpdateCoordinatorTests
 
         public void Complete(SystemUpdateMonitorResult result) =>
             _result.TrySetResult(result);
+
+        public void Publish(UpdaterSnapshot snapshot) =>
+            (_progress ?? throw new InvalidOperationException("The monitor has not started."))(
+                snapshot);
     }
 
     private sealed class RecordingMutationGate : ISystemMutationGate

@@ -24,6 +24,7 @@ internal interface ISystemUpdateOperationMonitor
 {
     Task<SystemUpdateMonitorResult> WaitForTerminalAsync(
         UpdaterSnapshot applyingSnapshot,
+        Action<UpdaterSnapshot> progress,
         CancellationToken cancellationToken);
 }
 
@@ -39,6 +40,7 @@ internal sealed class SystemUpdateOperationMonitor(
 
     public async Task<SystemUpdateMonitorResult> WaitForTerminalAsync(
         UpdaterSnapshot applyingSnapshot,
+        Action<UpdaterSnapshot> progress,
         CancellationToken cancellationToken)
     {
         var operationId = applyingSnapshot.OperationId;
@@ -76,10 +78,16 @@ internal sealed class SystemUpdateOperationMonitor(
                 continue;
             }
 
-            if (snapshot.ProtocolVersion != SystemUpdateStatusFactory.ProtocolVersion ||
+            if (snapshot.ProtocolVersion is not (1 or 2) ||
                 !snapshot.Supported ||
                 !string.Equals(snapshot.OperationId, operationId, StringComparison.Ordinal))
             {
+                continue;
+            }
+
+            if (snapshot.Phase == "applying")
+            {
+                progress(snapshot);
                 continue;
             }
 

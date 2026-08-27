@@ -19,7 +19,7 @@ public sealed class SystemUpdateOperationMonitorTests
         var monitor = CreateMonitor(gateway, clock);
 
         var result = await monitor.WaitForTerminalAsync(
-            Applying("operation-1"), default);
+            Applying("operation-1"), _ => { }, default);
 
         Assert.False(result.TimedOut);
         Assert.Equal("completed", result.TerminalSnapshot!.Phase);
@@ -36,7 +36,7 @@ public sealed class SystemUpdateOperationMonitorTests
         var monitor = CreateMonitor(gateway, clock);
 
         var result = await monitor.WaitForTerminalAsync(
-            Applying("operation-1"), default);
+            Applying("operation-1"), _ => { }, default);
 
         Assert.Equal("failed", result.TerminalSnapshot!.Phase);
         Assert.Equal(2, gateway.CheckCount);
@@ -52,7 +52,7 @@ public sealed class SystemUpdateOperationMonitorTests
         var monitor = CreateMonitor(gateway, clock);
 
         var result = await monitor.WaitForTerminalAsync(
-            Applying("operation-1"), default);
+            Applying("operation-1"), _ => { }, default);
 
         Assert.Equal("rolledBack", result.TerminalSnapshot!.Phase);
         Assert.Equal("operation-1", result.TerminalSnapshot.OperationId);
@@ -66,7 +66,7 @@ public sealed class SystemUpdateOperationMonitorTests
         var monitor = CreateMonitor(gateway, clock);
 
         var result = await monitor.WaitForTerminalAsync(
-            Applying("operation-1"), default);
+            Applying("operation-1"), _ => { }, default);
 
         Assert.True(result.TimedOut);
         Assert.Null(result.TerminalSnapshot);
@@ -86,11 +86,54 @@ public sealed class SystemUpdateOperationMonitorTests
         using var cancellation = new CancellationTokenSource();
 
         var task = monitor.WaitForTerminalAsync(
-            Applying("operation-1"), cancellation.Token);
+            Applying("operation-1"), _ => { }, cancellation.Token);
         await delay.WaitUntilCalledAsync();
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+    }
+
+    [Fact]
+    public async Task Publishes_matching_applying_progress_before_terminal_result()
+    {
+        var clock = new AdjustableTimeProvider(StartedAt);
+        var installing = Applying("operation-1") with
+        {
+            ProgressStage = "installing",
+            UpdatedAt = StartedAt.AddSeconds(1),
+        };
+        var gateway = new SequenceGateway(
+            installing,
+            Terminal("completed", "operation-1"));
+        var observed = new List<UpdaterSnapshot>();
+        var monitor = CreateMonitor(gateway, clock);
+
+        var result = await monitor.WaitForTerminalAsync(
+            Applying("operation-1"),
+            observed.Add,
+            default);
+
+        Assert.Equal(["installing"], observed.Select(item => item.ProgressStage));
+        Assert.Equal("completed", result.TerminalSnapshot!.Phase);
+    }
+
+    [Fact]
+    public async Task Does_not_publish_applying_progress_for_another_operation()
+    {
+        var clock = new AdjustableTimeProvider(StartedAt);
+        var gateway = new SequenceGateway(
+            Applying("operation-other") with { ProgressStage = "installing" },
+            Terminal("completed", "operation-1"));
+        var observed = new List<UpdaterSnapshot>();
+        var monitor = CreateMonitor(gateway, clock);
+
+        var result = await monitor.WaitForTerminalAsync(
+            Applying("operation-1"),
+            observed.Add,
+            default);
+
+        Assert.Empty(observed);
+        Assert.Equal("completed", result.TerminalSnapshot!.Phase);
     }
 
     private static SystemUpdateOperationMonitor CreateMonitor(
@@ -102,7 +145,7 @@ public sealed class SystemUpdateOperationMonitorTests
             NullLogger<SystemUpdateOperationMonitor>.Instance);
 
     private static UpdaterSnapshot Applying(string operationId) => new(
-        SystemUpdateStatusFactory.ProtocolVersion,
+        2,
         true,
         "stable",
         "v1.0.3",

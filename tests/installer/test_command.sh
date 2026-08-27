@@ -151,6 +151,29 @@ assert_update_stages() {
   assert_equal "$expected" "$actual" 'update progress stage order'
 }
 
+assert_ordered_update_events() {
+  local remaining
+  local expected
+  remaining="$(
+    printf '%s\n' "$last_output" |
+      sed -n 's/^REACHCOMMANDER_UPDATE_EVENT=//p'
+  )"
+  for expected in "$@"; do
+    if [[ "$remaining" != *"$expected"* ]]; then
+      fail "update trace event is missing or out of order: $expected"
+    fi
+    remaining="${remaining#*"$expected"}"
+  done
+}
+
+assert_update_events_are_sanitized() {
+  local markers
+  markers="$(printf '%s\n' "$last_output" | sed -n '/^REACHCOMMANDER_UPDATE_EVENT=/p')"
+  [[ -n "$markers" ]] || fail 'update trace markers are missing'
+  [[ "$markers" != *'/'* ]] || fail 'update trace marker exposed a path'
+  [[ "$markers" != *'@sha256:'* ]] || fail 'update trace marker exposed an image digest'
+}
+
 run_command() {
   set +e
   last_output="$(bash "$COMMAND_SOURCE" "$@" 2>&1)"
@@ -400,7 +423,11 @@ reset_update_baseline() {
   rm -f -- "$INSTALL_ROOT/state/failed-image" "$INSTALL_ROOT/state/update-transaction"
   rm -rf -- "$INSTALL_ROOT/backups"
   mkdir -p "$INSTALL_ROOT/backups"
-  unset FAKE_DOCKER_HEALTH_FILE REACHCOMMANDER_TEST_INTERRUPT_AFTER
+  unset \
+    FAKE_DOCKER_HEALTH_FILE \
+    FAKE_DOCKER_RUNNING_IMAGE_ID \
+    FAKE_DOCKER_RUNNING_IMAGE_ID_FILE \
+    REACHCOMMANDER_TEST_INTERRUPT_AFTER
   export FAKE_DOCKER_HEALTH=healthy
   export FAKE_DOCKER_PULL_EXIT=0
   export FAKE_FLOCK_EXIT=0
@@ -428,7 +455,11 @@ fi
 pass "update is a no-op when the resolved digest is current"
 
 export FAKE_DOCKER_DIGESTS="$digest_b"
+: >"$FAKE_DOCKER_LOG"
+printf 'starting\nhealthy\n' >"$TEST_ROOT/update-health-sequence"
+export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/update-health-sequence"
 run_command update edge
+unset FAKE_DOCKER_HEALTH_FILE
 assert_equal "0" "$last_status" "successful explicit update status"
 assert_equal "edge" "$(cat -- "$INSTALL_ROOT/state/channel")" "successful update channel"
 assert_equal "$digest_b" "$(cat -- "$INSTALL_ROOT/state/current-image")" "successful current image"
@@ -438,6 +469,24 @@ assert_equal "v1.3.0" "$(cat -- "$INSTALL_ROOT/state/previous-version")" "succes
 grep -Fxq "REACHCOMMANDER_IMAGE=$digest_b" "$INSTALL_ROOT/.env" || fail "successful environment image missing"
 [[ ! -e "$INSTALL_ROOT/state/update-transaction" ]] || fail "successful update marker leaked"
 assert_update_stages $'downloading\ninstalling\nrestarting\nhealthChecking'
+assert_ordered_update_events \
+  'downloadStarted:started' \
+  'downloadCompleted:succeeded' \
+  'backupStarted:started' \
+  'backupCompleted:succeeded' \
+  'installStarted:started' \
+  'installCompleted:succeeded' \
+  'candidateRestartStarted:started' \
+  'candidateRestartCompleted:succeeded' \
+  'candidateImageVerified:succeeded' \
+  'candidateHealthStarted:started' \
+  'candidateHealthActivity:activity' \
+  'candidateHealthSucceeded:succeeded'
+assert_update_events_are_sanitized
+mapfile -d '' successful_update_args <"$FAKE_DOCKER_LOG"
+if printf '%s\n' "${successful_update_args[@]}" | grep -Fxq 'restart'; then
+  fail 'update restarted Docker instead of recreating the application service'
+fi
 pass "successful update atomically advances image, version, and channel state"
 
 export FAKE_DOCKER_DIGESTS="$digest_c"
@@ -484,6 +533,25 @@ assert_equal "1" "$last_status" "invalid edge revision status"
 assert_equal "$state_before" "$(sha256sum "$INSTALL_ROOT/.env" "$INSTALL_ROOT/state/channel" "$INSTALL_ROOT/state/current-image" "$INSTALL_ROOT/state/previous-image" "$INSTALL_ROOT/state/current-version" "$INSTALL_ROOT/state/previous-version")" "invalid edge revision state"
 export FAKE_DOCKER_REVISION_LABEL=cccccccccccccccccccccccccccccccccccccccc
 pass "invalid OCI display labels fail before deployment state changes"
+
+printf '%s\n%s\n' \
+  "sha256:$(printf 'f%.0s' {1..64})" \
+  "sha256:$(printf 'c%.0s' {1..64})" \
+  >"$TEST_ROOT/update-running-image-sequence"
+export FAKE_DOCKER_RUNNING_IMAGE_ID_FILE="$TEST_ROOT/update-running-image-sequence"
+export FAKE_DOCKER_DIGESTS="$digest_d"
+run_command update stable
+unset FAKE_DOCKER_RUNNING_IMAGE_ID_FILE
+assert_equal "2" "$last_status" "candidate image mismatch rollback status"
+assert_ordered_update_events \
+  'candidateRestartCompleted:succeeded' \
+  'candidateImageVerified:failed' \
+  'rollbackStarted:started' \
+  'rollbackStateRestored:succeeded' \
+  'previousRestartCompleted:succeeded' \
+  'previousImageVerified:succeeded' \
+  'recoveryHealthSucceeded:succeeded'
+pass "update rolls back when Compose recreates the wrong container image"
 
 printf '1\n0\n' >"$TEST_ROOT/update-compose-sequence"
 export FAKE_DOCKER_COMPOSE_SEQUENCE_FILE="$TEST_ROOT/update-compose-sequence"

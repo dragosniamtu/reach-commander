@@ -316,6 +316,110 @@ report_update_stage() {
   esac
 }
 
+report_update_event() {
+  local code="${1:-}"
+  local outcome="${2:-}"
+  case "$code:$outcome" in
+    downloadStarted:started | downloadCompleted:succeeded | \
+      backupStarted:started | backupCompleted:succeeded | \
+      installStarted:started | installCompleted:succeeded | \
+      candidateRestartStarted:started | candidateRestartCompleted:succeeded | \
+      candidateRestartCompleted:failed | candidateImageVerified:succeeded | \
+      candidateImageVerified:failed | candidateHealthStarted:started | \
+      candidateHealthActivity:activity | candidateHealthSucceeded:succeeded | \
+      candidateHealthFailed:failed | rollbackStarted:started | \
+      rollbackStateRestored:succeeded | rollbackStateRestored:failed | \
+      previousRestartStarted:started | previousRestartCompleted:succeeded | \
+      previousRestartCompleted:failed | previousImageVerified:succeeded | \
+      previousImageVerified:failed | recoveryHealthStarted:started | \
+      recoveryHealthActivity:activity | recoveryHealthSucceeded:succeeded | \
+      recoveryHealthFailed:failed)
+      printf 'REACHCOMMANDER_UPDATE_EVENT=%s:%s\n' "$code" "$outcome" >&2
+      ;;
+    *)
+      rc_die 'internal update trace event is invalid'
+      return 1
+      ;;
+  esac
+}
+
+verify_running_image() {
+  local expected_image="${1:-}"
+  local expected_id
+  local running_id
+  if ! expected_id="$(
+    docker image inspect --format '{{.Id}}' "$expected_image"
+  )"; then
+    rc_die 'expected container image identity could not be inspected'
+    return 1
+  fi
+  if ! running_id="$(
+    docker inspect --format '{{.Image}}' reachcommander
+  )"; then
+    rc_die 'running container image identity could not be inspected'
+    return 1
+  fi
+  if [[ ! "$expected_id" =~ ^sha256:[0-9a-f]{64}$ || "$running_id" != "$expected_id" ]]; then
+    rc_die 'running container image does not match the expected update image'
+    return 1
+  fi
+}
+
+wait_for_update_health() {
+  local container="${1:-}"
+  local timeout="${2:-}"
+  local activity_event="${3:-}"
+  local deadline
+  local status
+  local attempts=0
+  if [[ -z "$container" || ! "$timeout" =~ ^[1-9][0-9]*$ ]]; then
+    rc_die 'health check requires a container and positive timeout'
+    return 1
+  fi
+  case "$activity_event" in
+    candidateHealthActivity | recoveryHealthActivity) ;;
+    *)
+      rc_die 'internal update health activity event is invalid'
+      return 1
+      ;;
+  esac
+  deadline=$((SECONDS + timeout))
+  while ((SECONDS <= deadline)); do
+    if ! status="$(
+      docker inspect \
+        --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+        "$container"
+    )"; then
+      rc_die 'container health inspection failed'
+      return 1
+    fi
+    case "$status" in
+      healthy)
+        return 0
+        ;;
+      unhealthy | missing)
+        rc_die 'container is not healthy'
+        return 1
+        ;;
+      starting | created | restarting)
+        attempts=$((attempts + 1))
+        if (((attempts - 1) % 15 == 0)); then
+          report_update_event "$activity_event" activity
+        fi
+        ;;
+      *)
+        rc_die 'container returned an invalid health status'
+        return 1
+        ;;
+    esac
+    if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]]; then
+      sleep 1
+    fi
+  done
+  rc_die 'container health check timed out'
+  return 1
+}
+
 command_update() {
   local requested_channel="${1:-}"
   local saved_channel
@@ -341,9 +445,11 @@ command_update() {
     return 1
   fi
   report_update_stage downloading
+  report_update_event downloadStarted started
   if ! resolved_image="$(rc_pull_digest "$requested_channel")"; then
     return 1
   fi
+  report_update_event downloadCompleted succeeded
   if [[ "$resolved_image" == "$current_image" ]]; then
     printf 'ReachCommander is already running %s.\n' "$resolved_image"
     return 0
@@ -353,9 +459,12 @@ command_update() {
   fi
 
   report_update_stage installing
+  report_update_event backupStarted started
   if ! backup_directory="$(create_update_backup)"; then
     return 1
   fi
+  report_update_event backupCompleted succeeded
+  report_update_event installStarted started
   rc_atomic_write "$marker" "$backup_directory"$'\n'
   rc_atomic_write "$RC_INSTALL_ROOT/state/previous-image" "$current_image"$'\n'
   rc_atomic_write "$RC_INSTALL_ROOT/state/previous-version" "$current_version"$'\n'
@@ -370,34 +479,62 @@ command_update() {
   maybe_interrupt_update current-version
   rc_atomic_write "$RC_INSTALL_ROOT/state/channel" "$requested_channel"$'\n'
   maybe_interrupt_update channel
+  report_update_event installCompleted succeeded
 
   report_update_stage restarting
+  report_update_event candidateRestartStarted started
   if rc_compose up -d reachcommander; then
-    report_update_stage healthChecking
-    if rc_wait_healthy reachcommander 60; then
-      rm -f -- "$marker"
-      remove_update_backup "$backup_directory"
-      printf 'ReachCommander updated successfully to %s (%s).\n' "$resolved_version" "$resolved_image"
-      return 0
+    report_update_event candidateRestartCompleted succeeded
+    if verify_running_image "$resolved_image"; then
+      report_update_event candidateImageVerified succeeded
+      report_update_stage healthChecking
+      report_update_event candidateHealthStarted started
+      if wait_for_update_health reachcommander 60 candidateHealthActivity; then
+        report_update_event candidateHealthSucceeded succeeded
+        rm -f -- "$marker"
+        remove_update_backup "$backup_directory"
+        printf 'ReachCommander updated successfully to %s (%s).\n' "$resolved_version" "$resolved_image"
+        return 0
+      fi
+      report_update_event candidateHealthFailed failed
+    else
+      report_update_event candidateImageVerified failed
     fi
+  else
+    report_update_event candidateRestartCompleted failed
   fi
 
+  report_update_event rollbackStarted started
   rc_compose logs --tail 200 reachcommander >&2 || true
   rc_atomic_write "$RC_INSTALL_ROOT/state/failed-image" "$resolved_image"$'\n'
   report_update_stage restoring
   if ! restore_update_backup "$backup_directory"; then
+    report_update_event rollbackStateRestored failed
     printf 'ReachCommander: update failed and state restoration failed; manual recovery is required.\n' >&2
     return 3
   fi
+  report_update_event rollbackStateRestored succeeded
   rm -f -- "$marker"
   remove_update_backup "$backup_directory" || true
   report_update_stage restartingPrevious
+  report_update_event previousRestartStarted started
   if rc_compose up -d reachcommander; then
+    report_update_event previousRestartCompleted succeeded
     report_update_stage verifyingRecovery
-    if rc_wait_healthy reachcommander 60; then
-      printf 'ReachCommander: update was unhealthy; the previous deployment was restored.\n' >&2
-      return 2
+    if verify_running_image "$current_image"; then
+      report_update_event previousImageVerified succeeded
+      report_update_event recoveryHealthStarted started
+      if wait_for_update_health reachcommander 60 recoveryHealthActivity; then
+        report_update_event recoveryHealthSucceeded succeeded
+        printf 'ReachCommander: update was unhealthy; the previous deployment was restored.\n' >&2
+        return 2
+      fi
+      report_update_event recoveryHealthFailed failed
+    else
+      report_update_event previousImageVerified failed
     fi
+  else
+    report_update_event previousRestartCompleted failed
   fi
   printf 'ReachCommander: update and rollback were unhealthy; manual recovery is required.\n' >&2
   return 3

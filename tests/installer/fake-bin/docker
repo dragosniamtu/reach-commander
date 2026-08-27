@@ -10,6 +10,15 @@ if [[ "${FAKE_DOCKER_PRINT_ARGS:-0}" == "1" ]]; then
   printf '[%s]\n' "$@"
 fi
 
+read_sequence_value() {
+  local sequence_file="$1"
+  local value
+  IFS= read -r value <"$sequence_file"
+  tail -n +2 "$sequence_file" >"${sequence_file}.next"
+  mv -f "${sequence_file}.next" "$sequence_file"
+  printf '%s\n' "$value"
+}
+
 case "${1:-}" in
   compose)
     if [[ "${2:-}" == 'version' ]]; then
@@ -21,9 +30,7 @@ case "${1:-}" in
       fi
     done
     if [[ -n "${FAKE_DOCKER_COMPOSE_SEQUENCE_FILE:-}" && -s "$FAKE_DOCKER_COMPOSE_SEQUENCE_FILE" ]]; then
-      IFS= read -r compose_status <"$FAKE_DOCKER_COMPOSE_SEQUENCE_FILE"
-      tail -n +2 "$FAKE_DOCKER_COMPOSE_SEQUENCE_FILE" >"${FAKE_DOCKER_COMPOSE_SEQUENCE_FILE}.next"
-      mv -f "${FAKE_DOCKER_COMPOSE_SEQUENCE_FILE}.next" "$FAKE_DOCKER_COMPOSE_SEQUENCE_FILE"
+      compose_status="$(read_sequence_value "$FAKE_DOCKER_COMPOSE_SEQUENCE_FILE")"
       exit "$compose_status"
     fi
     exit "${FAKE_DOCKER_COMPOSE_EXIT:-0}"
@@ -37,6 +44,10 @@ case "${1:-}" in
       exit 97
     fi
     case "${4:-}" in
+      '{{.Id}}')
+        image_id="${FAKE_DOCKER_IMAGE_ID:-${5##*@}}"
+        printf '%s\n' "$image_id"
+        ;;
       *org.opencontainers.image.version*)
         printf '%s\n' "${FAKE_DOCKER_VERSION_LABEL:-}"
         ;;
@@ -50,11 +61,22 @@ case "${1:-}" in
     exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
     ;;
   inspect)
+    if [[ "${3:-}" == '{{.Image}}' ]]; then
+      if [[ -n "${FAKE_DOCKER_RUNNING_IMAGE_ID_FILE:-}" && -s "$FAKE_DOCKER_RUNNING_IMAGE_ID_FILE" ]]; then
+        read_sequence_value "$FAKE_DOCKER_RUNNING_IMAGE_ID_FILE"
+      elif [[ -n "${FAKE_DOCKER_RUNNING_IMAGE_ID:-}" ]]; then
+        printf '%s\n' "$FAKE_DOCKER_RUNNING_IMAGE_ID"
+      else
+        configured_image="$(
+          sed -n 's/^REACHCOMMANDER_IMAGE=//p' \
+            "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
+        )"
+        printf '%s\n' "${configured_image##*@}"
+      fi
+      exit "${FAKE_DOCKER_INSPECT_EXIT:-0}"
+    fi
     if [[ -n "${FAKE_DOCKER_HEALTH_FILE:-}" && -s "$FAKE_DOCKER_HEALTH_FILE" ]]; then
-      IFS= read -r status <"$FAKE_DOCKER_HEALTH_FILE"
-      tail -n +2 "$FAKE_DOCKER_HEALTH_FILE" >"${FAKE_DOCKER_HEALTH_FILE}.next"
-      mv -f "${FAKE_DOCKER_HEALTH_FILE}.next" "$FAKE_DOCKER_HEALTH_FILE"
-      printf '%s\n' "$status"
+      read_sequence_value "$FAKE_DOCKER_HEALTH_FILE"
     else
       printf '%s\n' "${FAKE_DOCKER_HEALTH:-healthy}"
     fi

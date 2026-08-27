@@ -22,6 +22,7 @@ from typing import Callable, Mapping
 try:
     from .updater_protocol import (
         DIGEST,
+        LEGACY_PROTOCOL_VERSION,
         MAX_MESSAGE_BYTES,
         PROTOCOL_VERSION,
         STABLE_TAG,
@@ -39,6 +40,7 @@ except ImportError:  # Installed helper: bin/updater_service.py + lib/updater_pr
     sys.path.insert(0, str(library_directory))
     from updater_protocol import (  # type: ignore[no-redef]
         DIGEST,
+        LEGACY_PROTOCOL_VERSION,
         MAX_MESSAGE_BYTES,
         PROTOCOL_VERSION,
         STABLE_TAG,
@@ -58,7 +60,8 @@ DOCKER_COMMAND = "/usr/bin/docker"
 FIXED_GITHUB_RELEASE_URL = (
     "https://api.github.com/repos/dragosniamtu/reach-commander/releases/latest"
 )
-JOURNAL_SCHEMA = 1
+LEGACY_JOURNAL_SCHEMA = 1
+JOURNAL_SCHEMA = 2
 COMMAND_TIMEOUT_SECONDS = 300
 DISCOVERY_TIMEOUT_SECONDS = 120
 NETWORK_TIMEOUT_SECONDS = 10
@@ -92,7 +95,28 @@ _PUBLIC_DETAILS = {
     "update_interrupted": "The host update service restarted during an update.",
     "updater_journal_invalid": "The host update journal is invalid.",
 }
-_RESPONSE_FIELDS = (
+PROGRESS_STAGES = frozenset(
+    {
+        "downloading",
+        "installing",
+        "restarting",
+        "healthChecking",
+        "restoring",
+        "restartingPrevious",
+        "verifyingRecovery",
+    }
+)
+PROGRESS_TRANSITIONS = {
+    None: frozenset({"downloading"}),
+    "downloading": frozenset({"installing"}),
+    "installing": frozenset({"restarting"}),
+    "restarting": frozenset({"healthChecking", "restoring"}),
+    "healthChecking": frozenset({"restoring"}),
+    "restoring": frozenset({"restartingPrevious"}),
+    "restartingPrevious": frozenset({"verifyingRecovery"}),
+    "verifyingRecovery": frozenset(),
+}
+V1_RESPONSE_FIELDS = (
     "supported",
     "channel",
     "currentVersion",
@@ -106,6 +130,7 @@ _RESPONSE_FIELDS = (
     "lastCheckedAt",
     "updatedAt",
 )
+V2_RESPONSE_FIELDS = (*V1_RESPONSE_FIELDS, "progressStage")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _EDGE_REFERENCE = f"{TRUSTED_IMAGE_REPOSITORY}:edge"
 
@@ -283,8 +308,32 @@ class AtomicUpdateJournal:
             "reasonCode": "update_applying",
             "detail": _detail_for("update_applying"),
             "operationId": str(uuid.uuid4()),
+            "progressStage": None,
             "startedAt": timestamp,
             "updatedAt": timestamp,
+        }
+        with self._lock:
+            self._write_unlocked(value)
+        return value
+
+    def advance(
+        self,
+        operation: Mapping[str, object],
+        stage: str,
+        now: dt.datetime,
+    ) -> dict[str, object]:
+        current = operation.get("progressStage")
+        if (
+            operation.get("phase") != "applying"
+            or stage not in PROGRESS_STAGES
+            or stage not in PROGRESS_TRANSITIONS.get(current, frozenset())
+        ):
+            return dict(operation)
+        value = {
+            **dict(operation),
+            "schemaVersion": JOURNAL_SCHEMA,
+            "progressStage": stage,
+            "updatedAt": _iso_utc(now),
         }
         with self._lock:
             self._write_unlocked(value)
@@ -402,30 +451,30 @@ class UpdaterRuntime:
             try:
                 current = self._journal.read_optional()
             except JournalError:
-                return protocol_response(request.request_id, _journal_failure(self._clock()))
+                return protocol_response(request, _journal_failure(self._clock()))
 
             if current and current.get("phase") == "applying":
                 if self._worker is not None and self._worker.is_alive():
-                    return protocol_response(request.request_id, current)
+                    return protocol_response(request, current)
                 interrupted = self._journal.finish(
                     current,
                     "failed",
                     self._clock(),
                     reason_code="update_interrupted",
                 )
-                return protocol_response(request.request_id, interrupted)
+                return protocol_response(request, interrupted)
 
             if request.action == "check":
                 if current and current.get("phase") in _TERMINAL_PHASES and _is_recent(
                     current.get("updatedAt"), self._clock()
                 ):
-                    return protocol_response(request.request_id, current)
-                return protocol_response(request.request_id, self._check_and_store())
+                    return protocol_response(request, current)
+                return protocol_response(request, self._check_and_store())
 
             checked = self._discovery.check()
             if checked.phase != "available":
                 return protocol_response(
-                    request.request_id,
+                    request,
                     self._journal.write_snapshot(checked),
                 )
             operation = self._journal.begin(checked, self._clock())
@@ -439,8 +488,8 @@ class UpdaterRuntime:
                 self._worker.start()
             except RuntimeError:
                 failed = self._journal.finish(operation, "failed", self._clock())
-                return protocol_response(request.request_id, failed)
-            return protocol_response(request.request_id, operation)
+                return protocol_response(request, failed)
+            return protocol_response(request, operation)
 
     def wait_for_worker(self, timeout: float = 5) -> None:
         worker = self._worker
@@ -474,14 +523,19 @@ class UpdaterRuntime:
 
 
 def protocol_response(
-    request_id: str | None,
+    request: UpdaterRequest,
     value: Mapping[str, object],
 ) -> dict[str, object]:
+    fields = (
+        V1_RESPONSE_FIELDS
+        if request.protocol_version == LEGACY_PROTOCOL_VERSION
+        else V2_RESPONSE_FIELDS
+    )
     response: dict[str, object] = {
-        "protocolVersion": PROTOCOL_VERSION,
-        "requestId": request_id,
+        "protocolVersion": request.protocol_version,
+        "requestId": request.request_id,
     }
-    response.update({field: value.get(field) for field in _RESPONSE_FIELDS})
+    response.update({field: value.get(field) for field in fields})
     reason = response.get("reasonCode")
     response["detail"] = _detail_for(str(reason or ""))
     return response
@@ -675,8 +729,12 @@ def _reject_duplicate_journal_keys(pairs: list[tuple[str, object]]) -> dict[str,
 
 
 def _validate_journal(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or value.get("schemaVersion") != JOURNAL_SCHEMA:
+    if not isinstance(value, dict) or value.get("schemaVersion") not in {
+        LEGACY_JOURNAL_SCHEMA,
+        JOURNAL_SCHEMA,
+    }:
         raise JournalError("the update journal schema is invalid")
+    schema_version = value["schemaVersion"]
     phase = value.get("phase")
     reason = value.get("reasonCode")
     if phase not in _JOURNAL_PHASES or not isinstance(reason, str) or reason not in _PUBLIC_DETAILS:
@@ -691,6 +749,15 @@ def _validate_journal(value: object) -> dict[str, object]:
             raise JournalError("the update journal operation is invalid") from error
     if phase in {"applying", *_TERMINAL_PHASES} and operation_id is None:
         raise JournalError("the update journal operation is missing")
+    progress_stage = value.get("progressStage")
+    if schema_version == LEGACY_JOURNAL_SCHEMA and "progressStage" in value:
+        raise JournalError("the legacy update journal contains unexpected fields")
+    if progress_stage is not None and (
+        not isinstance(progress_stage, str)
+        or progress_stage not in PROGRESS_STAGES
+        or phase not in {"applying", *_TERMINAL_PHASES}
+    ):
+        raise JournalError("the update journal progress is invalid")
     for digest_field in ("currentDigest", "targetDigest"):
         digest = value.get(digest_field)
         if digest is not None and (
@@ -699,6 +766,7 @@ def _validate_journal(value: object) -> dict[str, object]:
             raise JournalError("the update journal digest is invalid")
     sanitized = dict(value)
     sanitized["operationId"] = operation_id
+    sanitized["progressStage"] = progress_stage
     sanitized["detail"] = _detail_for(reason)
     for key in ("channel", "currentVersion", "targetVersion"):
         item = sanitized.get(key)
@@ -715,10 +783,11 @@ def _validate_journal(value: object) -> dict[str, object]:
             raise JournalError("the update journal timestamp is invalid")
     allowed = {
         "schemaVersion",
-        *_RESPONSE_FIELDS,
+        *V2_RESPONSE_FIELDS,
         "startedAt",
     }
-    if set(sanitized) - allowed:
+    raw_allowed = allowed if schema_version == JOURNAL_SCHEMA else allowed - {"progressStage"}
+    if set(value) - raw_allowed or set(sanitized) - allowed:
         raise JournalError("the update journal contains unexpected fields")
     return sanitized
 

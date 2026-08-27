@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 
-PROTOCOL_VERSION = 1
+LEGACY_PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+SUPPORTED_PROTOCOL_VERSIONS = frozenset(
+    {LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION}
+)
 MAX_MESSAGE_BYTES = 65_536
 TRUSTED_IMAGE_REPOSITORY = "ghcr.io/dragosniamtu/reach-commander"
 
@@ -100,7 +104,7 @@ class UpdaterRequest:
         if (
             not isinstance(protocol_version, int)
             or isinstance(protocol_version, bool)
-            or protocol_version != PROTOCOL_VERSION
+            or protocol_version not in SUPPORTED_PROTOCOL_VERSIONS
         ):
             raise ProtocolError(
                 "protocol_incompatible",
@@ -124,7 +128,7 @@ class UpdaterRequest:
             raise ProtocolError(
                 "invalid_action", "The updater action is not supported."
             )
-        return cls(PROTOCOL_VERSION, request_id, action)
+        return cls(protocol_version, request_id, action)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -266,6 +270,7 @@ class UpdateSnapshot:
     operation_id: str | None = None
     last_checked_at: str | None = None
     updated_at: str | None = None
+    progress_stage: str | None = None
 
     @property
     def update_available(self) -> bool:
@@ -289,6 +294,7 @@ class UpdateSnapshot:
             "operationId": self.operation_id,
             "lastCheckedAt": self.last_checked_at,
             "updatedAt": self.updated_at,
+            "progressStage": self.progress_stage,
         }
 
 
@@ -546,8 +552,10 @@ def _iso_utc(value: dt.datetime) -> str:
 
 __all__ = [
     "DIGEST",
+    "LEGACY_PROTOCOL_VERSION",
     "MAX_MESSAGE_BYTES",
     "PROTOCOL_VERSION",
+    "SUPPORTED_PROTOCOL_VERSIONS",
     "STABLE_TAG",
     "TRUSTED_IMAGE_REPOSITORY",
     "GitHubRelease",

@@ -41,6 +41,8 @@ NOW = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
 CURRENT_DIGEST = "sha256:" + "1" * 64
 TARGET_DIGEST = "sha256:" + "2" * 64
 TARGET_REFERENCE = f"{TRUSTED_IMAGE_REPOSITORY}:v1.4.0"
+LEGACY_PROTOCOL_VERSION = 1
+DETAILED_PROTOCOL_VERSION = 2
 
 
 def snapshot(phase: str = "available") -> UpdateSnapshot:
@@ -61,11 +63,14 @@ def snapshot(phase: str = "available") -> UpdateSnapshot:
     )
 
 
-def request(action: str) -> UpdaterRequest:
+def request(
+    action: str,
+    protocol_version: int = LEGACY_PROTOCOL_VERSION,
+) -> UpdaterRequest:
     return UpdaterRequest.parse(
         json.dumps(
             {
-                "protocolVersion": 1,
+                "protocolVersion": protocol_version,
                 "requestId": str(uuid.uuid4()),
                 "action": action,
             }
@@ -164,6 +169,19 @@ class UpdaterRuntimeTests(unittest.TestCase):
             self.assertEqual([300], runner.timeouts)
             self.assertEqual([False], runner.shell_values)
             self.assertNotIn("stable", runner.argv[0])
+
+    def test_v1_response_has_exact_legacy_shape_and_v2_adds_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = self.runtime(Path(directory))
+
+            legacy = runtime.handle(request("check", LEGACY_PROTOCOL_VERSION))
+            detailed = runtime.handle(request("check", DETAILED_PROTOCOL_VERSION))
+
+        self.assertEqual(LEGACY_PROTOCOL_VERSION, legacy["protocolVersion"])
+        self.assertNotIn("progressStage", legacy)
+        self.assertEqual(DETAILED_PROTOCOL_VERSION, detailed["protocolVersion"])
+        self.assertIn("progressStage", detailed)
+        self.assertIsNone(detailed["progressStage"])
 
     def test_apply_is_idempotent_while_operation_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -293,6 +311,60 @@ class AtomicUpdateJournalTests(unittest.TestCase):
             operation = journal.begin(snapshot(), NOW)
             with self.assertRaisesRegex(JournalError, "terminal phase"):
                 journal.finish(operation, "applying", NOW)
+
+    def test_accepts_forward_and_recovery_progress_transitions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AtomicUpdateJournal(Path(directory) / "system-update.json")
+            operation = journal.begin(snapshot(), NOW)
+
+            for stage in (
+                "downloading",
+                "installing",
+                "restarting",
+                "healthChecking",
+                "restoring",
+                "restartingPrevious",
+                "verifyingRecovery",
+            ):
+                operation = journal.advance(operation, stage, NOW)
+                self.assertEqual(stage, operation["progressStage"])
+
+    def test_ignores_duplicate_unknown_and_backward_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AtomicUpdateJournal(Path(directory) / "system-update.json")
+            operation = journal.begin(snapshot(), NOW)
+            operation = journal.advance(operation, "downloading", NOW)
+            operation = journal.advance(operation, "installing", NOW)
+
+            self.assertEqual(
+                operation,
+                journal.advance(operation, "installing", NOW),
+            )
+            self.assertEqual(
+                operation,
+                journal.advance(operation, "downloading", NOW),
+            )
+            self.assertEqual(
+                operation,
+                journal.advance(operation, "notAStage", NOW),
+            )
+
+    def test_reads_legacy_journal_without_progress_and_upgrades_on_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = AtomicUpdateJournal(root / "system-update.json")
+            operation = journal.begin(snapshot(), NOW)
+            legacy = dict(operation)
+            legacy["schemaVersion"] = 1
+            legacy.pop("progressStage", None)
+            journal.path.write_text(json.dumps(legacy), encoding="utf-8")
+
+            recovered = journal.read_optional()
+            self.assertIsNone(recovered["progressStage"])
+            advanced = journal.advance(recovered, "downloading", NOW)
+
+            self.assertEqual(JOURNAL_SCHEMA, advanced["schemaVersion"])
+            self.assertEqual("downloading", advanced["progressStage"])
 
 
 class TrustedNetworkBoundaryTests(unittest.TestCase):

@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import deploy.updater_protocol as updater_protocol
 from deploy.updater_protocol import (
     MAX_MESSAGE_BYTES,
     PROTOCOL_VERSION,
@@ -27,15 +28,24 @@ REVISION = "a" * 40
 
 
 class UpdaterProtocolTests(unittest.TestCase):
-    def valid_request(self, action: str = "check") -> dict[str, object]:
+    def valid_request(
+        self,
+        action: str = "check",
+        protocol_version: int = PROTOCOL_VERSION,
+    ) -> dict[str, object]:
         return {
-            "protocolVersion": 1,
+            "protocolVersion": protocol_version,
             "requestId": str(uuid.uuid4()),
             "action": action,
         }
 
     def test_protocol_constants_are_fixed_and_request_is_immutable(self) -> None:
-        self.assertEqual(1, PROTOCOL_VERSION)
+        self.assertEqual(2, PROTOCOL_VERSION)
+        self.assertEqual(1, getattr(updater_protocol, "LEGACY_PROTOCOL_VERSION", None))
+        self.assertEqual(
+            frozenset({1, 2}),
+            getattr(updater_protocol, "SUPPORTED_PROTOCOL_VERSIONS", None),
+        )
         self.assertEqual(65_536, MAX_MESSAGE_BYTES)
 
         value = self.valid_request("applyConfiguredChannel")
@@ -46,6 +56,22 @@ class UpdaterProtocolTests(unittest.TestCase):
         self.assertEqual("applyConfiguredChannel", request.action)
         with self.assertRaises((AttributeError, TypeError)):
             request.action = "check"  # type: ignore[misc]
+
+    def test_accepts_legacy_and_detailed_protocols(self) -> None:
+        for version in (1, 2):
+            with self.subTest(version=version):
+                request = UpdaterRequest.parse(
+                    json.dumps(self.valid_request(protocol_version=version)).encode()
+                )
+                self.assertEqual(version, request.protocol_version)
+
+    def test_rejects_unadvertised_protocol_versions(self) -> None:
+        for version in (0, 3, True):
+            with self.subTest(version=version):
+                with self.assertRaisesRegex(ProtocolError, "incompatible"):
+                    UpdaterRequest.parse(
+                        json.dumps(self.valid_request(protocol_version=version)).encode()
+                    )
 
     def test_apply_rejects_browser_controlled_target_fields(self) -> None:
         for field, value in (
@@ -83,7 +109,7 @@ class UpdaterProtocolTests(unittest.TestCase):
     def test_rejects_missing_fields_wrong_types_protocol_action_and_uuid(self) -> None:
         mutations = (
             ({"requestId": str(uuid.uuid4()), "action": "check"}, "unexpected fields"),
-            ({**self.valid_request(), "protocolVersion": 2}, "incompatible"),
+            ({**self.valid_request(), "protocolVersion": 3}, "incompatible"),
             ({**self.valid_request(), "protocolVersion": True}, "incompatible"),
             ({**self.valid_request(), "requestId": "not-a-uuid"}, "request identifier"),
             ({**self.valid_request(), "requestId": 123}, "request identifier"),

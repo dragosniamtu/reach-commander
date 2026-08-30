@@ -32,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 738 cross-platform .NET tests, 387 Angular unit tests, 2 PWA contract tests, and 55 Chromium browser scenarios |
+| Quality | 738 cross-platform .NET tests, 406 Angular unit tests, 2 PWA contract tests, and 58 Chromium browser scenarios |
 
 ## What ReachCommander includes
 
@@ -458,6 +458,7 @@ If normal compensation cannot safely remove staging data, the UI reports only lo
 | `Tab` | Switch active pane |
 | `Insert` | Toggle selection and advance cursor |
 | `Ctrl+A` | Select all visible non-parent items |
+| `Shift+Up` / `Shift+Down` | Select the inclusive range from the keyboard anchor to the cursor; reverse direction to shrink it |
 | `Esc` | Close menu, clear filter, clear selection, then clear status |
 | `Ctrl+F` | Focus the active-panel search |
 | `Ctrl+L` | Focus the active pane's editable logical path |
@@ -474,7 +475,7 @@ If normal compensation cannot safely remove staging data, the UI reports only lo
 | `F9` | Toggle the command reference menu |
 | `F3` | Reserved/disabled until a later milestone |
 
-Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source buttons, toolbar actions, tabs, sortable headings, the path field, search, and F9 also work with pointer/touch input.
+Keyboard range selection uses `Shift+Up` and `Shift+Down` in the active pane. It includes files and folders between the anchor and cursor, excludes the synthetic `..` parent row, and replaces the current range as you extend or reverse it. Pointer selection supports click, `Ctrl+click`, and `Shift+click`. Source buttons, toolbar actions, tabs, sortable headings, the path field, search, and F9 also work with pointer/touch input.
 
 ## API
 

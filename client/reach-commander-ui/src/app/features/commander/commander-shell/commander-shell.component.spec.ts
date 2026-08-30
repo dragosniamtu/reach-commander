@@ -231,6 +231,16 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(metrics.start).toHaveBeenCalledOnce();
   });
 
+  it('advertises Shift+Arrow range selection in the shortcut hint and command reference', () => {
+    fixture.componentInstance.menuOpen.set(true);
+    fixture.detectChanges();
+    const hint = fixture.nativeElement.querySelector('.shortcut-hint') as HTMLElement;
+    const commands = fixture.nativeElement.querySelector('.command-menu') as HTMLElement;
+
+    expect(hint.textContent).toContain('Shift+↑/↓ range select');
+    expect(commands.textContent).toContain('Shift+↑/↓');
+  });
+
   it('places an enabled available-update control immediately before telemetry', () => {
     systemUpdate.status.set(systemUpdateStatus({
       phase: 'available',

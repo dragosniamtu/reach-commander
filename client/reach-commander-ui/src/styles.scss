@@ -284,6 +284,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 
 :root[data-theme='windows95'] body {
+  --text-4: #404040;
   font-family: var(--font-ui);
 }
 
@@ -456,19 +457,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   color: var(--text-2) !important;
   background: var(--surface-1) !important;
   box-shadow: none !important;
-}
-
-:root[data-theme='windows95'] :is(
-  .panel-status,
-  .global-status,
-  .version-badge,
-  .context-chip code,
-  .field-help,
-  .queued,
-  .state-label,
-  .empty-state
-) {
-  color: var(--text-2) !important;
 }
 
 :root[data-theme='windows95'] :is(

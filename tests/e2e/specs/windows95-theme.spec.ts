@@ -1,4 +1,4 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { systemUpdateFixture } from '../support/seed-fixtures';
 
 const storageKey = 'reachcommander.theme.v1';
@@ -212,6 +212,19 @@ test('keeps Windows 95 small status and semantic text readable on gray', async (
   expect(
     contrastRatio(statusStyles.readOnlyPolicy.color, statusStyles.readOnlyPolicy.background),
   ).toBeGreaterThanOrEqual(4.5);
+
+  await page.getByTestId('system-metrics-trigger').click();
+  const metricsPanel = page.getByRole('dialog', { name: 'System metrics' });
+  await expect(metricsPanel).toBeVisible();
+  const metricsLabelStyles = await metricsPanel.locator('dt').first().evaluate((element) => {
+    const label = getComputedStyle(element);
+    const section = getComputedStyle(element.closest('section')!);
+    return { color: label.color, background: section.backgroundColor };
+  });
+  expect(metricsLabelStyles.color).toBe('rgb(64, 64, 64)');
+  expect(contrastRatio(metricsLabelStyles.color, metricsLabelStyles.background)).toBeGreaterThanOrEqual(
+    4.5,
+  );
   expect(consoleErrors).toEqual([]);
 });
 
@@ -270,6 +283,19 @@ test('uses square gray Windows 95 chrome for the system update overlay', async (
   await resetTheme(page);
   await page.getByTestId('theme-selector').selectOption('windows95');
   await page.getByTestId('system-update-trigger').click();
+  const confirmation = page.getByRole('dialog', { name: 'Update ReachCommander?' });
+  const confirmationLabelStyles = await confirmation
+    .locator('.version-flow span')
+    .first()
+    .evaluate((element) => {
+      const label = getComputedStyle(element);
+      const section = getComputedStyle(element.closest('section')!);
+      return { color: label.color, background: section.backgroundColor };
+    });
+  expect(confirmationLabelStyles.color).toBe('rgb(64, 64, 64)');
+  expect(
+    contrastRatio(confirmationLabelStyles.color, confirmationLabelStyles.background),
+  ).toBeGreaterThanOrEqual(4.5);
   await page.getByRole('button', { name: 'Update ReachCommander' }).click();
 
   const overlay = page.locator('.system-update-overlay');

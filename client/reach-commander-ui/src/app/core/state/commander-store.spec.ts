@@ -334,6 +334,90 @@ describe('CommanderStore', () => {
     expect([...store.leftPanel().selectedItems].sort()).toEqual(['/beta.txt', '/gamma.txt']);
   });
 
+  it.each([
+    ['ArrowUp', (store: CommanderStore) => store.moveCursor('left', -1), -1, 5, [
+      '/echo.txt',
+      '/foxtrot.txt',
+    ]],
+    ['ArrowDown', (store: CommanderStore) => store.moveCursor('left', 1), 1, 7, [
+      '/hotel.txt',
+      '/india.txt',
+    ]],
+    ['PageUp', (store: CommanderStore) => store.moveCursorPage('left', -1), 1, 0, [
+      '/alpha.txt',
+      '/bravo.txt',
+    ]],
+    ['PageDown', (store: CommanderStore) => store.moveCursorPage('left', 1), -1, 11, [
+      '/kilo.txt',
+      '/lima.txt',
+    ]],
+    ['Home', (store: CommanderStore) => store.moveCursorBoundary('left', 'home'), 1, 0, [
+      '/alpha.txt',
+      '/bravo.txt',
+    ]],
+    ['End', (store: CommanderStore) => store.moveCursorBoundary('left', 'end'), -1, 11, [
+      '/kilo.txt',
+      '/lima.txt',
+    ]],
+  ])(
+    'uses the %s destination as the next Shift+Arrow anchor without clearing selection',
+    async (_name, move, shiftedAmount, expectedAnchor, expectedSelection) => {
+      const api = new FakeCommanderApi([
+        source('downloads', { defaultLeft: true, defaultRight: true }),
+      ]);
+      api.entries.set('downloads:/', [
+        entry('alpha.txt'),
+        entry('bravo.txt'),
+        entry('charlie.txt'),
+        entry('delta.txt'),
+        entry('echo.txt'),
+        entry('foxtrot.txt'),
+        entry('golf.txt'),
+        entry('hotel.txt'),
+        entry('india.txt'),
+        entry('juliet.txt'),
+        entry('kilo.txt'),
+        entry('lima.txt'),
+      ]);
+      const store = new CommanderStore(api);
+      await store.initialize();
+      store.moveCursor('left', 5);
+      store.moveCursor('left', 1, true);
+
+      move(store);
+
+      expect(store.leftPanel().selectionAnchor).toBe(expectedAnchor);
+      expect([...store.leftPanel().selectedItems].sort()).toEqual([
+        '/foxtrot.txt',
+        '/golf.txt',
+      ]);
+
+      store.moveCursor('left', shiftedAmount, true);
+
+      expect([...store.leftPanel().selectedItems].sort()).toEqual(expectedSelection);
+    },
+  );
+
+  it.each([
+    ['Home', 'home' as const, 0, '/alpha.txt'],
+    ['End', 'end' as const, 1, '/beta.txt'],
+  ])('leaves anchor and selection unchanged when %s is already at the boundary',
+    async (_name, boundary, cursorIndex, selectedItem) => {
+      const api = new FakeCommanderApi([
+        source('downloads', { defaultLeft: true, defaultRight: true }),
+      ]);
+      api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt')]);
+      const store = new CommanderStore(api);
+      await store.initialize();
+      store.selectWithPointer('left', cursorIndex, 'replace');
+
+      store.moveCursorBoundary('left', boundary);
+
+      expect(store.leftPanel().cursorIndex).toBe(cursorIndex);
+      expect(store.leftPanel().selectionAnchor).toBe(cursorIndex);
+      expect([...store.leftPanel().selectedItems]).toEqual([selectedItem]);
+    });
+
   it('clamps shifted cursor movement without inventing a range at a boundary', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true, defaultRight: true }),

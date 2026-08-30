@@ -328,9 +328,15 @@ export class CommanderStore {
   moveCursorBoundary(side: PanelSide, boundary: 'home' | 'end'): void {
     const state = this.panel(side)();
     const rowCount = buildVisibleRows(state).length;
+    const cursorIndex = rowCount === 0 ? -1 : boundary === 'home' ? 0 : rowCount - 1;
+    if (cursorIndex === state.cursorIndex) {
+      return;
+    }
+
     this.updatePanel(side, {
       ...state,
-      cursorIndex: rowCount === 0 ? -1 : boundary === 'home' ? 0 : rowCount - 1,
+      cursorIndex,
+      selectionAnchor: rowCount === 0 ? state.selectionAnchor : cursorIndex,
     });
   }
 

@@ -12,11 +12,17 @@ from deploy.updater_protocol import (
     DIAGNOSTIC_PROTOCOL_VERSION,
     MAX_MESSAGE_BYTES,
     PROTOCOL_VERSION,
+    SOURCE_MANAGEMENT_PROTOCOL_VERSION,
     TRUSTED_IMAGE_REPOSITORY,
     GitHubRelease,
     InstalledState,
     ProtocolError,
     ResolvedImage,
+    SourceManagementCapability,
+    SourceManagementErrorResponse,
+    SourceManagementOperation,
+    SourceManagementRequest,
+    SourceManagementResponse,
     StateError,
     UpdateDiscovery,
     UpdaterRequest,
@@ -147,6 +153,226 @@ class UpdaterProtocolTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 with self.assertRaisesRegex(ProtocolError, message):
                     UpdaterRequest.parse(json.dumps(payload).encode())
+
+
+class SourceManagementProtocolTests(unittest.TestCase):
+    def request(
+        self,
+        action: str = "status",
+        request_id: str | None = None,
+        **fields: object,
+    ) -> dict[str, object]:
+        return {
+            "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+            "requestId": request_id or str(uuid.uuid4()),
+            "action": action,
+            **fields,
+        }
+
+    def test_source_management_is_protocol_v5_not_an_updater_protocol(self) -> None:
+        self.assertEqual(5, SOURCE_MANAGEMENT_PROTOCOL_VERSION)
+        source_request = self.request(
+            "addSource",
+            displayName="Archive",
+            hostPath="/srv/reachcommander/archive",
+            access="readOnly",
+        )
+
+        parsed = SourceManagementRequest.parse(json.dumps(source_request).encode())
+
+        self.assertEqual("addSource", parsed.action)
+        self.assertEqual("Archive", parsed.display_name)
+        self.assertEqual("/srv/reachcommander/archive", parsed.host_path)
+        self.assertEqual("readOnly", parsed.access)
+        with self.assertRaises(ProtocolError):
+            UpdaterRequest.parse(json.dumps(source_request).encode())
+
+    def test_source_management_requests_use_an_exact_action_schema(self) -> None:
+        status = SourceManagementRequest.parse(json.dumps(self.request()).encode())
+        self.assertEqual("status", status.action)
+        self.assertIsNone(status.operation_id)
+
+        operation_id = str(uuid.uuid4())
+        operation = SourceManagementRequest.parse(
+            json.dumps(self.request("getOperation", operationId=operation_id)).encode()
+        )
+        self.assertEqual(operation_id, operation.operation_id)
+
+        invalid = (
+            self.request("addSource", displayName="Archive", hostPath="/srv/archive"),
+            self.request("addSource", displayName="Archive", hostPath="/srv/archive", access="readOnly", command="id"),
+            self.request("status", hostPath="/srv/archive"),
+            self.request("getOperation", operationId=operation_id, access="readOnly"),
+            self.request("deleteSource"),
+        )
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementRequest.parse(json.dumps(payload).encode())
+
+    def test_source_management_rejects_duplicate_fields_and_noncanonical_uuids(self) -> None:
+        request_id = str(uuid.uuid4())
+        duplicate = (
+            '{"protocolVersion":5,"requestId":"'
+            + request_id
+            + '","action":"status","action":"status"}'
+        ).encode()
+        with self.assertRaisesRegex(ProtocolError, "duplicate"):
+            SourceManagementRequest.parse(duplicate)
+
+        for value in (request_id.upper(), "{" + request_id + "}", "not-a-uuid"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ProtocolError, "identifier"):
+                    SourceManagementRequest.parse(
+                        json.dumps(self.request(request_id=value)).encode()
+                    )
+
+    def test_source_management_rejects_incompatible_versions_and_oversized_payloads(self) -> None:
+        for version in (0, 4, 6, True):
+            with self.subTest(version=version):
+                payload = self.request()
+                payload["protocolVersion"] = version
+                with self.assertRaisesRegex(ProtocolError, "incompatible"):
+                    SourceManagementRequest.parse(json.dumps(payload).encode())
+
+        with self.assertRaisesRegex(ProtocolError, "too large"):
+            SourceManagementRequest.parse(b"{" + b" " * 4_096)
+
+    def test_source_management_bounds_add_source_fields_before_filesystem_validation(self) -> None:
+        valid = self.request(
+            "addSource",
+            displayName="  Archive  ",
+            hostPath="/srv/reachcommander/archive",
+            access="readWrite",
+        )
+        parsed = SourceManagementRequest.parse(json.dumps(valid).encode())
+        self.assertEqual("Archive", parsed.display_name)
+
+        invalid = (
+            self.request("addSource", displayName="", hostPath="/srv/archive", access="readOnly"),
+            self.request("addSource", displayName="x" * 81, hostPath="/srv/archive", access="readOnly"),
+            self.request("addSource", displayName="bad\nname", hostPath="/srv/archive", access="readOnly"),
+            self.request("addSource", displayName="bad\u0085name", hostPath="/srv/archive", access="readOnly"),
+            self.request("addSource", displayName="Archive", hostPath="relative/path", access="readOnly"),
+            self.request("addSource", displayName="Archive", hostPath="C:\\archive", access="readOnly"),
+            self.request("addSource", displayName="Archive", hostPath="/srv/\x00archive", access="readOnly"),
+            self.request("addSource", displayName="Archive", hostPath="/" + "x" * 1_024, access="readOnly"),
+            self.request("addSource", displayName="Archive", hostPath="/srv/archive", access="rw"),
+        )
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementRequest.parse(json.dumps(payload).encode())
+
+    def test_source_management_responses_round_trip_exactly(self) -> None:
+        request_id = str(uuid.uuid4())
+        capability = SourceManagementCapability(True, "supported", "Source management is available.")
+        status = SourceManagementResponse.from_capability(request_id, capability)
+        self.assertEqual(
+            {
+                "protocolVersion": 5,
+                "requestId": request_id,
+                "action": "status",
+                "payload": {
+                    "supported": True,
+                    "reasonCode": "supported",
+                    "detail": "Source management is available.",
+                },
+            },
+            status.to_wire(),
+        )
+        self.assertEqual(status, SourceManagementResponse.parse(json.dumps(status.to_wire()).encode()))
+
+        operation = SourceManagementOperation(
+            operation_id=str(uuid.uuid4()),
+            source_id="archive",
+            display_name="Archive",
+            phase="accepted",
+            reason_code="accepted",
+            detail="Source change accepted.",
+            created_at="2026-08-31T10:00:00Z",
+            updated_at="2026-08-31T10:00:00Z",
+        )
+        response = SourceManagementResponse.from_operation(request_id, "addSource", operation)
+        parsed = SourceManagementResponse.parse(json.dumps(response.to_wire()).encode())
+        self.assertEqual(operation, parsed.operation)
+        self.assertEqual("addSource", parsed.action)
+
+    def test_source_management_responses_reject_request_id_mismatch_and_unsafe_public_fields(self) -> None:
+        request_id = str(uuid.uuid4())
+        with self.assertRaisesRegex(ProtocolError, "identifier"):
+            SourceManagementResponse.parse(
+                json.dumps(
+                    {
+                        "protocolVersion": 5,
+                        "requestId": request_id.upper(),
+                        "action": "status",
+                        "payload": {"supported": True, "reasonCode": "supported", "detail": "ok"},
+                    }
+                ).encode()
+            )
+
+        with self.assertRaises(ProtocolError):
+            SourceManagementResponse.parse(
+                json.dumps(
+                    {
+                        "protocolVersion": 5,
+                        "requestId": request_id,
+                        "action": "status",
+                        "payload": {"supported": True, "reasonCode": "supported", "detail": "ok", "hostPath": "/secret"},
+                    }
+                ).encode()
+            )
+
+        response = SourceManagementResponse.from_capability(
+            request_id, SourceManagementCapability(True, "supported", "ok")
+        )
+        with self.assertRaisesRegex(ProtocolError, "does not match"):
+            SourceManagementResponse.parse(
+                json.dumps(response.to_wire()).encode(),
+                expected_request_id=str(uuid.uuid4()),
+            )
+
+        error = SourceManagementErrorResponse.from_error(
+            request_id,
+            ProtocolError("invalid_request", "Rejected /srv/private because command output said nope"),
+        )
+        wire = error.to_wire()
+        self.assertEqual("invalid_request", wire["payload"]["code"])
+        self.assertNotIn("/srv/private", json.dumps(wire))
+        self.assertNotIn("command output", json.dumps(wire))
+        self.assertLessEqual(len(str(wire["payload"]["detail"])), 240)
+
+        direct_error = SourceManagementErrorResponse(
+            request_id, "invalid_request", "failed at /srv/private with command output"
+        )
+        self.assertNotIn("/srv/private", json.dumps(direct_error.to_wire()))
+
+    def test_source_management_status_and_operation_details_never_echo_host_data(self) -> None:
+        unsafe_detail = "Command output named /srv/private/source and runtime token abc"
+        capability = SourceManagementCapability(
+            False, "unsupported_deployment", unsafe_detail
+        )
+        operation = SourceManagementOperation(
+            operation_id=str(uuid.uuid4()),
+            source_id=None,
+            display_name=None,
+            phase="failed",
+            reason_code="validation_failed",
+            detail=unsafe_detail,
+            created_at="2026-08-31T10:00:00Z",
+            updated_at="2026-08-31T10:00:01Z",
+        )
+
+        wire = json.dumps(
+            SourceManagementResponse.from_operation(
+                str(uuid.uuid4()), "getOperation", operation
+            ).to_wire()
+        ) + json.dumps(SourceManagementResponse.from_capability(str(uuid.uuid4()), capability).to_wire())
+
+        self.assertNotIn("/srv/private/source", wire)
+        self.assertNotIn("Command output", wire)
+        self.assertNotIn("runtime token", wire)
 
 
 class UpdaterDiscoveryTests(unittest.TestCase):

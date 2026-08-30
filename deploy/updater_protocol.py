@@ -22,6 +22,9 @@ LEGACY_PROTOCOL_VERSION = 1
 DETAILED_PROTOCOL_VERSION = 2
 PROTOCOL_VERSION = 3
 DIAGNOSTIC_PROTOCOL_VERSION = 4
+# Source management deliberately uses a separate protocol so an older updater
+# helper cannot mistake a browser-controlled source request for an update action.
+SOURCE_MANAGEMENT_PROTOCOL_VERSION = 5
 SUPPORTED_PROTOCOL_VERSIONS = frozenset(
     {
         LEGACY_PROTOCOL_VERSION,
@@ -31,6 +34,7 @@ SUPPORTED_PROTOCOL_VERSIONS = frozenset(
     }
 )
 MAX_MESSAGE_BYTES = 65_536
+MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES = 4_096
 TRUSTED_IMAGE_REPOSITORY = "ghcr.io/dragosniamtu/reach-commander"
 
 STABLE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -48,6 +52,92 @@ _UPDATE_ACTIONS = frozenset({"check", "applyConfiguredChannel"})
 _DIAGNOSTIC_ACTION = "collectDiagnostics"
 _MAX_STATE_BYTES = 1_024
 _MAX_DETAIL_CHARS = 240
+_MAX_SOURCE_DISPLAY_NAME_CHARS = 80
+_MAX_SOURCE_HOST_PATH_CHARS = 1_024
+_SOURCE_REQUEST_FIELDS = frozenset({"protocolVersion", "requestId", "action"})
+_SOURCE_ADD_FIELDS = _SOURCE_REQUEST_FIELDS | frozenset(
+    {"displayName", "hostPath", "access"}
+)
+_SOURCE_OPERATION_FIELDS = _SOURCE_REQUEST_FIELDS | frozenset({"operationId"})
+_SOURCE_RESPONSE_FIELDS = frozenset(
+    {"protocolVersion", "requestId", "action", "payload"}
+)
+_SOURCE_CAPABILITY_FIELDS = frozenset({"supported", "reasonCode", "detail"})
+_SOURCE_OPERATION_RESPONSE_FIELDS = frozenset(
+    {
+        "operationId",
+        "sourceId",
+        "displayName",
+        "phase",
+        "reasonCode",
+        "detail",
+        "createdAt",
+        "updatedAt",
+    }
+)
+_SOURCE_STATUS_ACTION = "status"
+_SOURCE_ADD_ACTION = "addSource"
+_SOURCE_OPERATION_ACTION = "getOperation"
+_SOURCE_ACTIONS = frozenset(
+    {_SOURCE_STATUS_ACTION, _SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION}
+)
+_SOURCE_ACCESS_VALUES = frozenset({"readOnly", "readWrite"})
+_SOURCE_OPERATION_PHASES = frozenset(
+    {
+        "accepted",
+        "validating",
+        "applying",
+        "restarting",
+        "healthChecking",
+        "completed",
+        "rolledBack",
+        "failed",
+    }
+)
+_PUBLIC_SOURCE_ERROR_CODES = frozenset(
+    {
+        "invalid_request",
+        "request_too_large",
+        "protocol_incompatible",
+        "invalid_action",
+        "unsupported",
+        "busy",
+        "validation_failed",
+        "source_management_failed",
+    }
+)
+_PUBLIC_SOURCE_CAPABILITY_DETAILS = {
+    "supported": "Source management is available.",
+    "installer_upgrade_required": "Source management requires the latest installer.",
+    "unsupported_deployment": "Source management is unavailable on this installation.",
+    "unsupported_platform": "Source management is unavailable on this platform.",
+}
+_PUBLIC_SOURCE_ERROR_DETAILS = {
+    "invalid_request": "The source-management request is invalid.",
+    "request_too_large": "The source-management request is too large.",
+    "protocol_incompatible": "The source-management host protocol is incompatible.",
+    "invalid_action": "The source-management action is not supported.",
+    "unsupported": "Source management is unavailable on this installation.",
+    "busy": "Another source-management operation is in progress.",
+    "validation_failed": "The source folder could not be accepted.",
+    "source_management_failed": "The source-management operation could not be completed.",
+}
+_PUBLIC_SOURCE_OPERATION_DETAILS = {
+    "accepted": "Source change accepted.",
+    "validating": "The source change is being validated.",
+    "applying": "The source configuration is being applied.",
+    "restarting": "ReachCommander is restarting.",
+    "healthChecking": "ReachCommander is being checked.",
+    "completed": "The source has been added.",
+    "rolledBack": "The source change was rolled back.",
+    "failed": "The source-management operation could not be completed.",
+}
+_SOURCE_REASON_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_RFC3339_UTC = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,6})?Z$"
+)
 
 
 class ProtocolError(ValueError):
@@ -77,6 +167,357 @@ def _reject_duplicate_keys(pairs: Sequence[tuple[str, object]]) -> dict[str, obj
             )
         value[key] = item
     return value
+
+
+def _reject_duplicate_source_management_keys(
+    pairs: Sequence[tuple[str, object]],
+) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ProtocolError(
+                "invalid_request",
+                "The source-management message contains duplicate fields.",
+            )
+        value[key] = item
+    return value
+
+
+def _parse_source_management_json(raw: bytes, *, message: str) -> object:
+    if not isinstance(raw, bytes):
+        raise ProtocolError("invalid_request", f"The source-management {message} must be bytes.")
+    if len(raw) > MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES:
+        raise ProtocolError(
+            "request_too_large", f"The source-management {message} is too large."
+        )
+    try:
+        return json.loads(raw, object_pairs_hook=_reject_duplicate_source_management_keys)
+    except ProtocolError:
+        raise
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as error:
+        raise ProtocolError(
+            "invalid_request", f"The source-management {message} is not valid JSON."
+        ) from error
+
+
+def _canonical_uuid(value: object, *, subject: str) -> str:
+    if not isinstance(value, str):
+        raise ProtocolError("invalid_request", f"The {subject} identifier is invalid.")
+    try:
+        parsed = str(uuid.UUID(value))
+    except (ValueError, AttributeError) as error:
+        raise ProtocolError("invalid_request", f"The {subject} identifier is invalid.") from error
+    if value != parsed:
+        raise ProtocolError("invalid_request", f"The {subject} identifier is invalid.")
+    return parsed
+
+
+def _has_control_characters(value: str) -> bool:
+    return any(not character.isprintable() for character in value)
+
+
+def _bounded_public_detail(value: object) -> str:
+    if not isinstance(value, str):
+        raise ProtocolError("invalid_request", "The source-management detail is invalid.")
+    clean = "".join(" " if _has_control_characters(character) else character for character in value)
+    return " ".join(clean.split())[:_MAX_DETAIL_CHARS]
+
+
+def _public_reason_code(value: object) -> str:
+    if not isinstance(value, str) or not _SOURCE_REASON_CODE.fullmatch(value):
+        raise ProtocolError("invalid_request", "The source-management reason code is invalid.")
+    return value
+
+
+def _public_timestamp(value: object) -> str:
+    if not isinstance(value, str) or not _RFC3339_UTC.fullmatch(value):
+        raise ProtocolError("invalid_request", "The source-management timestamp is invalid.")
+    return value
+
+
+def _public_capability_detail(supported: bool, reason_code: str) -> str:
+    return _PUBLIC_SOURCE_CAPABILITY_DETAILS.get(
+        reason_code,
+        "Source management is available."
+        if supported
+        else "Source management is unavailable on this installation.",
+    )
+
+
+def _public_operation_detail(phase: str) -> str:
+    return _PUBLIC_SOURCE_OPERATION_DETAILS[phase]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SourceManagementRequest:
+    """A strict, non-updater request accepted by the source host service."""
+
+    protocol_version: int
+    request_id: str
+    action: str
+    display_name: str | None = None
+    host_path: str | None = None
+    access: str | None = None
+    operation_id: str | None = None
+
+    @classmethod
+    def parse(cls, raw: bytes) -> "SourceManagementRequest":
+        value = _parse_source_management_json(raw, message="request")
+        if not isinstance(value, dict):
+            raise ProtocolError("invalid_request", "The source-management request must be an object.")
+        if value.get("protocolVersion") != SOURCE_MANAGEMENT_PROTOCOL_VERSION:
+            raise ProtocolError(
+                "protocol_incompatible",
+                "The source-management host protocol is incompatible.",
+            )
+        request_id = _canonical_uuid(value.get("requestId"), subject="source-management request")
+        action = value.get("action")
+        if not isinstance(action, str) or action not in _SOURCE_ACTIONS:
+            raise ProtocolError("invalid_action", "The source-management action is not supported.")
+
+        if action == _SOURCE_STATUS_ACTION:
+            if set(value) != _SOURCE_REQUEST_FIELDS:
+                raise ProtocolError("invalid_request", "The source-management request contains unexpected fields.")
+            return cls(SOURCE_MANAGEMENT_PROTOCOL_VERSION, request_id, action)
+
+        if action == _SOURCE_OPERATION_ACTION:
+            if set(value) != _SOURCE_OPERATION_FIELDS:
+                raise ProtocolError("invalid_request", "The source-management request contains unexpected fields.")
+            operation_id = _canonical_uuid(value.get("operationId"), subject="source operation")
+            return cls(
+                SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+                request_id,
+                action,
+                operation_id=operation_id,
+            )
+
+        if set(value) != _SOURCE_ADD_FIELDS:
+            raise ProtocolError("invalid_request", "The source-management request contains unexpected fields.")
+        display_name = value.get("displayName")
+        if not isinstance(display_name, str):
+            raise ProtocolError("invalid_request", "The source display name is invalid.")
+        display_name = display_name.strip()
+        if (
+            not display_name
+            or len(display_name) > _MAX_SOURCE_DISPLAY_NAME_CHARS
+            or _has_control_characters(display_name)
+        ):
+            raise ProtocolError("invalid_request", "The source display name is invalid.")
+
+        host_path = value.get("hostPath")
+        if (
+            not isinstance(host_path, str)
+            or not host_path
+            or len(host_path) > _MAX_SOURCE_HOST_PATH_CHARS
+            or not host_path.startswith("/")
+            or "\\" in host_path
+            or _has_control_characters(host_path)
+        ):
+            raise ProtocolError("invalid_request", "The source host path is invalid.")
+        access = value.get("access")
+        if not isinstance(access, str) or access not in _SOURCE_ACCESS_VALUES:
+            raise ProtocolError("invalid_request", "The source access policy is invalid.")
+        return cls(
+            SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+            request_id,
+            action,
+            display_name=display_name,
+            host_path=host_path,
+            access=access,
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SourceManagementCapability:
+    supported: bool
+    reason_code: str
+    detail: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.supported, bool):
+            raise ProtocolError("invalid_request", "The source-management support state is invalid.")
+        object.__setattr__(self, "reason_code", _public_reason_code(self.reason_code))
+        if not isinstance(self.detail, str):
+            raise ProtocolError("invalid_request", "The source-management detail is invalid.")
+        object.__setattr__(
+            self,
+            "detail",
+            _public_capability_detail(self.supported, self.reason_code),
+        )
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "reasonCode": self.reason_code,
+            "detail": self.detail,
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SourceManagementOperation:
+    operation_id: str
+    source_id: str | None
+    display_name: str | None
+    phase: str
+    reason_code: str
+    detail: str
+    created_at: str
+    updated_at: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "operation_id", _canonical_uuid(self.operation_id, subject="source operation"))
+        if self.source_id is not None and (
+            not isinstance(self.source_id, str) or not _SOURCE_ID.fullmatch(self.source_id)
+        ):
+            raise ProtocolError("invalid_request", "The source identifier is invalid.")
+        if self.display_name is not None:
+            if (
+                not isinstance(self.display_name, str)
+                or not self.display_name
+                or len(self.display_name) > _MAX_SOURCE_DISPLAY_NAME_CHARS
+                or _has_control_characters(self.display_name)
+            ):
+                raise ProtocolError("invalid_request", "The source display name is invalid.")
+        if not isinstance(self.phase, str) or self.phase not in _SOURCE_OPERATION_PHASES:
+            raise ProtocolError("invalid_request", "The source operation phase is invalid.")
+        object.__setattr__(self, "reason_code", _public_reason_code(self.reason_code))
+        if not isinstance(self.detail, str):
+            raise ProtocolError("invalid_request", "The source-management detail is invalid.")
+        object.__setattr__(self, "detail", _public_operation_detail(self.phase))
+        object.__setattr__(self, "created_at", _public_timestamp(self.created_at))
+        object.__setattr__(self, "updated_at", _public_timestamp(self.updated_at))
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "operationId": self.operation_id,
+            "sourceId": self.source_id,
+            "displayName": self.display_name,
+            "phase": self.phase,
+            "reasonCode": self.reason_code,
+            "detail": self.detail,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SourceManagementResponse:
+    request_id: str
+    action: str
+    capability: SourceManagementCapability | None = None
+    operation: SourceManagementOperation | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "request_id", _canonical_uuid(self.request_id, subject="source-management request"))
+        if self.action == _SOURCE_STATUS_ACTION and self.capability is not None and self.operation is None:
+            return
+        if self.action in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION} and self.operation is not None and self.capability is None:
+            return
+        raise ProtocolError("invalid_request", "The source-management response is invalid.")
+
+    @classmethod
+    def from_capability(
+        cls, request_id: str, capability: SourceManagementCapability
+    ) -> "SourceManagementResponse":
+        return cls(request_id, _SOURCE_STATUS_ACTION, capability=capability)
+
+    @classmethod
+    def from_operation(
+        cls, request_id: str, action: str, operation: SourceManagementOperation
+    ) -> "SourceManagementResponse":
+        return cls(request_id, action, operation=operation)
+
+    def to_wire(self) -> dict[str, object]:
+        payload = self.capability.to_wire() if self.capability is not None else self.operation.to_wire()  # type: ignore[union-attr]
+        return {
+            "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+            "requestId": self.request_id,
+            "action": self.action,
+            "payload": payload,
+        }
+
+    @classmethod
+    def parse(
+        cls, raw: bytes, *, expected_request_id: str | None = None
+    ) -> "SourceManagementResponse":
+        value = _parse_source_management_json(raw, message="response")
+        if not isinstance(value, dict) or set(value) != _SOURCE_RESPONSE_FIELDS:
+            raise ProtocolError("invalid_request", "The source-management response contains unexpected fields.")
+        if value.get("protocolVersion") != SOURCE_MANAGEMENT_PROTOCOL_VERSION:
+            raise ProtocolError("protocol_incompatible", "The source-management host protocol is incompatible.")
+        request_id = _canonical_uuid(value.get("requestId"), subject="source-management request")
+        if expected_request_id is not None and request_id != _canonical_uuid(
+            expected_request_id, subject="source-management request"
+        ):
+            raise ProtocolError("invalid_request", "The source-management response identifier does not match.")
+        action = value.get("action")
+        payload = value.get("payload")
+        if not isinstance(payload, dict):
+            raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
+        if action == _SOURCE_STATUS_ACTION:
+            if set(payload) != _SOURCE_CAPABILITY_FIELDS:
+                raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
+            return cls.from_capability(
+                request_id,
+                SourceManagementCapability(
+                    payload.get("supported"), payload.get("reasonCode"), payload.get("detail")
+                ),
+            )
+        if action not in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION} or set(payload) != _SOURCE_OPERATION_RESPONSE_FIELDS:
+            raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
+        return cls.from_operation(
+            request_id,
+            action,
+            SourceManagementOperation(
+                operation_id=payload.get("operationId"),
+                source_id=payload.get("sourceId"),
+                display_name=payload.get("displayName"),
+                phase=payload.get("phase"),
+                reason_code=payload.get("reasonCode"),
+                detail=payload.get("detail"),
+                created_at=payload.get("createdAt"),
+                updated_at=payload.get("updatedAt"),
+            ),
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SourceManagementErrorResponse:
+    request_id: str | None
+    code: str
+    detail: str
+
+    def __post_init__(self) -> None:
+        code = (
+            self.code
+            if isinstance(self.code, str) and self.code in _PUBLIC_SOURCE_ERROR_CODES
+            else "source_management_failed"
+        )
+        if not isinstance(self.detail, str):
+            raise ProtocolError("invalid_request", "The source-management detail is invalid.")
+        object.__setattr__(self, "code", code)
+        object.__setattr__(self, "detail", _PUBLIC_SOURCE_ERROR_DETAILS[code])
+
+    @classmethod
+    def from_error(
+        cls, request_id: str | None, error: ProtocolError
+    ) -> "SourceManagementErrorResponse":
+        code = error.code if error.code in _PUBLIC_SOURCE_ERROR_CODES else "source_management_failed"
+        return cls(request_id, code, error.detail)
+
+    def to_wire(self) -> dict[str, object]:
+        request_id = (
+            _canonical_uuid(self.request_id, subject="source-management request")
+            if self.request_id is not None
+            else None
+        )
+        code = self.code if self.code in _PUBLIC_SOURCE_ERROR_CODES else "source_management_failed"
+        return {
+            "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+            "requestId": request_id,
+            "action": "error",
+            "payload": {"code": code, "detail": _bounded_public_detail(self.detail)},
+        }
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -574,7 +1015,9 @@ __all__ = [
     "DETAILED_PROTOCOL_VERSION",
     "LEGACY_PROTOCOL_VERSION",
     "MAX_MESSAGE_BYTES",
+    "MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES",
     "PROTOCOL_VERSION",
+    "SOURCE_MANAGEMENT_PROTOCOL_VERSION",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "STABLE_TAG",
     "TRUSTED_IMAGE_REPOSITORY",
@@ -582,6 +1025,11 @@ __all__ = [
     "InstalledState",
     "ProtocolError",
     "ResolvedImage",
+    "SourceManagementCapability",
+    "SourceManagementErrorResponse",
+    "SourceManagementOperation",
+    "SourceManagementRequest",
+    "SourceManagementResponse",
     "StateError",
     "UpdateDiscovery",
     "UpdateSnapshot",

@@ -281,6 +281,83 @@ describe('CommanderStore', () => {
     expect(store.leftPanel().selectedItems.has('/beta.txt')).toBe(false);
   });
 
+  it('resets the next Shift+Arrow anchor after sorting changes visible order', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.moveCursor('left', 2);
+    store.moveCursor('left', -1, true);
+
+    store.sortBy('left', 'name');
+
+    expect(store.leftPanel().cursorIndex).toBe(1);
+    expect(store.leftPanel().selectionAnchor).toBe(1);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/beta.txt', '/gamma.txt']);
+
+    store.moveCursor('left', 1, true);
+
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/alpha.txt', '/beta.txt']);
+  });
+
+  it('resets the next Shift+Arrow anchor after filtering clamps, clears, and hides all rows', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.moveCursor('left', 1);
+    store.moveCursor('left', 1, true);
+
+    store.setFilter('left', 'alpha');
+
+    expect(store.leftPanel().cursorIndex).toBe(0);
+    expect(store.leftPanel().selectionAnchor).toBe(0);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/beta.txt', '/gamma.txt']);
+
+    store.setFilter('left', '');
+    expect(store.leftPanel().cursorIndex).toBe(0);
+    expect(store.leftPanel().selectionAnchor).toBe(0);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/beta.txt', '/gamma.txt']);
+
+    store.setFilter('left', 'no-match');
+    expect(store.leftPanel().cursorIndex).toBe(-1);
+    expect(store.leftPanel().selectionAnchor).toBeNull();
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/beta.txt', '/gamma.txt']);
+
+    store.setFilter('left', '');
+    expect(store.leftPanel().cursorIndex).toBe(0);
+    expect(store.leftPanel().selectionAnchor).toBe(0);
+
+    store.moveCursor('left', 1, true);
+
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/alpha.txt', '/beta.txt']);
+  });
+
+  it('uses a parent-row pointer click as the next Shift+Arrow anchor without selecting it', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/Folder', [entry('one.txt'), entry('two.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    await store.navigateTo('left', '/Folder');
+    store.selectWithPointer('left', 2, 'replace');
+
+    store.selectWithPointer('left', 0, 'replace');
+
+    expect(store.leftPanel().cursorIndex).toBe(0);
+    expect(store.leftPanel().selectionAnchor).toBe(0);
+    expect([...store.leftPanel().selectedItems]).toEqual(['/two.txt']);
+
+    store.moveCursor('left', 1, true);
+
+    expect([...store.leftPanel().selectedItems]).toEqual(['/one.txt']);
+  });
+
   it('anchors the first shifted cursor move and extends the inclusive visible range', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true, defaultRight: true }),

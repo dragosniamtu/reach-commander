@@ -278,7 +278,14 @@ export class CommanderStore {
     const sortDirection = state.sortColumn === column && state.sortDirection === 'ascending'
       ? 'descending'
       : 'ascending';
-    this.updatePanel(side, { ...state, sortColumn: column, sortDirection });
+    const next: PanelState = { ...state, sortColumn: column, sortDirection };
+    const rowCount = buildVisibleRows(next).length;
+    const cursorIndex = rowCount === 0 ? -1 : Math.min(Math.max(state.cursorIndex, 0), rowCount - 1);
+    this.updatePanel(side, {
+      ...next,
+      cursorIndex,
+      selectionAnchor: cursorIndex < 0 ? null : cursorIndex,
+    });
     this.persist();
   }
 
@@ -286,7 +293,11 @@ export class CommanderStore {
     const state = { ...this.panel(side)(), filter };
     const rowCount = buildVisibleRows(state).length;
     const cursorIndex = rowCount === 0 ? -1 : Math.min(Math.max(state.cursorIndex, 0), rowCount - 1);
-    this.updatePanel(side, { ...state, cursorIndex });
+    this.updatePanel(side, {
+      ...state,
+      cursorIndex,
+      selectionAnchor: cursorIndex < 0 ? null : cursorIndex,
+    });
     this.persist();
   }
 
@@ -380,7 +391,7 @@ export class CommanderStore {
     }
 
     if (row.isParent) {
-      this.updatePanel(side, { ...state, cursorIndex: rowIndex });
+      this.updatePanel(side, { ...state, cursorIndex: rowIndex, selectionAnchor: rowIndex });
       return;
     }
 

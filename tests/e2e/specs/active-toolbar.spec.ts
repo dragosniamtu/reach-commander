@@ -158,6 +158,7 @@ test("keeps the toolbar hierarchy clear at desktop widths", async ({
 
     const toolbar = page.getByRole("toolbar", { name: "Active panel tools" });
     const search = page.getByRole("searchbox", { name: "Search active panel" });
+    const themeSelector = page.getByTestId("theme-selector");
     await search.fill("*.txt");
     const clearSearch = page.getByTestId("toolbar-clear-search");
     const topActions = page.locator(".top-actions");
@@ -175,6 +176,12 @@ test("keeps the toolbar hierarchy clear at desktop widths", async ({
     expect(clearSearchBounds).not.toBeNull();
     expect(topActionsBounds).not.toBeNull();
     expect(metricsBounds).not.toBeNull();
+    await expect(themeSelector).toHaveValue("default");
+    await expect(themeSelector.locator("option")).toHaveText([
+      "Modern",
+      "Norton",
+      "Windows 95",
+    ]);
     expect(toolbarBounds!.x + toolbarBounds!.width).toBeLessThanOrEqual(
       metricsBounds!.x,
     );

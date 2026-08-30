@@ -226,12 +226,20 @@
     display: none !important;
   }
 }
+@media (max-width: 1280px) {
+  .read-mode {
+    display: none !important;
+  }
+}
 @media (max-width: 1120px) {
   .brand-block > div {
     display: none;
   }
-  .read-mode {
-    display: none !important;
+  .top-actions {
+    gap: 5px;
+  }
+  .theme-selector > span {
+    display: none;
   }
 }
 @media (max-width: 760px) {

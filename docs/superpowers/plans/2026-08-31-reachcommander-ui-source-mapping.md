@@ -16,6 +16,7 @@
 - Never execute browser-supplied commands, Compose fragments, image references, or environment values.
 - Preserve authentication, antiforgery, rate limiting, non-root runtime identity, update/reconfiguration recovery, and data persistence.
 - Initial support is installer-managed Ubuntu only; every other deployment reports unsupported.
+- Existing installs with an older helper must fail closed and instruct the administrator to rerun the latest installer once; do not claim that an image-only update upgraded root-owned host integration.
 - Do not push unless explicitly requested.
 
 ### Task 1: Strict source-management host protocol
@@ -69,7 +70,7 @@
 
 - [ ] Add failing tests for supported/unsupported capability, strict response parsing, request ID/version matching, active-operation blocking, concurrent request rejection, cancellation, and sanitized failures.
 - [ ] Add controller tests proving authentication fallback, antiforgery mutation enforcement, request validation, accepted/status responses, and unsupported deployments.
-- [ ] Implement platform-neutral interfaces and an unavailable gateway default; bind the Unix gateway only when the configured socket is enabled.
+- [ ] Implement platform-neutral interfaces and an unavailable gateway default; bind the Unix gateway only when the configured socket is enabled, and map old-helper protocol incompatibility to an explicit installer-upgrade capability reason.
 - [ ] Reuse the existing file-operation/update probes to prevent restarting during active work.
 - [ ] Run targeted and full backend tests on Windows; retain Linux-specific behavior behind abstractions.
 - [ ] Commit the backend slice.
@@ -97,7 +98,7 @@
 
 - [ ] Add browser acceptance for unsupported installs and a fake installer-managed successful RO/RW source transaction with restart/reconnect.
 - [ ] Prove generated source IDs, new source visibility, operation blocking, rollback messaging, and absence of Docker-socket mounts.
-- [ ] Document prerequisites, specific-path requirement, UID/GID permissions, read-only default, restart behavior, troubleshooting, and CLI fallback.
+- [ ] Document prerequisites, specific-path requirement, UID/GID permissions, read-only default, restart behavior, troubleshooting, CLI fallback, and the one-time latest-installer upgrade required by pre-feature host helpers.
 - [ ] Run complete backend matrices available locally, all Python/Bash installer gates, Angular/PWA/build gates, and full Chromium acceptance.
 - [ ] Review security boundaries and full implementation diff; fix findings before completion.
 - [ ] Commit documentation/acceptance changes and report without pushing.

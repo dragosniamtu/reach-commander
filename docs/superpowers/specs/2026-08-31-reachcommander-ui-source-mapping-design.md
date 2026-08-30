@@ -79,6 +79,12 @@ The existing JSON source catalog is intentionally not hot-reloaded. A successful
 - Responses and logs never include Compose contents, command output, runtime tokens, cookies, or unrelated host paths. The requested and canonical source path may appear only in root-owned diagnostics, not general API errors.
 - The helper fails closed on old/incompatible protocol versions and unsupported/manual deployments.
 
+## Installer compatibility
+
+The current image-only updater does not replace the root-owned helper, systemd unit, or management CLI. Therefore an existing installation whose helper predates the source-management protocol cannot gain this privileged capability from a container update alone. It must run the latest signed/checksummed installer once to upgrade the host integration; application data, configured sources, port, access mode, and update channel are preserved by the existing reconfiguration transaction. The UI reports this state explicitly instead of presenting a broken Add source action.
+
+New clean installations made from the source-management release include the compatible helper immediately. This release also records the host-helper capability/version in status and diagnostics so future work can add a separately verified host-integration update path without guessing from the container version.
+
 ## Testing
 
 Coverage will include:
@@ -89,7 +95,7 @@ Coverage will include:
 4. API authorization, antiforgery, rate limiting, unsupported deployment, active-operation blocking, and protocol mismatch;
 5. Angular dialog validation, RO/RW warning, unsupported state, restart/reconnect, success/error behavior, and source refresh;
 6. browser acceptance using a fake installer-managed host protocol without mounting the Docker socket;
-7. installer/package contracts and Ubuntu ShellCheck gates.
+7. old-helper capability messaging plus installer/package contracts and Ubuntu ShellCheck gates.
 
 ## What stays simple for now
 

@@ -132,8 +132,21 @@ _PUBLIC_SOURCE_OPERATION_DETAILS = {
     "rolledBack": "The source change was rolled back.",
     "failed": "The source-management operation could not be completed.",
 }
-_SOURCE_REASON_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_SOURCE_CAPABILITY_REASON_CODES = frozenset(_PUBLIC_SOURCE_CAPABILITY_DETAILS)
+_SOURCE_OPERATION_REASON_CODES = {
+    "accepted": frozenset({"accepted"}),
+    "validating": frozenset({"in_progress"}),
+    "applying": frozenset({"in_progress"}),
+    "restarting": frozenset({"in_progress"}),
+    "healthChecking": frozenset({"in_progress"}),
+    "completed": frozenset({"completed"}),
+    "rolledBack": frozenset({"rolled_back"}),
+    "failed": frozenset({"validation_failed", "source_management_failed"}),
+}
+_SOURCE_ERROR_RESPONSE_FIELDS = frozenset(
+    {"requestAction", "operationId", "code", "detail"}
+)
 _RFC3339_UTC = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
     r"(?:\.[0-9]{1,6})?Z$"
@@ -223,16 +236,59 @@ def _bounded_public_detail(value: object) -> str:
     return " ".join(clean.split())[:_MAX_DETAIL_CHARS]
 
 
-def _public_reason_code(value: object) -> str:
-    if not isinstance(value, str) or not _SOURCE_REASON_CODE.fullmatch(value):
+def _parse_public_timestamp(value: object) -> dt.datetime:
+    if not isinstance(value, str) or not _RFC3339_UTC.fullmatch(value):
+        raise ProtocolError("invalid_request", "The source-management timestamp is invalid.")
+    try:
+        return dt.datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as error:
+        raise ProtocolError(
+            "invalid_request", "The source-management timestamp is invalid."
+        ) from error
+
+
+def _public_timestamp(value: object) -> str:
+    _parse_public_timestamp(value)
+    assert isinstance(value, str)
+    return value
+
+
+def _capability_reason_code(supported: bool, value: object) -> str:
+    if not isinstance(value, str) or value not in _SOURCE_CAPABILITY_REASON_CODES:
+        raise ProtocolError("invalid_request", "The source-management reason code is invalid.")
+    if supported != (value == "supported"):
+        raise ProtocolError("invalid_request", "The source-management support state is invalid.")
+    return value
+
+
+def _operation_reason_code(phase: str, value: object) -> str:
+    if not isinstance(value, str) or value not in _SOURCE_OPERATION_REASON_CODES[phase]:
         raise ProtocolError("invalid_request", "The source-management reason code is invalid.")
     return value
 
 
-def _public_timestamp(value: object) -> str:
-    if not isinstance(value, str) or not _RFC3339_UTC.fullmatch(value):
-        raise ProtocolError("invalid_request", "The source-management timestamp is invalid.")
-    return value
+def _validate_response_correlation(
+    *,
+    request_id: str,
+    action: str,
+    operation_id: str | None,
+    expected_request_id: str | None,
+    expected_action: str | None,
+    expected_operation_id: str | None,
+) -> None:
+    if expected_request_id is not None and request_id != _canonical_uuid(
+        expected_request_id, subject="source-management request"
+    ):
+        raise ProtocolError("invalid_request", "The source-management response identifier does not match.")
+    if expected_action is not None:
+        if not isinstance(expected_action, str) or expected_action not in _SOURCE_ACTIONS:
+            raise ProtocolError("invalid_request", "The expected source-management action is invalid.")
+        if action != expected_action:
+            raise ProtocolError("invalid_request", "The source-management response action does not match.")
+    if expected_operation_id is not None:
+        expected = _canonical_uuid(expected_operation_id, subject="source operation")
+        if operation_id != expected:
+            raise ProtocolError("invalid_request", "The source-management response operation does not match.")
 
 
 def _public_capability_detail(supported: bool, reason_code: str) -> str:
@@ -336,7 +392,11 @@ class SourceManagementCapability:
     def __post_init__(self) -> None:
         if not isinstance(self.supported, bool):
             raise ProtocolError("invalid_request", "The source-management support state is invalid.")
-        object.__setattr__(self, "reason_code", _public_reason_code(self.reason_code))
+        object.__setattr__(
+            self,
+            "reason_code",
+            _capability_reason_code(self.supported, self.reason_code),
+        )
         if not isinstance(self.detail, str):
             raise ProtocolError("invalid_request", "The source-management detail is invalid.")
         object.__setattr__(
@@ -366,6 +426,8 @@ class SourceManagementOperation:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "operation_id", _canonical_uuid(self.operation_id, subject="source operation"))
+        if (self.source_id is None) != (self.display_name is None):
+            raise ProtocolError("invalid_request", "The source operation identity is invalid.")
         if self.source_id is not None and (
             not isinstance(self.source_id, str) or not _SOURCE_ID.fullmatch(self.source_id)
         ):
@@ -380,12 +442,22 @@ class SourceManagementOperation:
                 raise ProtocolError("invalid_request", "The source display name is invalid.")
         if not isinstance(self.phase, str) or self.phase not in _SOURCE_OPERATION_PHASES:
             raise ProtocolError("invalid_request", "The source operation phase is invalid.")
-        object.__setattr__(self, "reason_code", _public_reason_code(self.reason_code))
+        if self.phase == "completed" and self.source_id is None:
+            raise ProtocolError("invalid_request", "The completed source operation identity is invalid.")
+        object.__setattr__(
+            self,
+            "reason_code",
+            _operation_reason_code(self.phase, self.reason_code),
+        )
         if not isinstance(self.detail, str):
             raise ProtocolError("invalid_request", "The source-management detail is invalid.")
         object.__setattr__(self, "detail", _public_operation_detail(self.phase))
         object.__setattr__(self, "created_at", _public_timestamp(self.created_at))
         object.__setattr__(self, "updated_at", _public_timestamp(self.updated_at))
+        if _parse_public_timestamp(self.created_at) > _parse_public_timestamp(
+            self.updated_at
+        ):
+            raise ProtocolError("invalid_request", "The source operation timestamps are invalid.")
 
     def to_wire(self) -> dict[str, object]:
         return {
@@ -409,9 +481,17 @@ class SourceManagementResponse:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request_id", _canonical_uuid(self.request_id, subject="source-management request"))
-        if self.action == _SOURCE_STATUS_ACTION and self.capability is not None and self.operation is None:
+        if (
+            self.action == _SOURCE_STATUS_ACTION
+            and isinstance(self.capability, SourceManagementCapability)
+            and self.operation is None
+        ):
             return
-        if self.action in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION} and self.operation is not None and self.capability is None:
+        if (
+            self.action in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION}
+            and isinstance(self.operation, SourceManagementOperation)
+            and self.capability is None
+        ):
             return
         raise ProtocolError("invalid_request", "The source-management response is invalid.")
 
@@ -428,7 +508,11 @@ class SourceManagementResponse:
         return cls(request_id, action, operation=operation)
 
     def to_wire(self) -> dict[str, object]:
-        payload = self.capability.to_wire() if self.capability is not None else self.operation.to_wire()  # type: ignore[union-attr]
+        if self.capability is not None:
+            payload = self.capability.to_wire()
+        else:
+            assert self.operation is not None
+            payload = self.operation.to_wire()
         return {
             "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
             "requestId": self.request_id,
@@ -438,18 +522,26 @@ class SourceManagementResponse:
 
     @classmethod
     def parse(
-        cls, raw: bytes, *, expected_request_id: str | None = None
-    ) -> "SourceManagementResponse":
+        cls,
+        raw: bytes,
+        *,
+        expected_request_id: str | None = None,
+        expected_action: str | None = None,
+        expected_operation_id: str | None = None,
+    ) -> "SourceManagementResponse | SourceManagementErrorResponse":
         value = _parse_source_management_json(raw, message="response")
         if not isinstance(value, dict) or set(value) != _SOURCE_RESPONSE_FIELDS:
             raise ProtocolError("invalid_request", "The source-management response contains unexpected fields.")
         if value.get("protocolVersion") != SOURCE_MANAGEMENT_PROTOCOL_VERSION:
             raise ProtocolError("protocol_incompatible", "The source-management host protocol is incompatible.")
+        if value.get("action") == "error":
+            return SourceManagementErrorResponse._from_wire_value(
+                value,
+                expected_request_id=expected_request_id,
+                expected_action=expected_action,
+                expected_operation_id=expected_operation_id,
+            )
         request_id = _canonical_uuid(value.get("requestId"), subject="source-management request")
-        if expected_request_id is not None and request_id != _canonical_uuid(
-            expected_request_id, subject="source-management request"
-        ):
-            raise ProtocolError("invalid_request", "The source-management response identifier does not match.")
         action = value.get("action")
         payload = value.get("payload")
         if not isinstance(payload, dict):
@@ -457,15 +549,26 @@ class SourceManagementResponse:
         if action == _SOURCE_STATUS_ACTION:
             if set(payload) != _SOURCE_CAPABILITY_FIELDS:
                 raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
-            return cls.from_capability(
+            response = cls.from_capability(
                 request_id,
                 SourceManagementCapability(
                     payload.get("supported"), payload.get("reasonCode"), payload.get("detail")
                 ),
             )
+            if payload.get("detail") != response.capability.detail:
+                raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
+            _validate_response_correlation(
+                request_id=request_id,
+                action=action,
+                operation_id=None,
+                expected_request_id=expected_request_id,
+                expected_action=expected_action,
+                expected_operation_id=expected_operation_id,
+            )
+            return response
         if action not in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION} or set(payload) != _SOURCE_OPERATION_RESPONSE_FIELDS:
             raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
-        return cls.from_operation(
+        response = cls.from_operation(
             request_id,
             action,
             SourceManagementOperation(
@@ -479,6 +582,18 @@ class SourceManagementResponse:
                 updated_at=payload.get("updatedAt"),
             ),
         )
+        assert response.operation is not None
+        if payload.get("detail") != response.operation.detail:
+            raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
+        _validate_response_correlation(
+            request_id=request_id,
+            action=action,
+            operation_id=response.operation.operation_id,
+            expected_request_id=expected_request_id,
+            expected_action=expected_action,
+            expected_operation_id=expected_operation_id,
+        )
+        return response
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -486,8 +601,26 @@ class SourceManagementErrorResponse:
     request_id: str | None
     code: str
     detail: str
+    request_action: str = _SOURCE_STATUS_ACTION
+    operation_id: str | None = None
 
     def __post_init__(self) -> None:
+        if self.request_id is not None:
+            object.__setattr__(
+                self,
+                "request_id",
+                _canonical_uuid(self.request_id, subject="source-management request"),
+            )
+        if not isinstance(self.request_action, str) or self.request_action not in _SOURCE_ACTIONS:
+            raise ProtocolError("invalid_request", "The source-management error action is invalid.")
+        if self.operation_id is not None:
+            object.__setattr__(
+                self,
+                "operation_id",
+                _canonical_uuid(self.operation_id, subject="source operation"),
+            )
+        if self.operation_id is not None and self.request_action != _SOURCE_OPERATION_ACTION:
+            raise ProtocolError("invalid_request", "The source-management error operation is invalid.")
         code = (
             self.code
             if isinstance(self.code, str) and self.code in _PUBLIC_SOURCE_ERROR_CODES
@@ -500,10 +633,21 @@ class SourceManagementErrorResponse:
 
     @classmethod
     def from_error(
-        cls, request_id: str | None, error: ProtocolError
+        cls,
+        request_id: str | None,
+        error: ProtocolError,
+        *,
+        request_action: str = _SOURCE_STATUS_ACTION,
+        operation_id: str | None = None,
     ) -> "SourceManagementErrorResponse":
         code = error.code if error.code in _PUBLIC_SOURCE_ERROR_CODES else "source_management_failed"
-        return cls(request_id, code, error.detail)
+        return cls(
+            request_id,
+            code,
+            error.detail,
+            request_action=request_action,
+            operation_id=operation_id,
+        )
 
     def to_wire(self) -> dict[str, object]:
         request_id = (
@@ -516,8 +660,82 @@ class SourceManagementErrorResponse:
             "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
             "requestId": request_id,
             "action": "error",
-            "payload": {"code": code, "detail": _bounded_public_detail(self.detail)},
+            "payload": {
+                "requestAction": self.request_action,
+                "operationId": self.operation_id,
+                "code": code,
+                "detail": _bounded_public_detail(self.detail),
+            },
         }
+
+    @classmethod
+    def parse(
+        cls,
+        raw: bytes,
+        *,
+        expected_request_id: str | None = None,
+        expected_action: str | None = None,
+        expected_operation_id: str | None = None,
+    ) -> "SourceManagementErrorResponse":
+        value = _parse_source_management_json(raw, message="response")
+        if not isinstance(value, dict) or set(value) != _SOURCE_RESPONSE_FIELDS:
+            raise ProtocolError("invalid_request", "The source-management response contains unexpected fields.")
+        if value.get("protocolVersion") != SOURCE_MANAGEMENT_PROTOCOL_VERSION:
+            raise ProtocolError("protocol_incompatible", "The source-management host protocol is incompatible.")
+        return cls._from_wire_value(
+            value,
+            expected_request_id=expected_request_id,
+            expected_action=expected_action,
+            expected_operation_id=expected_operation_id,
+        )
+
+    @classmethod
+    def _from_wire_value(
+        cls,
+        value: Mapping[str, object],
+        *,
+        expected_request_id: str | None,
+        expected_action: str | None,
+        expected_operation_id: str | None,
+    ) -> "SourceManagementErrorResponse":
+        if value.get("action") != "error":
+            raise ProtocolError("invalid_request", "The source-management response is not an error.")
+        request_id_value = value.get("requestId")
+        request_id = (
+            _canonical_uuid(request_id_value, subject="source-management request")
+            if request_id_value is not None
+            else None
+        )
+        payload = value.get("payload")
+        if not isinstance(payload, dict) or set(payload) != _SOURCE_ERROR_RESPONSE_FIELDS:
+            raise ProtocolError("invalid_request", "The source-management error payload is invalid.")
+        if (
+            not isinstance(payload.get("code"), str)
+            or payload.get("code") not in _PUBLIC_SOURCE_ERROR_CODES
+        ):
+            raise ProtocolError("invalid_request", "The source-management error payload is invalid.")
+        error = cls(
+            request_id,
+            payload.get("code"),
+            payload.get("detail"),
+            request_action=payload.get("requestAction"),
+            operation_id=payload.get("operationId"),
+        )
+        if payload.get("detail") != error.detail:
+            raise ProtocolError("invalid_request", "The source-management error payload is invalid.")
+        if error.request_id is None:
+            if expected_request_id is not None:
+                raise ProtocolError("invalid_request", "The source-management response identifier does not match.")
+        else:
+            _validate_response_correlation(
+                request_id=error.request_id,
+                action=error.request_action,
+                operation_id=error.operation_id,
+                expected_request_id=expected_request_id,
+                expected_action=expected_action,
+                expected_operation_id=expected_operation_id,
+            )
+        return error
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

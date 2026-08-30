@@ -374,6 +374,196 @@ class SourceManagementProtocolTests(unittest.TestCase):
         self.assertNotIn("Command output", wire)
         self.assertNotIn("runtime token", wire)
 
+    def test_source_management_response_parser_discriminates_and_correlates_error_envelopes(self) -> None:
+        request_id = str(uuid.uuid4())
+        operation_id = str(uuid.uuid4())
+        error_wire = {
+            "protocolVersion": 5,
+            "requestId": request_id,
+            "action": "error",
+            "payload": {
+                "requestAction": "getOperation",
+                "operationId": operation_id,
+                "code": "validation_failed",
+                "detail": "The source folder could not be accepted.",
+            },
+        }
+
+        parsed = SourceManagementResponse.parse(
+            json.dumps(error_wire).encode(),
+            expected_request_id=request_id,
+            expected_action="getOperation",
+            expected_operation_id=operation_id,
+        )
+        self.assertIsInstance(parsed, SourceManagementErrorResponse)
+        assert isinstance(parsed, SourceManagementErrorResponse)
+        self.assertEqual("getOperation", parsed.request_action)
+        self.assertEqual(operation_id, parsed.operation_id)
+        for expected_action, expected_operation_id in (
+            ("status", operation_id),
+            ("getOperation", str(uuid.uuid4())),
+        ):
+            with self.subTest(
+                error_expected_action=expected_action,
+                error_expected_operation_id=expected_operation_id,
+            ):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementResponse.parse(
+                        json.dumps(error_wire).encode(),
+                        expected_request_id=request_id,
+                        expected_action=expected_action,
+                        expected_operation_id=expected_operation_id,
+                    )
+
+        accepted = SourceManagementOperation(
+            operation_id=operation_id,
+            source_id="archive",
+            display_name="Archive",
+            phase="accepted",
+            reason_code="accepted",
+            detail="ignored",
+            created_at="2026-08-31T10:00:00Z",
+            updated_at="2026-08-31T10:00:00Z",
+        )
+        success_wire = SourceManagementResponse.from_operation(
+            request_id, "getOperation", accepted
+        ).to_wire()
+        self.assertIsInstance(
+            SourceManagementResponse.parse(
+                json.dumps(success_wire).encode(),
+                expected_request_id=request_id,
+                expected_action="getOperation",
+                expected_operation_id=operation_id,
+            ),
+            SourceManagementResponse,
+        )
+        for expected_action, expected_operation_id in (
+            ("status", operation_id),
+            ("getOperation", str(uuid.uuid4())),
+        ):
+            with self.subTest(
+                expected_action=expected_action,
+                expected_operation_id=expected_operation_id,
+            ):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementResponse.parse(
+                        json.dumps(success_wire).encode(),
+                        expected_request_id=request_id,
+                        expected_action=expected_action,
+                        expected_operation_id=expected_operation_id,
+                    )
+
+    def test_source_management_rejects_nonpublic_reasons_and_semantically_invalid_operations(self) -> None:
+        invalid_capabilities = (
+            (True, "session_token_abc123"),
+            (False, "supported"),
+            (True, "unsupported_deployment"),
+        )
+        for supported, reason_code in invalid_capabilities:
+            with self.subTest(supported=supported, reason_code=reason_code):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementCapability(supported, reason_code, "ignored")
+
+        invalid_operations = (
+            {
+                "phase": "accepted",
+                "reason_code": "session_token_abc123",
+                "source_id": "archive",
+                "display_name": "Archive",
+            },
+            {
+                "phase": "accepted",
+                "reason_code": "accepted",
+                "source_id": None,
+                "display_name": "Archive",
+            },
+            {
+                "phase": "failed",
+                "reason_code": "validation_failed",
+                "source_id": "archive",
+                "display_name": None,
+            },
+            {
+                "phase": "completed",
+                "reason_code": "completed",
+                "source_id": "archive",
+                "display_name": "Archive",
+                "created_at": "2026-02-30T10:00:00Z",
+            },
+            {
+                "phase": "completed",
+                "reason_code": "completed",
+                "source_id": "archive",
+                "display_name": "Archive",
+                "created_at": "2026-08-31T10:00:01Z",
+                "updated_at": "2026-08-31T10:00:00Z",
+            },
+        )
+        for values in invalid_operations:
+            with self.subTest(values=values):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementOperation(
+                        operation_id=str(uuid.uuid4()),
+                        source_id=values["source_id"],
+                        display_name=values["display_name"],
+                        phase=values["phase"],
+                        reason_code=values["reason_code"],
+                        detail="ignored",
+                        created_at=values.get("created_at", "2026-08-31T10:00:00Z"),
+                        updated_at=values.get("updated_at", "2026-08-31T10:00:00Z"),
+                    )
+
+    def test_source_management_parser_rejects_nested_duplicates_and_round_trips_errors(self) -> None:
+        request_id = str(uuid.uuid4())
+        operation_id = str(uuid.uuid4())
+        nested_duplicates = (
+            (
+                '{"protocolVersion":5,"requestId":"'
+                + request_id
+                + '","action":"status","payload":{"supported":true,"reasonCode":"supported","detail":"Source management is available.","detail":"Source management is available."}}'
+            ).encode(),
+            (
+                '{"protocolVersion":5,"requestId":"'
+                + request_id
+                + '","action":"getOperation","payload":{"operationId":"'
+                + operation_id
+                + '","sourceId":"archive","displayName":"Archive","phase":"accepted","reasonCode":"accepted","detail":"Source change accepted.","createdAt":"2026-08-31T10:00:00Z","updatedAt":"2026-08-31T10:00:00Z","phase":"accepted"}}'
+            ).encode(),
+            (
+                '{"protocolVersion":5,"requestId":"'
+                + request_id
+                + '","action":"error","payload":{"requestAction":"status","operationId":null,"code":"unsupported","detail":"Source management is unavailable on this installation.","code":"unsupported"}}'
+            ).encode(),
+        )
+        for raw in nested_duplicates:
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(ProtocolError, "duplicate"):
+                    SourceManagementResponse.parse(raw)
+
+        error = SourceManagementErrorResponse(
+            request_id,
+            "validation_failed",
+            "ignored",
+            request_action="getOperation",
+            operation_id=operation_id,
+        )
+        parsed = SourceManagementResponse.parse(
+            json.dumps(error.to_wire()).encode(),
+            expected_request_id=request_id,
+            expected_action="getOperation",
+            expected_operation_id=operation_id,
+        )
+        self.assertEqual(error, parsed)
+        self.assertEqual(
+            error,
+            SourceManagementErrorResponse.parse(
+                json.dumps(error.to_wire()).encode(),
+                expected_request_id=request_id,
+                expected_action="getOperation",
+                expected_operation_id=operation_id,
+            ),
+        )
+
 
 class UpdaterDiscoveryTests(unittest.TestCase):
     def state(

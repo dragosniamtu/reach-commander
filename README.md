@@ -42,7 +42,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Dense details tables with directories first, sortable columns, capacity, read-only, and unavailable-source states.
 - Centralized Total Commander-style keyboard handling and a permanent function-key bar.
 - A contextual top toolbar for Multi-Rename, Add files, and active-panel search.
-- A persistent Norton Commander-inspired theme, activated from the top toolbar and stored only in the current browser or installed PWA.
+- Three persistent interface themes—Modern, Norton, and Windows 95—selected from the top toolbar and stored only in the current browser or installed PWA.
 - Explicit `RO`, `RW`, and unavailable source states.
 - Read-only source discovery, directory listing, and file-information APIs.
 - F4 single-file and single-folder rename with a live server-authoritative preview, literal complete-name semantics, and conflict blocking.
@@ -227,9 +227,9 @@ The host directory must be writable by UID/GID `1000:1000`. Never mount `/`, a h
 
 An optional USB source is already shown in `config/sources.json`; because it has no default bind mount, it demonstrates the disabled/unavailable state. The administrator remains responsible for mounting removable media on the host and binding it to `/sources/usb:ro`.
 
-## Norton Commander theme
+## Themes
 
-Use the **Norton** control in the right side of the top toolbar to switch between ReachCommander's default interface and a cobalt-blue, cyan-framed, monospace theme inspired by classic Norton Commander. The preference stays in the current browser or installed PWA; it is not stored in the administrator account or sent to the server.
+Use the theme selector at the right side of the top toolbar to choose **Modern**, **Norton**, or **Windows 95**. Modern is ReachCommander's default interface; Norton uses a cobalt-blue, cyan-framed, monospace treatment inspired by classic Norton Commander; and Windows 95 uses an original CSS-inspired treatment of the era's familiar gray controls, beveled surfaces, and desktop typography. The preference stays only in the current browser or installed PWA; it is not stored in the administrator account or sent to the server. The Windows 95 theme uses no Microsoft assets.
 
 ## Hardware monitoring
 

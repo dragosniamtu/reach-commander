@@ -331,7 +331,7 @@ export class CommanderShellComponent implements OnInit {
     const side = this.store.activePanel();
     switch (command.type) {
       case 'move-cursor':
-        this.store.moveCursor(side, command.amount);
+        this.store.moveCursor(side, command.amount, command.extendSelection);
         break;
       case 'move-page':
         this.store.moveCursorPage(side, command.direction);

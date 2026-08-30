@@ -12,7 +12,7 @@ import {
 } from './commander.models';
 import { PanelPersistence, PersistedPanelState } from './panel-persistence';
 import { normalizeLogicalPath, parentLogicalPath } from './path-utils';
-import { buildVisibleRows } from './file-table.viewmodel';
+import { buildVisibleRows, FileTableRow } from './file-table.viewmodel';
 import { MultiRenameContext } from './multi-rename.models';
 import { SingleRenameCompletion, SingleRenameContext } from './single-rename.models';
 import {
@@ -290,7 +290,7 @@ export class CommanderStore {
     this.persist();
   }
 
-  moveCursor(side: PanelSide, amount: number): void {
+  moveCursor(side: PanelSide, amount: number, extendSelection = false): void {
     const state = this.panel(side)();
     const rowCount = buildVisibleRows(state).length;
     if (rowCount === 0) {
@@ -298,11 +298,27 @@ export class CommanderStore {
       return;
     }
 
+    const previousCursorIndex = state.cursorIndex < 0 ? 0 : state.cursorIndex;
     const cursorIndex = Math.min(
-      Math.max((state.cursorIndex < 0 ? 0 : state.cursorIndex) + amount, 0),
+      Math.max(previousCursorIndex + amount, 0),
       rowCount - 1,
     );
-    this.updatePanel(side, { ...state, cursorIndex });
+    if (cursorIndex === state.cursorIndex) {
+      return;
+    }
+
+    if (!extendSelection) {
+      this.updatePanel(side, { ...state, cursorIndex, selectionAnchor: cursorIndex });
+      return;
+    }
+
+    const selectionAnchor = state.selectionAnchor ?? previousCursorIndex;
+    this.updatePanel(side, {
+      ...state,
+      cursorIndex,
+      selectedItems: this.selectedRange(buildVisibleRows(state), selectionAnchor, cursorIndex),
+      selectionAnchor,
+    });
   }
 
   moveCursorPage(side: PanelSide, direction: -1 | 1): void {
@@ -371,11 +387,7 @@ export class CommanderStore {
         : selectedItems.add(row.relativePath);
     } else {
       const anchor = state.selectionAnchor ?? rowIndex;
-      selectedItems = new Set(
-        rows.slice(Math.min(anchor, rowIndex), Math.max(anchor, rowIndex) + 1)
-          .filter((candidate) => !candidate.isParent)
-          .map((candidate) => candidate.relativePath),
-      );
+      selectedItems = this.selectedRange(rows, anchor, rowIndex);
     }
 
     this.updatePanel(side, {
@@ -739,6 +751,18 @@ export class CommanderStore {
 
   private updatePanel(side: PanelSide, state: PanelState): void {
     this.panel(side).set(state);
+  }
+
+  private selectedRange(
+    rows: readonly FileTableRow[],
+    anchor: number,
+    cursorIndex: number,
+  ): Set<string> {
+    return new Set(
+      rows.slice(Math.min(anchor, cursorIndex), Math.max(anchor, cursorIndex) + 1)
+        .filter((row) => !row.isParent)
+        .map((row) => row.relativePath),
+    );
   }
 
   private persist(): void {

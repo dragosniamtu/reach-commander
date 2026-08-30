@@ -19,6 +19,8 @@ describe('CommanderKeyboardService', () => {
   it.each([
     ['ArrowUp', {}, { type: 'move-cursor', amount: -1 }],
     ['ArrowDown', {}, { type: 'move-cursor', amount: 1 }],
+    ['ArrowUp', { shiftKey: true }, { type: 'move-cursor', amount: -1, extendSelection: true }],
+    ['ArrowDown', { shiftKey: true }, { type: 'move-cursor', amount: 1, extendSelection: true }],
     ['PageUp', {}, { type: 'move-page', direction: -1 }],
     ['PageDown', {}, { type: 'move-page', direction: 1 }],
     ['Home', {}, { type: 'move-boundary', boundary: 'home' }],
@@ -53,17 +55,29 @@ describe('CommanderKeyboardService', () => {
     const escape = keyEvent('Escape');
     const focusSearch = keyEvent('f', { ctrlKey: true });
     const multiRename = keyEvent('m', { ctrlKey: true });
+    const shiftDown = keyEvent('ArrowDown', { shiftKey: true });
 
     input.dispatchEvent(letter);
     input.dispatchEvent(focusSearch);
     input.dispatchEvent(multiRename);
+    input.dispatchEvent(shiftDown);
     input.dispatchEvent(escape);
 
     expect(letter.defaultPrevented).toBe(false);
     expect(focusSearch.defaultPrevented).toBe(false);
     expect(multiRename.defaultPrevented).toBe(false);
+    expect(shiftDown.defaultPrevented).toBe(false);
     expect(commands).toEqual([{ type: 'escape' }]);
     input.remove();
+  });
+
+  it('leaves Shift shortcuts other than vertical cursor movement unhandled', () => {
+    const event = keyEvent('PageDown', { shiftKey: true });
+
+    document.dispatchEvent(event);
+
+    expect(commands).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('does not dispatch after stop and start is idempotent', () => {

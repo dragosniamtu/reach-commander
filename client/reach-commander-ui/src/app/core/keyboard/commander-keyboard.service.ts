@@ -46,6 +46,10 @@ export function mapKeyboardEvent(event: KeyboardEvent): CommanderCommand | null 
     return event.key === 'Escape' ? { type: 'escape' } : null;
   }
 
+  if (event.shiftKey && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+    return null;
+  }
+
   if (event.ctrlKey && !event.altKey && !event.metaKey) {
     switch (event.key.toLocaleLowerCase()) {
       case 'a':
@@ -73,9 +77,9 @@ export function mapKeyboardEvent(event: KeyboardEvent): CommanderCommand | null 
 
   switch (event.key) {
     case 'ArrowUp':
-      return { type: 'move-cursor', amount: -1 };
+      return { type: 'move-cursor', amount: -1, ...(event.shiftKey ? { extendSelection: true } : {}) };
     case 'ArrowDown':
-      return { type: 'move-cursor', amount: 1 };
+      return { type: 'move-cursor', amount: 1, ...(event.shiftKey ? { extendSelection: true } : {}) };
     case 'PageUp':
       return { type: 'move-page', direction: -1 };
     case 'PageDown':

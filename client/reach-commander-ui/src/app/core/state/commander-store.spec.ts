@@ -281,6 +281,105 @@ describe('CommanderStore', () => {
     expect(store.leftPanel().selectedItems.has('/beta.txt')).toBe(false);
   });
 
+  it('anchors the first shifted cursor move and extends the inclusive visible range', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    store.moveCursor('left', 1, true);
+    store.moveCursor('left', 1, true);
+
+    expect(store.leftPanel().cursorIndex).toBe(2);
+    expect(store.leftPanel().selectionAnchor).toBe(0);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual([
+      '/alpha.txt',
+      '/beta.txt',
+      '/gamma.txt',
+    ]);
+  });
+
+  it('shrinks a shifted cursor range when movement reverses direction', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    store.moveCursor('left', 1, true);
+    store.moveCursor('left', 1, true);
+    store.moveCursor('left', -1, true);
+
+    expect(store.leftPanel().cursorIndex).toBe(1);
+    expect(store.leftPanel().selectionAnchor).toBe(0);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/alpha.txt', '/beta.txt']);
+  });
+
+  it('uses an ordinary cursor destination as the next range anchor without clearing selection', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt'), entry('gamma.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    store.selectWithPointer('left', 0, 'replace');
+
+    store.moveCursor('left', 1);
+    store.moveCursor('left', 1, true);
+
+    expect(store.leftPanel().selectionAnchor).toBe(1);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/beta.txt', '/gamma.txt']);
+  });
+
+  it('clamps shifted cursor movement without inventing a range at a boundary', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    store.moveCursor('left', -1, true);
+
+    expect(store.leftPanel().cursorIndex).toBe(0);
+    expect(store.leftPanel().selectionAnchor).toBeNull();
+    expect(store.leftPanel().selectedItems.size).toBe(0);
+  });
+
+  it('keeps shifted cursor ranges scoped to their pane', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [entry('alpha.txt'), entry('beta.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    const rightBefore = store.rightPanel();
+
+    store.moveCursor('left', 1, true);
+
+    expect([...store.leftPanel().selectedItems]).toEqual(['/alpha.txt', '/beta.txt']);
+    expect(store.rightPanel()).toBe(rightBefore);
+  });
+
+  it('excludes the synthetic parent row from shifted cursor ranges', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/Folder', [entry('one.txt'), entry('two.txt')]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    await store.navigateTo('left', '/Folder');
+
+    store.moveCursor('left', 1, true);
+    store.moveCursor('left', 1, true);
+
+    expect(store.leftPanel().cursorIndex).toBe(2);
+    expect([...store.leftPanel().selectedItems].sort()).toEqual(['/one.txt', '/two.txt']);
+  });
+
   it('clamps the cursor after filtering and keeps the opposite pane untouched', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true, defaultRight: true }),

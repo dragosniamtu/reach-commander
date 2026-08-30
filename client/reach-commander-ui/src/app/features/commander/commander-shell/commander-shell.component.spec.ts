@@ -59,6 +59,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     refreshAfterRename: vi.fn(() => Promise.resolve()),
     captureFileOperationContext: vi.fn((_kind: 'copy' | 'move'): any => null),
     activatePanel: vi.fn(),
+    moveCursor: vi.fn(),
     setFilter: vi.fn(),
     openEntry: vi.fn(() => Promise.resolve()),
   };
@@ -317,6 +318,16 @@ describe('CommanderShellComponent system metrics integration', () => {
 
     expect(fixture.componentInstance.metricsOpen()).toBe(false);
     expect(metrics.start).toHaveBeenCalledOnce();
+  });
+
+  it('routes shifted cursor movement to the active pane with range-selection intent', () => {
+    fixture.componentInstance.execute({
+      type: 'move-cursor',
+      amount: 1,
+      extendSelection: true,
+    });
+
+    expect(store.moveCursor).toHaveBeenCalledWith('left', 1, true);
   });
 
   it('captures the active panel destination and refreshes only that panel after completion', () => {

@@ -1,22 +1,54 @@
-import { expect, test } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
+import { systemUpdateFixture } from '../support/seed-fixtures';
 
 const storageKey = 'reachcommander.theme.v1';
+const systemUpdateEndpoint = '**/api/system-update**';
 
-test.beforeEach(async ({ page }) => {
-  await page.goto('/');
-  await page.evaluate((key) => localStorage.removeItem(key), storageKey);
-  await page.reload();
-});
+test.use({ serviceWorkers: 'block' });
 
-test('applies and persists Windows 95 chrome across the commander and authentication screen', async ({
-  page,
-}, testInfo) => {
+function captureConsoleErrors(page: Page): string[] {
   const consoleErrors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') {
       consoleErrors.push(message.text());
     }
   });
+  return consoleErrors;
+}
+
+async function resetTheme(page: Page): Promise<void> {
+  await page.goto('/');
+  await page.evaluate((key) => localStorage.removeItem(key), storageKey);
+  await page.reload();
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string): number => {
+    const channels = color.match(/\d+/g)?.slice(0, 3).map(Number);
+    if (!channels || channels.length !== 3) {
+      throw new Error(`Expected an RGB color, received ${color}`);
+    }
+    const [red, green, blue] = channels.map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.03928
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (
+    (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+  );
+}
+
+test('applies and persists Windows 95 chrome across the commander and authentication screen', async ({
+  page,
+}, testInfo) => {
+  const consoleErrors = captureConsoleErrors(page);
+  await resetTheme(page);
 
   const root = page.locator('html');
   const selector = page.getByTestId('theme-selector');
@@ -39,30 +71,6 @@ test('applies and persists Windows 95 chrome across the commander and authentica
     title: '#000080',
     selection: '#000080',
   });
-
-  const toolbarButtonStyles = await page
-    .locator('app-active-panel-toolbar .toolbar button')
-    .first()
-    .evaluate((element) => {
-      const styles = getComputedStyle(element);
-      return {
-        radius: styles.borderRadius,
-        borderTop: styles.borderTopColor,
-        borderRight: styles.borderRightColor,
-        borderBottom: styles.borderBottomColor,
-        borderLeft: styles.borderLeftColor,
-        boxShadow: styles.boxShadow,
-      };
-    });
-  expect(toolbarButtonStyles).toMatchObject({
-    radius: '0px',
-    borderTop: 'rgb(255, 255, 255)',
-    borderRight: 'rgb(0, 0, 0)',
-    borderBottom: 'rgb(0, 0, 0)',
-    borderLeft: 'rgb(255, 255, 255)',
-  });
-  expect(toolbarButtonStyles.boxShadow).toContain('rgb(223, 223, 223)');
-  expect(toolbarButtonStyles.boxShadow).toContain('rgb(128, 128, 128)');
 
   expect(
     await page
@@ -106,16 +114,112 @@ test('applies and persists Windows 95 chrome across the commander and authentica
   expect(consoleErrors).toEqual([]);
 });
 
-test('keeps both Windows 95 panes usable at compact width', async ({ page }, testInfo) => {
-  const consoleErrors: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error') {
-      consoleErrors.push(message.text());
-    }
+test('keeps raised Windows 95 header controls and chips dark on gray', async ({ page }) => {
+  const consoleErrors = captureConsoleErrors(page);
+  await resetTheme(page);
+  await page.getByTestId('theme-selector').selectOption('windows95');
+
+  const toolbarButtonStyles = await page
+    .getByTestId('toolbar-trash')
+    .evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        radius: styles.borderRadius,
+        borderTop: styles.borderTopColor,
+        borderRight: styles.borderRightColor,
+        borderBottom: styles.borderBottomColor,
+        borderLeft: styles.borderLeftColor,
+        boxShadow: styles.boxShadow,
+        color: styles.color,
+        background: styles.backgroundColor,
+      };
+    });
+  expect(toolbarButtonStyles).toMatchObject({
+    radius: '0px',
+    borderTop: 'rgb(255, 255, 255)',
+    borderRight: 'rgb(0, 0, 0)',
+    borderBottom: 'rgb(0, 0, 0)',
+    borderLeft: 'rgb(255, 255, 255)',
+    color: 'rgb(0, 0, 0)',
+    background: 'rgb(192, 192, 192)',
+  });
+  expect(toolbarButtonStyles.boxShadow).toContain('rgb(223, 223, 223)');
+  expect(toolbarButtonStyles.boxShadow).toContain('rgb(128, 128, 128)');
+
+  const chipStyles = await page.evaluate(() => {
+    const readColor = (selector: string): string => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) {
+        throw new Error(`Missing representative Windows 95 element: ${selector}`);
+      }
+      return getComputedStyle(element).color;
+    };
+    return {
+      title: readColor('[data-testid="active-panel-context"] strong'),
+      path: readColor('[data-testid="active-panel-context"] code'),
+    };
+  });
+  expect(chipStyles).toEqual({
+    title: 'rgb(0, 0, 0)',
+    path: 'rgb(32, 32, 32)',
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
+test('keeps Windows 95 small status and semantic text readable on gray', async ({ page }) => {
+  const consoleErrors = captureConsoleErrors(page);
+  await resetTheme(page);
+  await page.getByTestId('theme-selector').selectOption('windows95');
+
+  expect(
+    await page.locator('html').evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        mutedToken: styles.getPropertyValue('--text-4').trim(),
+        success: styles.getPropertyValue('--success').trim(),
+        warning: styles.getPropertyValue('--warning').trim(),
+      };
+    }),
+  ).toEqual({
+    mutedToken: '#606060',
+    success: '#005a00',
+    warning: '#5a4a00',
   });
 
+  const statusStyles = await page.evaluate(() => {
+    const read = (selector: string) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) {
+        throw new Error(`Missing representative Windows 95 element: ${selector}`);
+      }
+      const styles = getComputedStyle(element);
+      return { color: styles.color, background: styles.backgroundColor };
+    };
+    return {
+      panelStatus: read('[data-testid="left-panel"] .panel-status'),
+      writablePolicy: read('[data-testid="left-panel"] [data-testid="source-downloads"] .writable'),
+      readOnlyPolicy: read('[data-testid="left-panel"] [data-testid="source-archive"] .read-only'),
+    };
+  });
+  expect(
+    contrastRatio(statusStyles.panelStatus.color, statusStyles.panelStatus.background),
+  ).toBeGreaterThanOrEqual(4.5);
+  expect(statusStyles.writablePolicy.color).toBe('rgb(0, 90, 0)');
+  expect(
+    contrastRatio(statusStyles.writablePolicy.color, statusStyles.writablePolicy.background),
+  ).toBeGreaterThanOrEqual(4.5);
+  expect(statusStyles.readOnlyPolicy.color).toBe('rgb(90, 74, 0)');
+  expect(
+    contrastRatio(statusStyles.readOnlyPolicy.color, statusStyles.readOnlyPolicy.background),
+  ).toBeGreaterThanOrEqual(4.5);
+  expect(consoleErrors).toEqual([]);
+});
+
+test('keeps both Windows 95 panes usable at compact width', async ({ page }, testInfo) => {
+  const consoleErrors = captureConsoleErrors(page);
+
   await page.setViewportSize({ width: 680, height: 800 });
-  await page.reload();
+  await resetTheme(page);
   await page.getByTestId('theme-selector').selectOption('windows95');
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'windows95');
@@ -131,6 +235,80 @@ test('keeps both Windows 95 panes usable at compact width', async ({ page }, tes
   });
   await page.getByTestId('right-panel').screenshot({
     path: testInfo.outputPath('windows95-theme-680-right-panel.png'),
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
+test('uses square gray Windows 95 chrome for the system update overlay', async (
+  { page },
+  testInfo,
+) => {
+  const consoleErrors = captureConsoleErrors(page);
+  let current = systemUpdateFixture({
+    targetVersion: 'v1.4.0',
+    phase: 'available',
+    updateAvailable: true,
+    canApply: true,
+    reasonCode: 'update_available',
+    detail: 'A verified ReachCommander update is available.',
+  });
+  await page.route(systemUpdateEndpoint, async (route) => {
+    if (new URL(route.request().url()).pathname === '/api/system-update/apply') {
+      current = systemUpdateFixture({
+        targetVersion: 'v1.4.0',
+        phase: 'applying',
+        progressStage: 'downloading',
+        updateAvailable: true,
+        reasonCode: 'update_applying',
+        operationId: 'operation-windows95',
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await resetTheme(page);
+  await page.getByTestId('theme-selector').selectOption('windows95');
+  await page.getByTestId('system-update-trigger').click();
+  await page.getByRole('button', { name: 'Update ReachCommander' }).click();
+
+  const overlay = page.locator('.system-update-overlay');
+  await expect(overlay).toBeVisible();
+  expect(
+    await overlay.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      const state = getComputedStyle(element.querySelector('.update-state')!);
+      const heading = getComputedStyle(element.querySelector('.update-state > div')!);
+      const title = getComputedStyle(element.querySelector('h2')!);
+      const progressCopy = getComputedStyle(element.querySelector('.progress-copy')!);
+      const details = getComputedStyle(element.querySelector('.technical-details')!);
+      const spinnerRing = getComputedStyle(element.querySelector('.spinner i')!);
+      return {
+        radius: styles.borderRadius,
+        background: styles.backgroundColor,
+        stateBackground: state.backgroundColor,
+        headingBackground: heading.backgroundColor,
+        titleColor: title.color,
+        progressColor: progressCopy.color,
+        detailsRadius: details.borderRadius,
+        detailsBackground: details.backgroundColor,
+        spinnerShadow: spinnerRing.boxShadow,
+      };
+    }),
+  ).toEqual({
+    radius: '0px',
+    background: 'rgb(192, 192, 192)',
+    stateBackground: 'rgb(192, 192, 192)',
+    headingBackground: 'rgb(0, 0, 128)',
+    titleColor: 'rgb(255, 255, 255)',
+    progressColor: 'rgb(0, 0, 128)',
+    detailsRadius: '0px',
+    detailsBackground: 'rgb(192, 192, 192)',
+    spinnerShadow: 'none',
+  });
+  await page.screenshot({
+    path: testInfo.outputPath('windows95-system-update-overlay.png'),
+    fullPage: true,
   });
   expect(consoleErrors).toEqual([]);
 });

@@ -270,12 +270,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   --accent-text: #ffffff;
   --accent-dim: rgb(0 0 128 / .18);
   --focus-ring: transparent;
-  --success: #008000;
-  --warning: #806000;
+  --success: #005a00;
+  --warning: #5a4a00;
   --danger: #800000;
   --danger-text: #800000;
   --danger-dim: rgb(128 0 0 / .14);
-  --folder: #806000;
+  --folder: #5a4a00;
   --file: #000000;
   --row-hover: #dfdfdf;
   --selection: #000080;
@@ -323,7 +323,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .trash-dialog,
   .directory-dialog,
   .update-dialog,
-  .update-overlay,
+  .system-update-overlay,
+  .update-state,
+  .technical-details,
   .task-indicator
 ) {
   border-radius: 0 !important;
@@ -356,12 +358,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .trash-dialog,
   .directory-dialog,
   .update-dialog,
-  .update-overlay,
+  .system-update-overlay,
+  .update-state,
+  .technical-details,
   .task-indicator
 ) {
   border-style: solid !important;
   border-width: 1px !important;
   border-color: #ffffff #000000 #000000 #ffffff !important;
+  color: var(--text-1) !important;
   background-color: var(--surface-1) !important;
   box-shadow:
     inset 1px 1px 0 #dfdfdf,
@@ -416,6 +421,33 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 
 :root[data-theme='windows95'] :is(
+  .topbar,
+  .panel-heading,
+  .auth-brand,
+  .workspace-header,
+  .dialog-header,
+  .panel-header,
+  .command-menu > header
+) :is(
+  button,
+  button *,
+  .context-chip,
+  .context-chip *,
+  .mode,
+  .version-badge,
+  .task-indicator,
+  .task-indicator *,
+  .metrics-trigger,
+  .metrics-trigger *
+) {
+  color: var(--text-1) !important;
+}
+
+:root[data-theme='windows95'] .topbar .context-chip code {
+  color: var(--text-2) !important;
+}
+
+:root[data-theme='windows95'] :is(
   .global-status,
   .panel-status,
   .dialog-footer,
@@ -424,6 +456,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   color: var(--text-2) !important;
   background: var(--surface-1) !important;
   box-shadow: none !important;
+}
+
+:root[data-theme='windows95'] :is(
+  .panel-status,
+  .global-status,
+  .version-badge,
+  .context-chip code,
+  .field-help,
+  .queued,
+  .state-label,
+  .empty-state
+) {
+  color: var(--text-2) !important;
 }
 
 :root[data-theme='windows95'] :is(
@@ -445,6 +490,40 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 
 :root[data-theme='windows95'] .auth-card {
   background-color: var(--surface-1) !important;
+}
+
+:root[data-theme='windows95'] .system-update-overlay {
+  border: 0 !important;
+  color: var(--text-2) !important;
+  background: var(--surface-1) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='windows95'] .system-update-overlay .update-state > div:first-of-type {
+  width: 100%;
+  padding: 7px 10px;
+  color: #ffffff !important;
+  background: var(--title-bar) !important;
+}
+
+:root[data-theme='windows95'] .system-update-overlay .update-state > div:first-of-type :is(
+  .eyebrow,
+  h2
+) {
+  color: #ffffff !important;
+}
+
+:root[data-theme='windows95'] .system-update-overlay .progress-copy {
+  color: var(--accent) !important;
+}
+
+:root[data-theme='windows95'] .system-update-overlay :is(
+  .spinner i,
+  .step-indicator,
+  .terminal-icon
+) {
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
 :root[data-theme='windows95'] .panes {

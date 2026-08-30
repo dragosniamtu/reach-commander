@@ -5,6 +5,7 @@ TEST_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$TEST_DIRECTORY/../.." && pwd)"
 COMMAND_SOURCE="$REPOSITORY_ROOT/deploy/reachcommander"
 RENDERER="$REPOSITORY_ROOT/deploy/render_config.py"
+SOURCE_MANAGEMENT="$REPOSITORY_ROOT/deploy/source_management.py"
 TEMPLATE="$REPOSITORY_ROOT/deploy/compose.release.yaml"
 UPDATER_COMPOSE="$REPOSITORY_ROOT/deploy/compose.updater.yaml"
 UPDATER_PROTOCOL="$REPOSITORY_ROOT/deploy/updater_protocol.py"
@@ -46,6 +47,8 @@ mkdir -p \
   "$(dirname -- "$COMMAND_PATH")"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
+cp -- "$SOURCE_MANAGEMENT" "$INSTALL_ROOT/bin/source_management.py"
+cp -- "$TEMPLATE" "$INSTALL_ROOT/lib/compose.release.yaml"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
 cp -- "$SUPPORT_BUNDLE_CLI" "$INSTALL_ROOT/bin/support_bundle_cli.py"
 cp -- "$UPDATE_TRACE_CLI" "$INSTALL_ROOT/bin/update_trace_cli.py"
@@ -74,6 +77,11 @@ python3 "$RENDERER" add-source \
   --default-left true \
   --default-right true
 python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output "$INSTALL_ROOT"
+mkdir -p -- "$INSTALL_ROOT/backups"
+chmod 0700 -- "$INSTALL_ROOT" "$INSTALL_ROOT/bin" "$INSTALL_ROOT/lib" "$INSTALL_ROOT/state" "$INSTALL_ROOT/backups"
+chmod 0600 -- "$INSTALL_ROOT/.env" "$INSTALL_ROOT/compose.yaml" "$INSTALL_ROOT/compose.override.yaml" "$INSTALL_ROOT/state/source-mounts.json" "$INSTALL_ROOT/lib/compose.release.yaml"
+chmod 0755 -- "$INSTALL_ROOT/config" "$INSTALL_ROOT/bin/render_config.py" "$INSTALL_ROOT/bin/source_management.py"
+chmod 0644 -- "$INSTALL_ROOT/config/sources.json"
 printf 'stable\n' >"$INSTALL_ROOT/state/channel"
 grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
 : >"$INSTALL_ROOT/state/previous-image"
@@ -221,6 +229,66 @@ for invocation in \
   assert_equal "64" "$last_status" "usage status for $invocation"
 done
 pass "command dispatcher rejects unknown commands and extra arguments"
+
+for invocation in 'source' 'source add extra' 'source remove'; do
+  read -r -a invocation_arguments <<<"$invocation"
+  run_command "${invocation_arguments[@]}"
+  assert_equal "64" "$last_status" "source usage status for $invocation"
+done
+pass "source dispatcher exposes only the fixed add action"
+
+: >"$FAKE_DOCKER_LOG"
+: >"$FAKE_FLOCK_LOG"
+run_command_with_input '{"malformed":true}' source add
+assert_equal "2" "$last_status" "malformed source request status"
+[[ -s "$FAKE_FLOCK_LOG" ]] || fail "source add did not acquire the shared command lock"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "malformed source request invoked Docker"
+[[ "$last_output" != *"$INSTALL_ROOT"* ]] || fail "source failure exposed the install root"
+[[ "$last_output" != *'/srv/private'* ]] || fail "source failure exposed a requested path"
+pass "source add accepts only bounded structured stdin under the shared lock"
+
+source_request='{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}'
+for required_source_file in \
+  "$INSTALL_ROOT/bin/render_config.py" \
+  "$INSTALL_ROOT/lib/updater_protocol.py" \
+  "$INSTALL_ROOT/lib/compose.release.yaml"; do
+  mv -- "$required_source_file" "$required_source_file.missing"
+  run_command_with_input "$source_request" source add
+  assert_equal "1" "$last_status" "missing source dependency status"
+  mv -- "$required_source_file.missing" "$required_source_file"
+done
+pass "source add rejects missing trusted dependencies before Python imports or Docker access"
+
+export FAKE_FLOCK_EXIT=1
+: >"$FAKE_DOCKER_LOG"
+run_command_with_input '{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}' source add
+assert_equal "1" "$last_status" "contended source add status"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "contended source add invoked Docker"
+export FAKE_FLOCK_EXIT=0
+pass "concurrent source add is rejected before validation or Docker access"
+
+if grep -Eq '(^|[^[:alnum:]_])eval([^[:alnum:]_]|$)' "$COMMAND_SOURCE" "$SOURCE_MANAGEMENT"; then
+  fail "source command path must not use shell evaluation"
+fi
+pass "source command never evaluates request data as shell code"
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    ;;
+  *)
+    NEW_SOURCE_PATH="$TEST_ROOT/new source"
+    mkdir -p -- "$NEW_SOURCE_PATH"
+    : >"$FAKE_DOCKER_LOG"
+    run_command_with_input \
+      '{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"New Source","hostPath":"'"$NEW_SOURCE_PATH"'","access":"readOnly"}' \
+      source add
+    assert_equal "0" "$last_status" "successful source add status"
+    [[ "$last_output" == *'"sourceId":"new-source"'* ]] || fail "source add result ID missing"
+    [[ "$last_output" != *"$NEW_SOURCE_PATH"* ]] || fail "source add result exposed its host path"
+    grep -q '"id": "new-source"' "$INSTALL_ROOT/config/sources.json" || fail "new source catalog entry missing"
+    pass "source add publishes one validated source without exposing its host path"
+    ;;
+esac
 
 run_command support-bundle extra
 assert_equal "64" "$last_status" "support-bundle extra argument status"
@@ -736,6 +804,14 @@ export FAKE_DOCKER_HEALTH=healthy
 pass "failed automatic rollback reports manual recovery without losing prior state"
 
 reset_update_baseline
+: >"$FAKE_DOCKER_LOG"
+mkdir -p -- "$INSTALL_ROOT/backups/.source-transaction"
+run_command update stable
+assert_equal "1" "$last_status" "incomplete source transaction update status"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "incomplete source transaction update invoked Docker"
+rm -rf -- "$INSTALL_ROOT/backups/.source-transaction"
+pass "updates fail closed while a source transaction requires recovery"
+
 export FAKE_DOCKER_DIGESTS="$digest_b"
 export FAKE_FLOCK_EXIT=1
 : >"$FAKE_DOCKER_LOG"
@@ -888,6 +964,8 @@ mkdir -p \
   "$INSTALL_ROOT/data/file-operations/operations"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
+cp -- "$SOURCE_MANAGEMENT" "$INSTALL_ROOT/bin/source_management.py"
+cp -- "$TEMPLATE" "$INSTALL_ROOT/lib/compose.release.yaml"
 cp -- "$UPDATE_TRACE_CLI" "$INSTALL_ROOT/bin/update_trace_cli.py"
 cp -- "$SUPPORT_BUNDLE_CLI" "$INSTALL_ROOT/bin/support_bundle_cli.py"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
@@ -898,6 +976,11 @@ cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/compose.override.yaml"
 cp -- "$COMMAND_SOURCE" "$COMMAND_PATH"
 chmod +x "$COMMAND_PATH"
 python3 "$RENDERER" render --request "$REQUEST" --template "$TEMPLATE" --output "$INSTALL_ROOT"
+mkdir -p -- "$INSTALL_ROOT/backups"
+chmod 0700 -- "$INSTALL_ROOT" "$INSTALL_ROOT/bin" "$INSTALL_ROOT/lib" "$INSTALL_ROOT/state" "$INSTALL_ROOT/backups"
+chmod 0600 -- "$INSTALL_ROOT/.env" "$INSTALL_ROOT/compose.yaml" "$INSTALL_ROOT/compose.override.yaml" "$INSTALL_ROOT/state/source-mounts.json" "$INSTALL_ROOT/lib/compose.release.yaml"
+chmod 0755 -- "$INSTALL_ROOT/config" "$INSTALL_ROOT/bin/render_config.py" "$INSTALL_ROOT/bin/source_management.py"
+chmod 0644 -- "$INSTALL_ROOT/config/sources.json"
 printf 'stable\n' >"$INSTALL_ROOT/state/channel"
 grep '^REACHCOMMANDER_IMAGE=' "$INSTALL_ROOT/.env" | cut -d= -f2- >"$INSTALL_ROOT/state/current-image"
 : >"$INSTALL_ROOT/state/previous-image"

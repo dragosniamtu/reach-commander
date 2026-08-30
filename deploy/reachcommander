@@ -45,6 +45,7 @@ Usage:
   reachcommander stop
   reachcommander restart
   reachcommander doctor
+  reachcommander source add
   reachcommander update [stable|edge|vX.Y.Z]
   reachcommander uninstall
 EOF
@@ -72,6 +73,9 @@ validate_invocation() {
       ;;
     update)
       (( argument_count == 1 || argument_count == 2 )) || return 64
+      ;;
+    source)
+      (( argument_count == 2 )) && [[ "${2:-}" == 'add' ]] || return 64
       ;;
     *)
       return 64
@@ -157,6 +161,61 @@ command_support_bundle() {
     return 1
   }
   PYTHONDONTWRITEBYTECODE=1 python3 "$support_bundle_cli"
+}
+
+command_source_add() {
+  local source_helper="$RC_INSTALL_ROOT/bin/source_management.py"
+  local specification
+  local relative_path
+  local expected_mode
+  local installed_path
+  local owner
+  local mode
+  local source_directories=(
+    '.:700'
+    'bin:700'
+    'lib:700'
+  )
+  local source_dependencies=(
+    'bin/source_management.py:755'
+    'bin/render_config.py:755'
+    'lib/updater_protocol.py:644'
+    'lib/compose.release.yaml:600'
+  )
+  rc_acquire_lock || return 1
+  for specification in "${source_directories[@]}"; do
+    IFS=: read -r relative_path expected_mode <<<"$specification"
+    installed_path="$RC_INSTALL_ROOT/$relative_path"
+    if [[ ! -d "$installed_path" || -L "$installed_path" ]]; then
+      rc_die 'source-management helper is unsafe'
+      return 1
+    fi
+    if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]]; then
+      owner="$(stat -c '%u:%g' -- "$installed_path" 2>/dev/null || true)"
+      mode="$(stat -c '%a' -- "$installed_path" 2>/dev/null || true)"
+      if [[ "$owner" != '0:0' || "$mode" != "$expected_mode" ]]; then
+        rc_die 'source-management helper is unsafe'
+        return 1
+      fi
+    fi
+  done
+  for specification in "${source_dependencies[@]}"; do
+    IFS=: read -r relative_path expected_mode <<<"$specification"
+    installed_path="$RC_INSTALL_ROOT/$relative_path"
+    if [[ ! -f "$installed_path" || -L "$installed_path" ]]; then
+      rc_die 'source-management helper is unavailable'
+      return 1
+    fi
+    if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]]; then
+      owner="$(stat -c '%u:%g' -- "$installed_path" 2>/dev/null || true)"
+      mode="$(stat -c '%a' -- "$installed_path" 2>/dev/null || true)"
+      if [[ "$owner" != '0:0' || "$mode" != "$expected_mode" ]]; then
+        rc_die 'source-management helper is unsafe'
+        return 1
+      fi
+    fi
+  done
+  PYTHONDONTWRITEBYTECODE=1 python3 "$source_helper"
 }
 
 command_start() {
@@ -299,6 +358,10 @@ verify_update_state() {
   local previous_image=''
   local current_version
   local previous_version=''
+  if [[ -e "$RC_INSTALL_ROOT/backups/.source-transaction" || -L "$RC_INSTALL_ROOT/backups/.source-transaction" ]]; then
+    rc_die 'an incomplete source transaction must be recovered before updating'
+    return 1
+  fi
   if [[ -e "$RC_INSTALL_ROOT/state/update-transaction" ]]; then
     printf 'ReachCommander: an incomplete update transaction exists; run reachcommander doctor before retrying.\n' >&2
     return 1
@@ -656,12 +719,15 @@ UNINSTALL_FILES=(
   'state/previous-image'
   'state/current-version'
   'state/previous-version'
+  'state/source-operation.json'
   'state/command.lock'
   'bin/render_config.py'
+  'bin/source_management.py'
   'bin/support_bundle_cli.py'
   'bin/update_trace_cli.py'
   'bin/updater_service.py'
   'lib/common.sh'
+  'lib/compose.release.yaml'
   'lib/support_bundle.py'
   'lib/updater_protocol.py'
   'lib/updater_trace.py'
@@ -712,14 +778,17 @@ validate_uninstall_tree() {
       state/previous-image|\
       state/current-version|\
       state/previous-version|\
+      state/source-operation.json|\
       state/failed-image|\
       state/system-update.json|\
       state/command.lock|\
       bin/render_config.py|\
+      bin/source_management.py|\
       bin/support_bundle_cli.py|\
       bin/update_trace_cli.py|\
       bin/updater_service.py|\
       lib/common.sh|\
+      lib/compose.release.yaml|\
       lib/support_bundle.py|\
       lib/updater_protocol.py|\
       lib/updater_trace.py)
@@ -1136,10 +1205,12 @@ doctor_required_files() {
     'state/current-version' \
     'state/previous-version' \
     'bin/render_config.py' \
+    'bin/source_management.py' \
     'bin/support_bundle_cli.py' \
     'bin/updater_service.py' \
     'bin/update_trace_cli.py' \
     'lib/common.sh' \
+    'lib/compose.release.yaml' \
     'lib/support_bundle.py' \
     'lib/updater_protocol.py' \
     'lib/updater_trace.py'; do
@@ -1449,6 +1520,9 @@ case "$1" in
     ;;
   doctor)
     command_doctor
+    ;;
+  source)
+    command_source_add
     ;;
   update)
     command_update "${2:-}"

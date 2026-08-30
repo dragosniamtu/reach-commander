@@ -18,6 +18,7 @@ mkdir -p "$BUNDLE/lib" "$BUNDLE/systemd"
 cp -- "$INSTALLER_SOURCE" "$BUNDLE/install.sh"
 cp -- "$REPOSITORY_ROOT/deploy/lan_address.py" "$BUNDLE/lan_address.py"
 cp -- "$REPOSITORY_ROOT/deploy/render_config.py" "$BUNDLE/render_config.py"
+cp -- "$REPOSITORY_ROOT/deploy/source_management.py" "$BUNDLE/source_management.py"
 cp -- "$REPOSITORY_ROOT/deploy/compose.release.yaml" "$BUNDLE/compose.release.yaml"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$BUNDLE/lib/common.sh"
 for updater_source in \
@@ -274,11 +275,13 @@ for required_file in \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
-  bin/render_config.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
-  lib/common.sh lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
+  bin/render_config.py bin/source_management.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
+  lib/common.sh lib/compose.release.yaml lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$required_file" ]] || fail "missing installed $required_file"
 done
 [[ -f "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" ]] || fail "updater systemd unit missing"
+[[ -d "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups" ]] || fail "source transaction root missing"
+[[ ! -L "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups" ]] || fail "source transaction root is symlinked"
 [[ -f "$REACHCOMMANDER_TEST_LOCK_PATH" ]] || fail "fixed external lock missing"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/command.lock" ]] || fail "deployment contains a replaceable lock inode"
 [[ -x "$REACHCOMMANDER_TEST_COMMAND_PATH" ]] || fail "management command was not installed"
@@ -312,6 +315,16 @@ assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "first source canar
 assert_equal "keep two" "$(cat -- "$SOURCE_TWO/canary.txt")" "second source canary"
 pass "first install renders mixed sources and starts a digest-pinned service"
 
+deployment_before="$(active_deployment_fingerprint)"
+mkdir -p -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.source-transaction"
+: >"$FAKE_DOCKER_LOG"
+run_installer $'n\n' "$TEST_ROOT/incomplete-source-transaction.out"
+assert_equal "1" "$last_status" "incomplete source transaction reconfiguration status"
+assert_equal "$deployment_before" "$(active_deployment_fingerprint)" "incomplete source transaction deployment"
+[[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "incomplete source transaction reconfiguration invoked Docker"
+rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.source-transaction"
+pass "reconfiguration fails closed while a source transaction requires recovery"
+
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
     skip "runtime configuration modes permit non-root container reads" "Windows does not expose POSIX host modes"
@@ -321,6 +334,8 @@ case "$(uname -s)" in
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json")" "source configuration mode"
     assert_equal "600" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env")" "environment mode"
     assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/updater_service.py")" "updater service mode"
+    assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/source_management.py")" "source management mode"
+    assert_equal "600" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/compose.release.yaml")" "trusted Compose template mode"
     assert_equal "755" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/update_trace_cli.py")" "update trace CLI mode"
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/updater_protocol.py")" "updater protocol mode"
     assert_equal "644" "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/updater_trace.py")" "updater trace library mode"
@@ -455,7 +470,9 @@ for legacy_file in \
   state/current-version \
   state/previous-version \
   bin/update_trace_cli.py \
+  bin/source_management.py \
   bin/updater_service.py \
+  lib/compose.release.yaml \
   lib/updater_protocol.py \
   lib/updater_trace.py; do
   rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/$legacy_file"
@@ -472,7 +489,9 @@ for migrated_file in \
   state/current-version \
   state/previous-version \
   bin/update_trace_cli.py \
+  bin/source_management.py \
   bin/updater_service.py \
+  lib/compose.release.yaml \
   lib/updater_protocol.py \
   lib/updater_trace.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$migrated_file" ]] || fail "legacy migration missing $migrated_file"
@@ -583,8 +602,8 @@ for recovery_file in \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
-  bin/render_config.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
-  lib/common.sh lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
+  bin/render_config.py bin/source_management.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
+  lib/common.sh lib/compose.release.yaml lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
   cp -- \
     "$REACHCOMMANDER_TEST_INSTALL_ROOT/$recovery_file" \
     "$recovery_backup/deployment/$recovery_file"

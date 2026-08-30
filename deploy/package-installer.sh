@@ -48,6 +48,7 @@ required_sources=(
   "$SCRIPT_DIRECTORY/lan_address.py"
   "$SCRIPT_DIRECTORY/reachcommander"
   "$SCRIPT_DIRECTORY/render_config.py"
+  "$SCRIPT_DIRECTORY/source_management.py"
   "$SCRIPT_DIRECTORY/support_bundle.py"
   "$SCRIPT_DIRECTORY/support_bundle_cli.py"
   "$SCRIPT_DIRECTORY/update_trace_cli.py"
@@ -74,6 +75,7 @@ install -m 0755 -- "$SCRIPT_DIRECTORY/install.sh" "$PACKAGE_ROOT/install.sh"
 install -m 0644 -- "$SCRIPT_DIRECTORY/lan_address.py" "$PACKAGE_ROOT/lan_address.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/reachcommander" "$PACKAGE_ROOT/reachcommander"
 install -m 0644 -- "$SCRIPT_DIRECTORY/render_config.py" "$PACKAGE_ROOT/render_config.py"
+install -m 0644 -- "$SCRIPT_DIRECTORY/source_management.py" "$PACKAGE_ROOT/source_management.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/support_bundle.py" "$PACKAGE_ROOT/support_bundle.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/support_bundle_cli.py" "$PACKAGE_ROOT/support_bundle_cli.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/update_trace_cli.py" "$PACKAGE_ROOT/update_trace_cli.py"
@@ -90,6 +92,7 @@ chmod 0644 -- \
   "$PACKAGE_ROOT/compose.updater.yaml" \
   "$PACKAGE_ROOT/lan_address.py" \
   "$PACKAGE_ROOT/render_config.py" \
+  "$PACKAGE_ROOT/source_management.py" \
   "$PACKAGE_ROOT/support_bundle.py" \
   "$PACKAGE_ROOT/updater_protocol.py" \
   "$PACKAGE_ROOT/updater_trace.py" \
@@ -121,6 +124,7 @@ tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installe
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/lib/common.sh
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/reachcommander
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/render_config.py
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/source_management.py
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/support_bundle.py
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/support_bundle_cli.py
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/update_trace_cli.py

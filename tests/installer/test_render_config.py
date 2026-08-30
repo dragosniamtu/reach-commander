@@ -499,6 +499,53 @@ class RendererTestCase(unittest.TestCase):
                     True,
                 )
 
+    def test_load_installed_request_and_append_source_reuse_renderer_invariants(self) -> None:
+        renderer = self.require_renderer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            renderer.render_deployment(
+                renderer.load_request(FIXTURE_PATH), TEMPLATE_PATH, root
+            )
+
+            installed = renderer.load_installed_request(
+                root / ".env",
+                root / "config" / "sources.json",
+                root / "state" / "source-mounts.json",
+            )
+            updated = renderer.append_source(
+                installed,
+                source_id="archive",
+                name="Archive",
+                host_path="/srv/archive",
+                access="rw",
+            )
+
+            self.assertEqual(("media", "archive"), tuple(item.id for item in updated.sources))
+            self.assertTrue(updated.sources[0].default_left)
+            self.assertTrue(updated.sources[0].default_right)
+            self.assertFalse(updated.sources[1].default_left)
+            self.assertFalse(updated.sources[1].default_right)
+            self.assertFalse(updated.sources[1].read_only)
+
+    def test_load_installed_request_rejects_catalog_mount_mismatch(self) -> None:
+        renderer = self.require_renderer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            renderer.render_deployment(
+                renderer.load_request(FIXTURE_PATH), TEMPLATE_PATH, root
+            )
+            catalog_path = root / "config" / "sources.json"
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            catalog["sources"][0]["readOnly"] = False
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "inconsistent"):
+                renderer.load_installed_request(
+                    root / ".env",
+                    catalog_path,
+                    root / "state" / "source-mounts.json",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,7 @@ umask 077
 SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIBRARY="$SCRIPT_DIRECTORY/lib/common.sh"
 RENDERER="$SCRIPT_DIRECTORY/render_config.py"
+SOURCE_MANAGEMENT="$SCRIPT_DIRECTORY/source_management.py"
 LAN_ADDRESS_HELPER="$SCRIPT_DIRECTORY/lan_address.py"
 COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
 UPDATER_COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.updater.yaml"
@@ -99,6 +100,7 @@ require_bundle() {
   local bundle_file
   for bundle_file in \
     "$RENDERER" \
+    "$SOURCE_MANAGEMENT" \
     "$LAN_ADDRESS_HELPER" \
     "$COMPOSE_TEMPLATE" \
     "$UPDATER_COMPOSE_TEMPLATE" \
@@ -161,6 +163,9 @@ preflight() {
   rc_require_commands docker python3 readlink flock install mktemp setpriv sync find systemctl
   require_bundle
   read_bundle_version
+}
+
+verify_docker_compose() {
   if ! docker compose version >/dev/null 2>&1; then
     rc_die 'Docker Compose v2 is required'
     return 1
@@ -500,9 +505,11 @@ UPDATER_DEPLOYMENT_FILES=(
   'state/current-version'
   'state/previous-version'
   'bin/support_bundle_cli.py'
+  'bin/source_management.py'
   'bin/update_trace_cli.py'
   'bin/updater_service.py'
   'lib/support_bundle.py'
+  'lib/compose.release.yaml'
   'lib/updater_protocol.py'
   'lib/updater_trace.py'
 )
@@ -605,6 +612,12 @@ backup_existing_deployment() {
 install_staged_deployment() {
   local stage_root="$1"
   local relative_path
+  if [[ -L "$RC_INSTALL_ROOT/backups" || -e "$RC_INSTALL_ROOT/backups" && ! -d "$RC_INSTALL_ROOT/backups" ]]; then
+    rc_die 'source transaction root is unsafe'
+    return 1
+  fi
+  mkdir -p -- "$RC_INSTALL_ROOT/backups" || return 1
+  chmod 0700 -- "$RC_INSTALL_ROOT/backups" || return 1
   for relative_path in "${DEPLOYMENT_FILES[@]}"; do
     copy_atomic \
       "$stage_root/$relative_path" \
@@ -826,6 +839,14 @@ recover_incomplete_reconfiguration() {
   printf 'Recovered an interrupted ReachCommander reconfiguration.\n'
 }
 
+reject_incomplete_source_transaction() {
+  local transaction_root="$RC_INSTALL_ROOT/backups/.source-transaction"
+  if [[ -e "$transaction_root" || -L "$transaction_root" ]]; then
+    rc_die 'an incomplete source transaction must be recovered before reconfiguration'
+    return 1
+  fi
+}
+
 remove_partial_initial_deployment() {
   local relative_path
   local directory
@@ -907,6 +928,8 @@ if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]] || (( EUID == 0 )); then
 fi
 rc_acquire_lock
 recover_incomplete_reconfiguration
+reject_incomplete_source_transaction
+verify_docker_compose
 
 if [[ -f "$RC_INSTALL_ROOT/.env" || -f "$RC_INSTALL_ROOT/compose.yaml" ]]; then
   HAD_EXISTING=true
@@ -1021,10 +1044,12 @@ fi
 python3 "$RENDERER" set-image --env "$STAGE_ROOT/.env" --image "$RESOLVED_IMAGE"
 mkdir -p -- "$STAGE_ROOT/bin" "$STAGE_ROOT/lib"
 install -m 0755 -- "$RENDERER" "$STAGE_ROOT/bin/render_config.py"
+install -m 0755 -- "$SOURCE_MANAGEMENT" "$STAGE_ROOT/bin/source_management.py"
 install -m 0755 -- "$SUPPORT_BUNDLE_CLI" "$STAGE_ROOT/bin/support_bundle_cli.py"
 install -m 0755 -- "$UPDATE_TRACE_CLI" "$STAGE_ROOT/bin/update_trace_cli.py"
 install -m 0755 -- "$UPDATER_SERVICE" "$STAGE_ROOT/bin/updater_service.py"
 install -m 0600 -- "$COMMON_LIBRARY" "$STAGE_ROOT/lib/common.sh"
+install -m 0600 -- "$COMPOSE_TEMPLATE" "$STAGE_ROOT/lib/compose.release.yaml"
 install -m 0644 -- "$SUPPORT_BUNDLE" "$STAGE_ROOT/lib/support_bundle.py"
 install -m 0644 -- "$UPDATER_PROTOCOL" "$STAGE_ROOT/lib/updater_protocol.py"
 install -m 0644 -- "$UPDATER_TRACE" "$STAGE_ROOT/lib/updater_trace.py"

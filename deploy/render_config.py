@@ -42,6 +42,16 @@ SOURCE_KEYS = {
     "defaultLeft",
     "defaultRight",
 }
+CATALOG_SOURCE_KEYS = {
+    "id",
+    "name",
+    "path",
+    "enabled",
+    "readOnly",
+    "defaultLeft",
+    "defaultRight",
+}
+MOUNT_SOURCE_KEYS = {"id", "hostPath", "access"}
 ENV_KEYS = (
     "REACHCOMMANDER_ACCESS_MODE",
     "REACHCOMMANDER_BIND_ADDRESS",
@@ -483,6 +493,117 @@ def set_env_image(path: pathlib.Path | str, image: str) -> None:
         destination,
         "".join(f"{key}={values[key]}\n" for key in ENV_KEYS),
     )
+
+
+def load_installed_request(
+    env_path: pathlib.Path | str,
+    catalog_path: pathlib.Path | str,
+    mounts_path: pathlib.Path | str,
+) -> DeploymentRequest:
+    """Reconstruct one renderer request from exact installer-owned outputs."""
+    environment = _read_env(pathlib.Path(env_path))
+    catalog = _load_json(pathlib.Path(catalog_path), "source catalog")
+    mounts = _load_json(pathlib.Path(mounts_path), "source mounts")
+    if type(catalog) is not dict or set(catalog) != {"sources"}:
+        raise ValueError("source catalog: invalid fields")
+    if type(mounts) is not dict or set(mounts) != {"sources"}:
+        raise ValueError("source mounts: invalid fields")
+    catalog_sources = catalog["sources"]
+    mount_sources = mounts["sources"]
+    if (
+        type(catalog_sources) is not list
+        or type(mount_sources) is not list
+        or not catalog_sources
+        or len(catalog_sources) != len(mount_sources)
+    ):
+        raise ValueError("installed sources: inconsistent lists")
+
+    request_sources: list[dict[str, object]] = []
+    for catalog_source, mount_source in zip(catalog_sources, mount_sources):
+        catalog_mapping = _require_exact_keys(
+            catalog_source, CATALOG_SOURCE_KEYS, "source catalog"
+        )
+        mount_mapping = _require_exact_keys(
+            mount_source, MOUNT_SOURCE_KEYS, "source mounts"
+        )
+        source_id = catalog_mapping["id"]
+        access = mount_mapping["access"]
+        if (
+            source_id != mount_mapping["id"]
+            or catalog_mapping["path"] != f"/sources/{source_id}"
+            or catalog_mapping["enabled"] is not True
+            or access not in ("ro", "rw")
+            or catalog_mapping["readOnly"] is not (access == "ro")
+        ):
+            raise ValueError("installed sources: inconsistent metadata")
+        request_sources.append(
+            {
+                "id": source_id,
+                "name": catalog_mapping["name"],
+                "hostPath": mount_mapping["hostPath"],
+                "readOnly": catalog_mapping["readOnly"],
+                "defaultLeft": catalog_mapping["defaultLeft"],
+                "defaultRight": catalog_mapping["defaultRight"],
+            }
+        )
+
+    try:
+        port = int(environment["REACHCOMMANDER_PORT"])
+        uid = int(environment["REACHCOMMANDER_UID"])
+        gid = int(environment["REACHCOMMANDER_GID"])
+    except ValueError as error:
+        raise ValueError("env: invalid integer") from error
+    return DeploymentRequest.from_mapping(
+        {
+            "accessMode": environment["REACHCOMMANDER_ACCESS_MODE"],
+            "bindAddress": environment["REACHCOMMANDER_BIND_ADDRESS"],
+            "port": port,
+            "allowInsecureHttp": environment[
+                "REACHCOMMANDER_ALLOW_INSECURE_HTTP"
+            ]
+            == "true",
+            "uid": uid,
+            "gid": gid,
+            "image": environment["REACHCOMMANDER_IMAGE"],
+            "sources": request_sources,
+        }
+    )
+
+
+def append_source(
+    request: DeploymentRequest,
+    *,
+    source_id: str,
+    name: str,
+    host_path: str,
+    access: str,
+) -> DeploymentRequest:
+    """Return a fully revalidated request with one non-default source appended."""
+    if not isinstance(request, DeploymentRequest):
+        raise ValueError("request: invalid deployment request")
+    if access not in ("ro", "rw"):
+        raise ValueError("sources.access: invalid value")
+    mapping = {
+        "accessMode": request.access_mode,
+        "bindAddress": request.bind_address,
+        "port": request.port,
+        "allowInsecureHttp": request.allow_insecure_http,
+        "uid": request.uid,
+        "gid": request.gid,
+        "image": request.image,
+        "sources": [source.to_request_mapping() for source in request.sources]
+        + [
+            {
+                "id": source_id,
+                "name": name,
+                "hostPath": host_path,
+                "readOnly": access == "ro",
+                "defaultLeft": False,
+                "defaultRight": False,
+            }
+        ],
+    }
+    return DeploymentRequest.from_mapping(mapping)
 
 
 def source_paths(path: pathlib.Path | str) -> tuple[str, ...]:

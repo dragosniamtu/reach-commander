@@ -25,13 +25,25 @@ describe('ThemeService', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();
   });
 
-  it('restores only the valid Norton value', () => {
+  it('restores the stored Norton value', () => {
     storage.setItem(ThemeService.storageKey, 'norton');
 
     const service = TestBed.inject(ThemeService);
 
     expect(service.theme()).toBe('norton');
+    expect(service.isNorton()).toBe(true);
+    expect(service.isWindows95()).toBe(false);
     expect(document.documentElement.dataset['theme']).toBe('norton');
+  });
+
+  it('restores the stored Windows 95 value', () => {
+    storage.setItem(ThemeService.storageKey, 'windows95');
+
+    const service = TestBed.inject(ThemeService);
+
+    expect(service.theme()).toBe('windows95');
+    expect(service.isWindows95()).toBe(true);
+    expect(document.documentElement.dataset['theme']).toBe('windows95');
   });
 
   it('ignores an unrecognized stored value', () => {
@@ -43,15 +55,20 @@ describe('ThemeService', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();
   });
 
-  it('toggles, persists Norton, and removes the default override', () => {
+  it('persists both alternate themes and removes the default override', () => {
     const service = TestBed.inject(ThemeService);
 
-    service.toggle();
+    service.setTheme('norton');
     expect(service.theme()).toBe('norton');
     expect(storage.getItem(ThemeService.storageKey)).toBe('norton');
     expect(document.documentElement.dataset['theme']).toBe('norton');
 
-    service.toggle();
+    service.setTheme('windows95');
+    expect(service.theme()).toBe('windows95');
+    expect(storage.getItem(ThemeService.storageKey)).toBe('windows95');
+    expect(document.documentElement.dataset['theme']).toBe('windows95');
+
+    service.setTheme('default');
     expect(service.theme()).toBe('default');
     expect(storage.getItem(ThemeService.storageKey)).toBeNull();
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();
@@ -75,9 +92,9 @@ describe('ThemeService', () => {
     document = TestBed.inject(DOCUMENT);
 
     const service = TestBed.inject(ThemeService);
-    service.setTheme('norton');
-    expect(service.isNorton()).toBe(true);
-    expect(document.documentElement.dataset['theme']).toBe('norton');
+    service.setTheme('windows95');
+    expect(service.isWindows95()).toBe(true);
+    expect(document.documentElement.dataset['theme']).toBe('windows95');
 
     service.setTheme('default');
     expect(service.isNorton()).toBe(false);

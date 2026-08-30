@@ -1,7 +1,9 @@
 import { DOCUMENT } from '@angular/common';
 import { Injectable, InjectionToken, computed, inject, signal } from '@angular/core';
 
-export type ReachCommanderTheme = 'default' | 'norton';
+export type ReachCommanderTheme = 'default' | 'norton' | 'windows95';
+
+const storedThemes = new Set<ReachCommanderTheme>(['norton', 'windows95']);
 
 export const THEME_STORAGE = new InjectionToken<Storage>('ReachCommander theme storage', {
   providedIn: 'root',
@@ -18,23 +20,17 @@ export class ThemeService {
 
   readonly theme = this.mutableTheme.asReadonly();
   readonly isNorton = computed(() => this.theme() === 'norton');
+  readonly isWindows95 = computed(() => this.theme() === 'windows95');
 
   constructor() {
     this.apply(this.readPreference());
   }
 
-  toggle(): void {
-    this.setTheme(this.isNorton() ? 'default' : 'norton');
-  }
-
   setTheme(theme: ReachCommanderTheme): void {
     this.apply(theme);
     try {
-      if (theme === 'norton') {
-        this.storage.setItem(ThemeService.storageKey, theme);
-      } else {
-        this.storage.removeItem(ThemeService.storageKey);
-      }
+      if (theme === 'default') this.storage.removeItem(ThemeService.storageKey);
+      else this.storage.setItem(ThemeService.storageKey, theme);
     } catch {
       // A disabled or full browser store must not prevent a visual preference change.
     }
@@ -42,7 +38,10 @@ export class ThemeService {
 
   private readPreference(): ReachCommanderTheme {
     try {
-      return this.storage.getItem(ThemeService.storageKey) === 'norton' ? 'norton' : 'default';
+      const storedTheme = this.storage.getItem(ThemeService.storageKey);
+      return storedTheme !== null && storedThemes.has(storedTheme as ReachCommanderTheme)
+        ? storedTheme as ReachCommanderTheme
+        : 'default';
     } catch {
       return 'default';
     }
@@ -50,10 +49,10 @@ export class ThemeService {
 
   private apply(theme: ReachCommanderTheme): void {
     this.mutableTheme.set(theme);
-    if (theme === 'norton') {
-      this.document.documentElement.dataset['theme'] = theme;
-    } else {
+    if (theme === 'default') {
       this.document.documentElement.removeAttribute('data-theme');
+    } else {
+      this.document.documentElement.dataset['theme'] = theme;
     }
   }
 }

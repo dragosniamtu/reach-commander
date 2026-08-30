@@ -53,14 +53,14 @@ describe('App', () => {
   });
 
   it('initializes a saved theme before rendering an unauthenticated screen', async () => {
-    localStorage.setItem('reachcommander.theme.v1', 'norton');
+    localStorage.setItem('reachcommander.theme.v1', 'windows95');
     auth.setState(authState({ phase: 'anonymous' }));
 
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     await fixture.whenStable();
 
-    expect(document.documentElement.dataset['theme']).toBe('norton');
+    expect(document.documentElement.dataset['theme']).toBe('windows95');
     expect(fixture.nativeElement.querySelector('app-authentication-screen')).not.toBeNull();
   });
 

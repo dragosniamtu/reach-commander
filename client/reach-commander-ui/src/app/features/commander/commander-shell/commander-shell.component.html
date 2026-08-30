@@ -43,7 +43,7 @@
         [attr.aria-pressed]="theme.isNorton()"
         [attr.aria-label]="theme.isNorton() ? 'Deactivate Norton theme' : 'Activate Norton theme'"
         [title]="theme.isNorton() ? 'Deactivate Norton theme' : 'Activate Norton theme'"
-        (click)="theme.toggle()"
+        (click)="theme.setTheme(theme.isNorton() ? 'default' : 'norton')"
       >
         <span class="theme-label">Norton</span>
         <span class="theme-label-compact" aria-hidden="true">N</span>

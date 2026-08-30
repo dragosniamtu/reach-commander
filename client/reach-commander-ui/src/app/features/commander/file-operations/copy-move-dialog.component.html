@@ -1,7 +1,7 @@
 <div class="transfer-backdrop" data-testid="copy-move-dialog">
   <dialog
     open
-    class="copy-move-dialog"
+    class="copy-move-dialog theme-dialog-shell"
     aria-modal="true"
     aria-labelledby="copy-move-title"
     aria-describedby="copy-move-description"
@@ -9,7 +9,7 @@
     [cdkTrapFocusAutoCapture]="true"
   >
     @if (store.context(); as context) {
-      <header>
+      <header class="theme-dialog-titlebar">
         <div>
           <span class="eyebrow">Controlled file operation</span>
           <h2 id="copy-move-title">{{ operationLabel() }} selected items</h2>

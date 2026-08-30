@@ -107,6 +107,15 @@ test('applies and persists Windows 95 chrome across the commander and authentica
   expect(await authCard.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
     'rgb(192, 192, 192)',
   );
+  const authEyebrowStyles = await authCard.locator('.eyebrow').evaluate((element) => {
+    const eyebrow = getComputedStyle(element);
+    const card = getComputedStyle(element.closest('.auth-card')!);
+    return { color: eyebrow.color, background: card.backgroundColor };
+  });
+  expect(authEyebrowStyles.color).toBe('rgb(0, 0, 128)');
+  expect(contrastRatio(authEyebrowStyles.color, authEyebrowStyles.background)).toBeGreaterThanOrEqual(
+    4.5,
+  );
   await page.screenshot({
     path: testInfo.outputPath('windows95-authentication.png'),
     fullPage: true,
@@ -163,6 +172,86 @@ test('keeps raised Windows 95 header controls and chips dark on gray', async ({ 
     title: 'rgb(0, 0, 0)',
     path: 'rgb(32, 32, 32)',
   });
+
+  const themeLabelStyles = await page.locator('.theme-selector > span').evaluate((element) => {
+    const label = getComputedStyle(element);
+    const topbar = getComputedStyle(element.closest('.topbar')!);
+    return { color: label.color, background: topbar.backgroundColor };
+  });
+  expect(themeLabelStyles.color).toBe('rgb(255, 255, 255)');
+  expect(contrastRatio(themeLabelStyles.color, themeLabelStyles.background)).toBeGreaterThanOrEqual(
+    4.5,
+  );
+
+  await page.getByTestId('toolbar-trash').focus();
+  expect(
+    await page.getByTestId('toolbar-trash').evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        outlineStyle: styles.outlineStyle,
+        outlineWidth: styles.outlineWidth,
+        outlineColor: styles.outlineColor,
+      };
+    }),
+  ).toEqual({
+    outlineStyle: 'dotted',
+    outlineWidth: '1px',
+    outlineColor: 'rgb(0, 0, 0)',
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
+test('uses common square beveled shells and navy title strips for Windows 95 dialogs', async ({
+  page,
+}) => {
+  const consoleErrors = captureConsoleErrors(page);
+  await resetTheme(page);
+  await page.getByTestId('theme-selector').selectOption('windows95');
+
+  await page.getByTestId('account-menu-trigger').click();
+  await page.getByTestId('change-password').click();
+  const passwordDialog = page.getByTestId('change-password-dialog');
+  await expect(passwordDialog).toHaveClass(/theme-dialog-shell/);
+  await expect(passwordDialog.locator(':scope > header')).toHaveClass(/theme-dialog-titlebar/);
+  expect(
+    await passwordDialog.evaluate((element) => {
+      const shell = getComputedStyle(element);
+      const titlebar = getComputedStyle(element.querySelector(':scope > header')!);
+      const title = getComputedStyle(element.querySelector(':scope > header h2')!);
+      return {
+        radius: shell.borderRadius,
+        background: shell.backgroundColor,
+        borderTop: shell.borderTopColor,
+        borderRight: shell.borderRightColor,
+        titleBackground: titlebar.backgroundColor,
+        titleColor: title.color,
+      };
+    }),
+  ).toEqual({
+    radius: '0px',
+    background: 'rgb(192, 192, 192)',
+    borderTop: 'rgb(255, 255, 255)',
+    borderRight: 'rgb(0, 0, 0)',
+    titleBackground: 'rgb(0, 0, 128)',
+    titleColor: 'rgb(255, 255, 255)',
+  });
+  await passwordDialog.getByRole('button', { name: 'Close change password dialog' }).click();
+
+  await page.getByTestId('left-panel').focus();
+  await page.keyboard.press('F7');
+  const directoryDialog = page.getByRole('dialog', { name: 'New directory' });
+  await expect(directoryDialog).toHaveClass(/theme-dialog-shell/);
+  await expect(directoryDialog.locator(':scope > header')).toHaveClass(/theme-dialog-titlebar/);
+  const directoryLabelStyles = await directoryDialog
+    .locator('.dialog-body > label')
+    .evaluate((element) => {
+      const label = getComputedStyle(element);
+      const shell = getComputedStyle(element.closest('.theme-dialog-shell')!);
+      return { color: label.color, background: shell.backgroundColor };
+    });
+  expect(contrastRatio(directoryLabelStyles.color, directoryLabelStyles.background)).toBeGreaterThanOrEqual(
+    4.5,
+  );
   expect(consoleErrors).toEqual([]);
 });
 
@@ -284,6 +373,8 @@ test('uses square gray Windows 95 chrome for the system update overlay', async (
   await page.getByTestId('theme-selector').selectOption('windows95');
   await page.getByTestId('system-update-trigger').click();
   const confirmation = page.getByRole('dialog', { name: 'Update ReachCommander?' });
+  await expect(confirmation).toHaveClass(/theme-dialog-shell/);
+  await expect(confirmation.locator(':scope > header')).toHaveClass(/theme-dialog-titlebar/);
   const confirmationLabelStyles = await confirmation
     .locator('.version-flow span')
     .first()

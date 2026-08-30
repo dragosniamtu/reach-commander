@@ -3,8 +3,8 @@ import { longFileNameFixture } from '../support/fixture-names';
 
 const themeStorageKey = 'reachcommander.theme.v1';
 
-for (const norton of [false, true]) {
-  test(`centers file rows and ellipsizes long names in ${norton ? 'Norton' : 'default'} theme`, async ({
+for (const theme of ['default', 'norton', 'windows95'] as const) {
+  test(`centers 30px file rows and ellipsizes long names in ${theme} theme`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 680, height: 800 });
@@ -12,11 +12,12 @@ for (const norton of [false, true]) {
     await page.evaluate((key) => localStorage.removeItem(key), themeStorageKey);
     await page.reload();
 
-    if (norton) {
-      await page.getByTestId('theme-selector').selectOption('norton');
-      await expect(page.locator('html')).toHaveAttribute('data-theme', 'norton');
+    await page.getByTestId('theme-selector').selectOption(theme);
+    await expect(page.getByTestId('theme-selector')).toHaveValue(theme);
+    if (theme === 'default') {
+      await expect(page.locator('html')).not.toHaveAttribute('data-theme');
     } else {
-      await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'norton');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     }
 
     const panel = page.getByTestId('right-panel');

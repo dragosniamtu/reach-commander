@@ -1,6 +1,6 @@
 <div class="trash-backdrop">
-  <dialog open class="trash-dialog" aria-modal="true" aria-labelledby="trash-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
-    <header>
+  <dialog open class="trash-dialog theme-dialog-shell" aria-modal="true" aria-labelledby="trash-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+    <header class="theme-dialog-titlebar">
       <div><span class="eyebrow">Managed recovery area</span><h2 id="trash-title">Trash</h2></div>
       <button type="button" aria-label="Close Trash" [disabled]="store.busy()" (click)="requestClose()">×</button>
     </header>

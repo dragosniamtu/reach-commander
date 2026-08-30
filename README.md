@@ -32,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 738 cross-platform .NET tests, 371 Angular tests, PWA contract checks, and 47 real-browser checks |
+| Quality | 738 cross-platform .NET tests, 387 Angular unit tests, 2 PWA contract tests, and 55 Chromium browser scenarios |
 
 ## What ReachCommander includes
 

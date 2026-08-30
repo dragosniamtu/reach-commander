@@ -1,7 +1,7 @@
 <div class="extraction-backdrop" data-testid="archive-extraction-dialog">
   <dialog
     #dialog
-    class="extraction-dialog"
+    class="extraction-dialog theme-dialog-shell"
     aria-modal="true"
     aria-labelledby="archive-extraction-title"
     aria-describedby="archive-extraction-description"
@@ -11,7 +11,7 @@
     [cdkTrapFocusAutoCapture]="true"
     (cancel)="handleNativeCancel($event)"
   >
-    <header>
+    <header class="theme-dialog-titlebar">
       <div>
         <span class="eyebrow">Controlled file operation</span>
         <h2 id="archive-extraction-title">Extract archive</h2>

@@ -1,7 +1,7 @@
 <div class="transfer-backdrop" data-testid="transfer-progress-dialog">
-  <dialog open class="progress-dialog" aria-modal="true" aria-labelledby="transfer-progress-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+  <dialog open class="progress-dialog theme-dialog-shell" aria-modal="true" aria-labelledby="transfer-progress-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
     @if (store.activeTask(); as task) {
-      <header>
+      <header class="theme-dialog-titlebar">
         <div>
           <span class="eyebrow">Background-capable task</span>
           <h2 id="transfer-progress-title">{{ kindLabel(task.kind) }}</h2>

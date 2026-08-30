@@ -285,7 +285,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 
 :root[data-theme='windows95'] body {
   --text-4: #404040;
+  --accent-text: #000080;
   font-family: var(--font-ui);
+}
+
+:root[data-theme='windows95'] app-file-table tbody tr.cursor {
+  --accent-text: #ffffff;
 }
 
 :root[data-theme='windows95'] :is(.app-shell, .auth-shell) {
@@ -315,7 +320,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .auth-card,
   .password-dialog,
   .rename-workspace,
-  .single-rename-dialog,
+  .theme-dialog-shell,
   .upload-panel,
   .extraction-dialog,
   .copy-move-dialog,
@@ -350,7 +355,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .auth-card,
   .password-dialog,
   .rename-workspace,
-  .single-rename-dialog,
+  .theme-dialog-shell,
   .upload-panel,
   .extraction-dialog,
   .copy-move-dialog,
@@ -400,6 +405,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .panel-heading,
   .auth-brand,
   .workspace-header,
+  .theme-dialog-titlebar,
   .dialog-header,
   .panel-header,
   .command-menu > header
@@ -414,10 +420,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .panel-heading,
   .auth-brand,
   .workspace-header,
+  .theme-dialog-titlebar,
   .dialog-header,
   .panel-header,
   .command-menu > header
-) :is(strong, span, p, button) {
+) :is(strong, span, p, h1, h2, h3, button) {
   color: inherit !important;
 }
 
@@ -426,6 +433,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .panel-heading,
   .auth-brand,
   .workspace-header,
+  .theme-dialog-titlebar,
   .dialog-header,
   .panel-header,
   .command-menu > header
@@ -442,6 +450,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .metrics-trigger *
 ) {
   color: var(--text-1) !important;
+}
+
+:root[data-theme='windows95'] .topbar .theme-selector > span {
+  color: #ffffff !important;
 }
 
 :root[data-theme='windows95'] .topbar .context-chip code {

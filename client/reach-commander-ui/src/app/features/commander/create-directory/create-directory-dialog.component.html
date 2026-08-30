@@ -1,6 +1,6 @@
 <div class="directory-backdrop">
-  <dialog open class="directory-dialog" aria-modal="true" aria-labelledby="create-directory-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
-    <header><div><span class="eyebrow">Create one folder</span><h2 id="create-directory-title">New directory</h2></div><button type="button" aria-label="Close new directory" [disabled]="busy()" (click)="requestClose()">×</button></header>
+  <dialog open class="directory-dialog theme-dialog-shell" aria-modal="true" aria-labelledby="create-directory-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+    <header class="theme-dialog-titlebar"><div><span class="eyebrow">Create one folder</span><h2 id="create-directory-title">New directory</h2></div><button type="button" aria-label="Close new directory" [disabled]="busy()" (click)="requestClose()">×</button></header>
     <div class="dialog-body">
       <section class="destination"><span>Destination</span><code>{{ sourceName() }}:{{ parentLogicalPath() }}</code></section>
       <label for="directory-name">Directory name<input id="directory-name" type="text" autocomplete="off" autofocus [value]="name()" [disabled]="busy()" (input)="nameChanged($event)" /></label>

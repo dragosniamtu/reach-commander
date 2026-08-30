@@ -37,7 +37,7 @@
     (mousedown)="$event.target === $event.currentTarget && closePasswordDialog()"
   >
     <section
-      class="password-dialog"
+      class="password-dialog theme-dialog-shell"
       data-testid="change-password-dialog"
       role="dialog"
       aria-modal="true"
@@ -45,7 +45,7 @@
       cdkTrapFocus
       [cdkTrapFocusAutoCapture]="true"
     >
-      <header>
+      <header class="theme-dialog-titlebar">
         <div>
           <span>ACCOUNT SECURITY</span>
           <h2 id="change-password-title">Change password</h2>

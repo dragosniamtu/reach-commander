@@ -8,11 +8,11 @@ test.beforeEach(async ({ page }) => {
   await page.reload();
 });
 
-test("activates, persists, and deactivates the Norton theme", async ({
+test("selects, persists, and resets the Norton theme", async ({
   page,
 }, testInfo) => {
   const root = page.locator("html");
-  const toggle = page.getByTestId("norton-theme-toggle");
+  const selector = page.getByTestId("theme-selector");
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -20,12 +20,11 @@ test("activates, persists, and deactivates the Norton theme", async ({
     }
   });
 
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await toggle.click();
+  await expect(selector).toHaveValue("default");
+  await selector.selectOption("norton");
 
   await expect(root).toHaveAttribute("data-theme", "norton");
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await expect(toggle).toHaveAccessibleName("Deactivate Norton theme");
+  await expect(selector).toHaveValue("norton");
   expect(
     await root.evaluate((element) => {
       const styles = getComputedStyle(element);
@@ -64,14 +63,14 @@ test("activates, persists, and deactivates the Norton theme", async ({
 
   await page.reload();
   await expect(root).toHaveAttribute("data-theme", "norton");
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(selector).toHaveValue("norton");
   expect(
     await page.evaluate((key) => localStorage.getItem(key), storageKey),
   ).toBe("norton");
 
-  await toggle.click();
+  await selector.selectOption("default");
   await expect(root).not.toHaveAttribute("data-theme", "norton");
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(selector).toHaveValue("default");
   expect(
     await page.evaluate((key) => localStorage.getItem(key), storageKey),
   ).toBeNull();
@@ -81,15 +80,15 @@ test("activates, persists, and deactivates the Norton theme", async ({
   expect(consoleErrors).toEqual([]);
 });
 
-test("keeps the Norton toggle and dual-pane shell usable at compact width", async ({
+test("keeps the Norton selector and dual-pane shell usable at compact width", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 680, height: 800 });
   await page.reload();
 
-  const toggle = page.getByTestId("norton-theme-toggle");
-  await expect(toggle).toBeVisible();
-  await toggle.click();
+  const selector = page.getByTestId("theme-selector");
+  await expect(selector).toBeVisible();
+  await selector.selectOption("norton");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "norton");
   await expect(page.getByTestId("left-panel")).toBeVisible();
   await expect(page.getByTestId("right-panel")).toBeVisible();

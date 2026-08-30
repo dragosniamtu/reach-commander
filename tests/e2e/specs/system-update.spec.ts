@@ -639,7 +639,7 @@ for (const norton of [false, true]) {
     await page.setViewportSize({ width: 360, height: 560 });
     await page.goto("/");
     if (norton) {
-      await page.getByTestId("norton-theme-toggle").click();
+      await page.getByTestId("theme-selector").selectOption("norton");
       await expect(page.locator("html")).toHaveAttribute(
         "data-theme",
         "norton",

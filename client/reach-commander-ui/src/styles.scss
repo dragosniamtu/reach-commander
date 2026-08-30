@@ -248,3 +248,293 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   color: #000080;
   background: #00ffff;
 }
+
+:root[data-theme='windows95'] {
+  color-scheme: light;
+  --font-ui: Tahoma, 'MS Sans Serif', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Courier New', Consolas, monospace;
+  --app-bg: #008080;
+  --surface-1: #c0c0c0;
+  --surface-2: #c0c0c0;
+  --surface-3: #dfdfdf;
+  --surface-4: #a0a0a0;
+  --title-bar: #000080;
+  --line: #808080;
+  --line-strong: #000000;
+  --text-1: #000000;
+  --text-2: #202020;
+  --text-3: #404040;
+  --text-4: #606060;
+  --accent: #000080;
+  --accent-soft: #0000a0;
+  --accent-text: #ffffff;
+  --accent-dim: rgb(0 0 128 / .18);
+  --focus-ring: transparent;
+  --success: #008000;
+  --warning: #806000;
+  --danger: #800000;
+  --danger-text: #800000;
+  --danger-dim: rgb(128 0 0 / .14);
+  --folder: #806000;
+  --file: #000000;
+  --row-hover: #dfdfdf;
+  --selection: #000080;
+  --selection-text: #ffffff;
+  --shadow: none;
+}
+
+:root[data-theme='windows95'] body {
+  font-family: var(--font-ui);
+}
+
+:root[data-theme='windows95'] :is(.app-shell, .auth-shell) {
+  background: var(--app-bg) !important;
+}
+
+:root[data-theme='windows95'] :is(
+  button,
+  input,
+  select,
+  progress,
+  .brand-mark,
+  .context-chip,
+  .action-wrapper,
+  .search-box,
+  .source-button,
+  .tab-shell,
+  .path-display,
+  .path-input,
+  .mode,
+  .panel,
+  .loading,
+  .command-menu,
+  .account-menu,
+  .metrics-trigger,
+  .metrics-panel,
+  .auth-card,
+  .password-dialog,
+  .rename-workspace,
+  .single-rename-dialog,
+  .upload-panel,
+  .extraction-dialog,
+  .copy-move-dialog,
+  .progress-dialog,
+  .delete-dialog,
+  .trash-dialog,
+  .directory-dialog,
+  .update-dialog,
+  .update-overlay,
+  .task-indicator
+) {
+  border-radius: 0 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='windows95'] :is(
+  button,
+  select,
+  .brand-mark,
+  .context-chip,
+  .source-button,
+  .tab-shell,
+  .mode,
+  .loading,
+  .command-menu,
+  .account-menu,
+  .metrics-trigger,
+  .metrics-panel,
+  .auth-card,
+  .password-dialog,
+  .rename-workspace,
+  .single-rename-dialog,
+  .upload-panel,
+  .extraction-dialog,
+  .copy-move-dialog,
+  .progress-dialog,
+  .delete-dialog,
+  .trash-dialog,
+  .directory-dialog,
+  .update-dialog,
+  .update-overlay,
+  .task-indicator
+) {
+  border-style: solid !important;
+  border-width: 1px !important;
+  border-color: #ffffff #000000 #000000 #ffffff !important;
+  background-color: var(--surface-1) !important;
+  box-shadow:
+    inset 1px 1px 0 #dfdfdf,
+    inset -1px -1px 0 #808080 !important;
+}
+
+:root[data-theme='windows95'] :is(
+  input,
+  .search-box,
+  .path-display,
+  .path-input,
+  button:active:not(:disabled),
+  .tab-shell.active
+) {
+  border-style: solid !important;
+  border-width: 1px !important;
+  border-color: #000000 #ffffff #ffffff #000000 !important;
+  box-shadow:
+    inset 1px 1px 0 #808080,
+    inset -1px -1px 0 #dfdfdf !important;
+}
+
+:root[data-theme='windows95'] :is(input, .search-box, .path-display, .path-input) {
+  color: #000000 !important;
+  background-color: #ffffff !important;
+}
+
+:root[data-theme='windows95'] :is(
+  .topbar,
+  .panel-heading,
+  .auth-brand,
+  .workspace-header,
+  .dialog-header,
+  .panel-header,
+  .command-menu > header
+) {
+  color: #ffffff !important;
+  background: var(--title-bar) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='windows95'] :is(
+  .topbar,
+  .panel-heading,
+  .auth-brand,
+  .workspace-header,
+  .dialog-header,
+  .panel-header,
+  .command-menu > header
+) :is(strong, span, p, button) {
+  color: inherit !important;
+}
+
+:root[data-theme='windows95'] :is(
+  .global-status,
+  .panel-status,
+  .dialog-footer,
+  .auth-card footer
+) {
+  color: var(--text-2) !important;
+  background: var(--surface-1) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='windows95'] :is(
+  .dialog-backdrop,
+  .rename-backdrop,
+  .single-rename-backdrop,
+  .upload-backdrop,
+  .extraction-backdrop,
+  .transfer-backdrop,
+  .delete-backdrop,
+  .trash-backdrop,
+  .directory-backdrop,
+  .metrics-backdrop,
+  .update-backdrop
+) {
+  background: rgb(0 0 0 / .46) !important;
+  backdrop-filter: none !important;
+}
+
+:root[data-theme='windows95'] .auth-card {
+  background-color: var(--surface-1) !important;
+}
+
+:root[data-theme='windows95'] .panes {
+  padding: 5px 5px 4px;
+}
+
+:root[data-theme='windows95'] .panel {
+  outline: 1px solid #808080 !important;
+  background: var(--surface-1) !important;
+}
+
+:root[data-theme='windows95'] .panel.active {
+  outline: 2px solid #000000 !important;
+}
+
+:root[data-theme='windows95'] app-file-table :is(th, td) {
+  border-right: 1px solid var(--line);
+}
+
+:root[data-theme='windows95'] app-file-table thead {
+  background: var(--surface-1);
+  box-shadow: 0 1px 0 #000000;
+}
+
+:root[data-theme='windows95'] app-file-table th button {
+  color: #000000;
+  background: var(--surface-1) !important;
+}
+
+:root[data-theme='windows95'] app-file-table tbody tr {
+  border-bottom-color: transparent;
+}
+
+:root[data-theme='windows95'] app-file-table tbody tr.cursor {
+  color: var(--selection-text);
+  background: var(--selection);
+  outline: 1px dotted #ffffff;
+  outline-offset: -2px;
+}
+
+:root[data-theme='windows95'] app-file-table tbody tr.cursor :is(
+  .muted,
+  .type-icon,
+  .link-mark
+) {
+  color: inherit;
+}
+
+:root[data-theme='windows95'] app-file-table tbody tr.cursor td:first-child {
+  box-shadow: none;
+}
+
+:root[data-theme='windows95'] .command-bar {
+  gap: 2px;
+  padding: 2px;
+  border-top: 1px solid #ffffff;
+  background: var(--surface-1) !important;
+}
+
+:root[data-theme='windows95'] .command-bar button {
+  border-style: solid !important;
+  border-width: 1px !important;
+  border-color: #ffffff #000000 #000000 #ffffff !important;
+  color: #000000;
+  background: var(--surface-1) !important;
+  box-shadow:
+    inset 1px 1px 0 #dfdfdf,
+    inset -1px -1px 0 #808080 !important;
+}
+
+:root[data-theme='windows95'] .command-bar button:active:not(:disabled) {
+  border-color: #000000 #ffffff #ffffff #000000 !important;
+  box-shadow:
+    inset 1px 1px 0 #808080,
+    inset -1px -1px 0 #dfdfdf !important;
+}
+
+:root[data-theme='windows95'] .command-bar kbd {
+  border: 0;
+  border-radius: 0;
+  color: #ffffff;
+  background: #000080;
+}
+
+:root[data-theme='windows95'] :is(
+  button,
+  input,
+  select,
+  [tabindex]
+):focus-visible {
+  outline: 1px dotted #000000;
+  outline-offset: -4px;
+}

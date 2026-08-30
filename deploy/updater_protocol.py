@@ -269,17 +269,20 @@ def _operation_reason_code(phase: str, value: object) -> str:
 
 def _validate_response_correlation(
     *,
-    request_id: str,
+    request_id: str | None,
     action: str,
     operation_id: str | None,
     expected_request_id: str | None,
     expected_action: str | None,
     expected_operation_id: str | None,
 ) -> None:
-    if expected_request_id is not None and request_id != _canonical_uuid(
-        expected_request_id, subject="source-management request"
-    ):
-        raise ProtocolError("invalid_request", "The source-management response identifier does not match.")
+    if expected_request_id is not None:
+        if request_id != _canonical_uuid(
+            expected_request_id, subject="source-management request"
+        ):
+            raise ProtocolError(
+                "invalid_request", "The source-management response identifier does not match."
+            )
     if expected_action is not None:
         if not isinstance(expected_action, str) or expected_action not in _SOURCE_ACTIONS:
             raise ProtocolError("invalid_request", "The expected source-management action is invalid.")
@@ -619,7 +622,9 @@ class SourceManagementErrorResponse:
                 "operation_id",
                 _canonical_uuid(self.operation_id, subject="source operation"),
             )
-        if self.operation_id is not None and self.request_action != _SOURCE_OPERATION_ACTION:
+        if (self.request_action == _SOURCE_OPERATION_ACTION) != (
+            self.operation_id is not None
+        ):
             raise ProtocolError("invalid_request", "The source-management error operation is invalid.")
         code = (
             self.code
@@ -723,18 +728,14 @@ class SourceManagementErrorResponse:
         )
         if payload.get("detail") != error.detail:
             raise ProtocolError("invalid_request", "The source-management error payload is invalid.")
-        if error.request_id is None:
-            if expected_request_id is not None:
-                raise ProtocolError("invalid_request", "The source-management response identifier does not match.")
-        else:
-            _validate_response_correlation(
-                request_id=error.request_id,
-                action=error.request_action,
-                operation_id=error.operation_id,
-                expected_request_id=expected_request_id,
-                expected_action=expected_action,
-                expected_operation_id=expected_operation_id,
-            )
+        _validate_response_correlation(
+            request_id=error.request_id,
+            action=error.request_action,
+            operation_id=error.operation_id,
+            expected_request_id=expected_request_id,
+            expected_action=expected_action,
+            expected_operation_id=expected_operation_id,
+        )
         return error
 
 

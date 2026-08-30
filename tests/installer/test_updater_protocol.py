@@ -564,6 +564,65 @@ class SourceManagementProtocolTests(unittest.TestCase):
             ),
         )
 
+    def test_source_management_error_operation_correlation_is_exact_even_without_request_id(self) -> None:
+        operation_id = str(uuid.uuid4())
+        for request_action, error_operation_id in (
+            ("getOperation", None),
+            ("status", operation_id),
+            ("addSource", operation_id),
+        ):
+            with self.subTest(
+                request_action=request_action,
+                operation_id=error_operation_id,
+            ):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementErrorResponse(
+                        None,
+                        "validation_failed",
+                        "ignored",
+                        request_action=request_action,
+                        operation_id=error_operation_id,
+                    )
+
+        error = SourceManagementErrorResponse(
+            None,
+            "validation_failed",
+            "ignored",
+            request_action="getOperation",
+            operation_id=operation_id,
+        )
+        wire = json.dumps(error.to_wire()).encode()
+        self.assertEqual(
+            error,
+            SourceManagementErrorResponse.parse(
+                wire,
+                expected_action="getOperation",
+                expected_operation_id=operation_id,
+            ),
+        )
+        for expected_action, expected_operation_id in (
+            ("status", operation_id),
+            ("getOperation", str(uuid.uuid4())),
+        ):
+            with self.subTest(
+                expected_action=expected_action,
+                expected_operation_id=expected_operation_id,
+            ):
+                with self.assertRaises(ProtocolError):
+                    SourceManagementResponse.parse(
+                        wire,
+                        expected_action=expected_action,
+                        expected_operation_id=expected_operation_id,
+                    )
+
+        with self.assertRaises(ProtocolError):
+            SourceManagementResponse.parse(
+                wire,
+                expected_request_id=str(uuid.uuid4()),
+                expected_action="getOperation",
+                expected_operation_id=operation_id,
+            )
+
 
 class UpdaterDiscoveryTests(unittest.TestCase):
     def state(

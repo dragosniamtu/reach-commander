@@ -289,7 +289,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   font-family: var(--font-ui);
 }
 
-:root[data-theme='windows95'] app-file-table tbody tr.cursor {
+:root[data-theme='windows95'] app-file-table tbody tr:is(.cursor, .selected) {
   --accent-text: #ffffff;
 }
 
@@ -564,7 +564,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   outline-offset: -2px;
 }
 
-:root[data-theme='windows95'] app-file-table tbody tr.cursor :is(
+:root[data-theme='windows95'] app-file-table tbody tr:is(.cursor, .selected) :is(
   .muted,
   .type-icon,
   .link-mark

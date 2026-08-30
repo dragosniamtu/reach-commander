@@ -201,6 +201,58 @@ test('keeps raised Windows 95 header controls and chips dark on gray', async ({ 
   expect(consoleErrors).toEqual([]);
 });
 
+test('keeps accent children white on an Insert-selected non-cursor Windows 95 row', async ({
+  page,
+}) => {
+  const consoleErrors = captureConsoleErrors(page);
+  await resetTheme(page);
+  await page.getByTestId('theme-selector').selectOption('windows95');
+
+  const panel = page.getByTestId('left-panel');
+  const archiveRow = panel.locator('tr[data-path="/nested.zip"]');
+  const archiveIndex = await archiveRow.evaluate((element) =>
+    [...element.parentElement!.children].indexOf(element),
+  );
+  await panel.focus();
+  await page.keyboard.press('Home');
+  for (let index = 0; index < archiveIndex; index += 1) {
+    await page.keyboard.press('ArrowDown');
+  }
+  await expect(archiveRow).toHaveClass(/cursor/);
+  await page.keyboard.press('Insert');
+
+  await expect(archiveRow).toHaveClass(/selected/);
+  await expect(archiveRow).not.toHaveClass(/cursor/);
+  expect(
+    await archiveRow.evaluate((element) => {
+      const row = getComputedStyle(element);
+      const archiveIcon = getComputedStyle(element.querySelector('.type-icon.archive')!);
+      const explicitChildren = [...element.querySelectorAll('.type-icon, .muted, .link-mark')].map(
+        (child) => getComputedStyle(child).color,
+      );
+      return {
+        rowColor: row.color,
+        rowBackground: row.backgroundColor,
+        accentText: row.getPropertyValue('--accent-text').trim(),
+        archiveIconColor: archiveIcon.color,
+        explicitChildren,
+      };
+    }),
+  ).toEqual({
+    rowColor: 'rgb(255, 255, 255)',
+    rowBackground: 'rgb(0, 0, 128)',
+    accentText: '#ffffff',
+    archiveIconColor: 'rgb(255, 255, 255)',
+    explicitChildren: [
+      'rgb(255, 255, 255)',
+      'rgb(255, 255, 255)',
+      'rgb(255, 255, 255)',
+      'rgb(255, 255, 255)',
+    ],
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
 test('uses common square beveled shells and navy title strips for Windows 95 dialogs', async ({
   page,
 }) => {

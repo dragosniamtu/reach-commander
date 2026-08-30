@@ -269,23 +269,28 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(systemUpdate.apply).toHaveBeenCalledOnce();
   });
 
-  it('places an accessible persistent-theme toggle before account and metrics controls', () => {
+  it('places an accessible theme selector before account and metrics controls', () => {
     const actions = fixture.nativeElement.querySelector('.top-actions') as HTMLElement;
-    const button = actions.querySelector(
-      '[data-testid="norton-theme-toggle"]',
-    ) as HTMLButtonElement;
+    const selector = fixture.nativeElement.querySelector(
+      '[data-testid="theme-selector"]',
+    ) as HTMLSelectElement;
 
-    expect(button).not.toBeNull();
-    expect(button.getAttribute('aria-pressed')).toBe('false');
-    expect(button.getAttribute('aria-label')).toBe('Activate Norton theme');
-    expect(button.nextElementSibling?.tagName).toBe('APP-ACCOUNT-MENU');
+    expect(selector).not.toBeNull();
+    expect(selector.getAttribute('aria-label')).toBe('Theme');
+    expect([...selector.options].map(({ value, text }) => [value, text])).toEqual([
+      ['default', 'Modern'],
+      ['norton', 'Norton'],
+      ['windows95', 'Windows 95'],
+    ]);
+    expect(selector.value).toBe('default');
+    expect(selector.parentElement?.nextElementSibling?.tagName).toBe('APP-ACCOUNT-MENU');
 
-    button.click();
+    selector.value = 'windows95';
+    selector.dispatchEvent(new Event('change'));
     fixture.detectChanges();
 
-    expect(document.documentElement.dataset['theme']).toBe('norton');
-    expect(button.getAttribute('aria-pressed')).toBe('true');
-    expect(button.getAttribute('aria-label')).toBe('Deactivate Norton theme');
+    expect(document.documentElement.dataset['theme']).toBe('windows95');
+    expect(selector.value).toBe('windows95');
   });
 
   it('stops polling when the shell is destroyed', () => {

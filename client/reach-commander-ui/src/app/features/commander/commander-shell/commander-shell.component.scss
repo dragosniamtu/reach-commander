@@ -235,7 +235,7 @@
   }
 }
 @media (max-width: 760px) {
-  .top-actions > button:not(.install-app):not(.theme-toggle) {
+  .top-actions > button:not(.install-app) {
     display: none;
   }
 }

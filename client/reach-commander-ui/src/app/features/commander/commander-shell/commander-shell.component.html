@@ -35,19 +35,19 @@
       >
         ⚙
       </button>
-      <button
-        type="button"
-        class="theme-toggle"
-        data-testid="norton-theme-toggle"
-        [class.active]="theme.isNorton()"
-        [attr.aria-pressed]="theme.isNorton()"
-        [attr.aria-label]="theme.isNorton() ? 'Deactivate Norton theme' : 'Activate Norton theme'"
-        [title]="theme.isNorton() ? 'Deactivate Norton theme' : 'Activate Norton theme'"
-        (click)="theme.setTheme(theme.isNorton() ? 'default' : 'norton')"
-      >
-        <span class="theme-label">Norton</span>
-        <span class="theme-label-compact" aria-hidden="true">N</span>
-      </button>
+      <label class="theme-selector" title="Choose interface theme">
+        <span>Theme</span>
+        <select
+          data-testid="theme-selector"
+          aria-label="Theme"
+          [value]="theme.theme()"
+          (change)="selectTheme($event)"
+        >
+          <option value="default">Modern</option>
+          <option value="norton">Norton</option>
+          <option value="windows95">Windows 95</option>
+        </select>
+      </label>
       <app-account-menu />
       <app-system-update-button
         [status]="systemUpdate.status()"

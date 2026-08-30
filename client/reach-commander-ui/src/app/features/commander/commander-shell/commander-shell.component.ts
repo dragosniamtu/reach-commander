@@ -277,6 +277,17 @@ export class CommanderShellComponent implements OnInit {
     }
   }
 
+  selectTheme(event: Event): void {
+    const selectedTheme = (event.target as HTMLSelectElement | null)?.value;
+    if (
+      selectedTheme === 'default' ||
+      selectedTheme === 'norton' ||
+      selectedTheme === 'windows95'
+    ) {
+      this.theme.setTheme(selectedTheme);
+    }
+  }
+
   execute(command: CommanderCommand): void {
     if (this.hasBlockingFileModal()) {
       return;

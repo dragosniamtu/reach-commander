@@ -34,8 +34,8 @@
 * { box-sizing: border-box; }
 html, body { min-height: 100%; margin: 0; background: var(--app-bg); }
 body { color: var(--text-1); font-family: var(--font-ui); overflow: hidden; }
-button, input { font: inherit; }
-button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button, input, select { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 ::selection { color: var(--selection-text); background: var(--selection); }
 
 @media (prefers-color-scheme: light) {
@@ -64,41 +64,37 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
   }
 }
 
-:root .top-actions .theme-toggle {
+:root .top-actions .theme-selector {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
   color: var(--text-2);
+}
+
+:root .top-actions .theme-selector select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text-2);
+  background: var(--surface-3);
   cursor: pointer;
 }
 
-:root .top-actions .theme-toggle:hover,
-:root .top-actions .theme-toggle.active {
+:root .top-actions .theme-selector select:hover,
+:root .top-actions .theme-selector select:focus-visible {
   border-color: var(--accent);
   color: var(--accent-text);
   background: var(--accent-dim);
 }
 
-:root :is(.theme-label, .theme-label-compact) {
+:root .theme-selector > span {
   font: 700 9px/1 var(--font-ui);
 }
 
-:root .theme-label-compact {
-  display: none;
-}
-
 @media (max-width: 760px) {
-  :root .theme-label {
+  :root .theme-selector > span {
     display: none;
-  }
-
-  :root .theme-label-compact {
-    display: inline;
-  }
-
-  :root .top-actions .theme-toggle {
-    width: 31px;
-    padding: 0;
   }
 }
 

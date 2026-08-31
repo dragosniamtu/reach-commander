@@ -25,7 +25,24 @@ fi
 export PATH="$FAKE_BIN:$PATH"
 
 TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf -- "$TEST_ROOT"' EXIT
+TRUSTED_SOURCE_PARENT=''
+
+run_test_as_root() {
+  if (( EUID == 0 )); then
+    "$@"
+  else
+    sudo -- "$@"
+  fi
+}
+
+cleanup_test() {
+  rm -rf -- "$TEST_ROOT"
+  if [[ "$TRUSTED_SOURCE_PARENT" =~ ^/srv/reachcommander-command-test-[0-9]+-[0-9]+$ ]]; then
+    run_test_as_root rm -rf -- "$TRUSTED_SOURCE_PARENT"
+  fi
+}
+
+trap cleanup_test EXIT
 INSTALL_ROOT="$TEST_ROOT/install root"
 COMMAND_PATH="$TEST_ROOT/bin/reachcommander"
 SOURCE_PATH="$TEST_ROOT/source data"
@@ -35,6 +52,16 @@ if [[ "$RUNTIME_UID" == '0' ]]; then
   RUNTIME_UID=1000
   RUNTIME_GID=1000
 fi
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    ;;
+  *)
+    TRUSTED_SOURCE_PARENT="/srv/reachcommander-command-test-${PPID}-${BASHPID}"
+    run_test_as_root install -d -o 0 -g 0 -m 0755 -- "$TRUSTED_SOURCE_PARENT"
+    SOURCE_PATH="$TRUSTED_SOURCE_PARENT/source data"
+    run_test_as_root install -d -o "$RUNTIME_UID" -g "$RUNTIME_GID" -m 0750 -- "$SOURCE_PATH"
+    ;;
+esac
 mkdir -p \
   "$INSTALL_ROOT/bin" \
   "$INSTALL_ROOT/lib" \
@@ -609,8 +636,8 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
     ;;
   *)
-    NEW_SOURCE_PATH="$TEST_ROOT/new source"
-    mkdir -p -- "$NEW_SOURCE_PATH"
+    NEW_SOURCE_PATH="$TRUSTED_SOURCE_PARENT/new source"
+    run_test_as_root install -d -o "$RUNTIME_UID" -g "$RUNTIME_GID" -m 0750 -- "$NEW_SOURCE_PATH"
     : >"$FAKE_DOCKER_LOG"
     run_command_with_input \
       '{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"New Source","hostPath":"'"$NEW_SOURCE_PATH"'","access":"readOnly"}' \
@@ -989,11 +1016,21 @@ assert_equal "1" "$last_status" "doctor invalid previous version status"
 : >"$INSTALL_ROOT/state/previous-version"
 pass "doctor requires and validates display version state"
 
-mv -- "$SOURCE_PATH" "$TEST_ROOT/source-away"
+SOURCE_AWAY="$TEST_ROOT/source-away"
+if [[ -n "$TRUSTED_SOURCE_PARENT" ]]; then
+  SOURCE_AWAY="$TRUSTED_SOURCE_PARENT/source-away"
+  run_test_as_root mv -- "$SOURCE_PATH" "$SOURCE_AWAY"
+else
+  mv -- "$SOURCE_PATH" "$SOURCE_AWAY"
+fi
 run_command doctor
 assert_equal "1" "$last_status" "doctor missing source status"
 [[ "$last_output" == *'[FAIL] Source path is missing'* ]] || fail "doctor missing source failure missing"
-mv -- "$TEST_ROOT/source-away" "$SOURCE_PATH"
+if [[ -n "$TRUSTED_SOURCE_PARENT" ]]; then
+  run_test_as_root mv -- "$SOURCE_AWAY" "$SOURCE_PATH"
+else
+  mv -- "$SOURCE_AWAY" "$SOURCE_PATH"
+fi
 pass "doctor fails when a configured host source is unavailable"
 
 cp -- "$INSTALL_ROOT/config/sources.json" "$TEST_ROOT/sources.backup"

@@ -417,7 +417,7 @@ finally:
   )
   source_capture_pid=$!
   SOURCE_ADD_DRAIN_PID="$source_capture_pid"
-  PYTHONDONTWRITEBYTECODE=1 setsid python3 "$source_helper" >&8 2>/dev/null &
+  PYTHONDONTWRITEBYTECODE=1 setsid python3 "$source_helper" <&0 >&8 2>/dev/null &
   SOURCE_ADD_HELPER_PID=$!
   SOURCE_ADD_HELPER_PGID="$SOURCE_ADD_HELPER_PID"
   if wait "$SOURCE_ADD_HELPER_PID"; then

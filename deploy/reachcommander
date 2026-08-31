@@ -213,12 +213,72 @@ source_management_dependencies_are_safe() {
 
 command_source_add() {
   local source_helper="$RC_INSTALL_ROOT/bin/source_management.py"
+  local source_stdout=''
+  local source_capture_pid=''
+  local source_status=1
+  local output_size=0
+  local emit_status=0
   rc_acquire_lock || return 1
   if ! source_management_dependencies_are_safe; then
     rc_die 'source-management helper is unavailable or unsafe'
     return 1
   fi
-  PYTHONDONTWRITEBYTECODE=1 python3 "$source_helper"
+  source_stdout="$(mktemp "$RC_INSTALL_ROOT/.source-add-stdout.XXXXXX")" || {
+    printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'
+    return 1
+  }
+  if ! chmod 0600 -- "$source_stdout"; then
+    rm -f -- "$source_stdout"
+    printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'
+    return 1
+  fi
+  exec 8> >(
+    head -c 4097 >"$source_stdout"
+    cat >/dev/null
+  )
+  source_capture_pid=$!
+  if PYTHONDONTWRITEBYTECODE=1 python3 "$source_helper" >&8 2>/dev/null; then
+    source_status=0
+  else
+    source_status=$?
+  fi
+  exec 8>&-
+  if ! wait "$source_capture_pid"; then
+    source_status=1
+  fi
+  output_size="$(wc -c <"$source_stdout")"
+  if (( source_status == 0 && output_size > 0 && output_size <= 4096 )); then
+    cat -- "$source_stdout" || emit_status=$?
+    rm -f -- "$source_stdout"
+    return "$emit_status"
+  fi
+  rm -f -- "$source_stdout"
+  case "$source_status" in
+    2)
+      printf '%s\n' '{"code":"invalid_request","detail":"The source-management request is invalid."}'
+      return 2
+      ;;
+    3)
+      printf '%s\n' '{"code":"validation_failed","detail":"The source folder could not be accepted."}'
+      return 3
+      ;;
+    4)
+      printf '%s\n' '{"code":"busy","detail":"Another ReachCommander operation is already running."}'
+      return 4
+      ;;
+    5)
+      printf '%s\n' '{"code":"rolled_back","detail":"The source change was rolled back."}'
+      return 5
+      ;;
+    6)
+      printf '%s\n' '{"code":"recovery_failed","detail":"The source change requires manual recovery."}'
+      return 6
+      ;;
+    *)
+      printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'
+      return 1
+      ;;
+  esac
 }
 
 command_start() {
@@ -1205,7 +1265,7 @@ doctor_source_transaction_state() {
       doctor_fail 'Source transaction recovery is required; retry the original source add, then reinstall if recovery still fails'
       ;;
     recovery-unavailable)
-      doctor_fail 'Source transaction recovery data is missing; reinstall or restore the installer-managed state'
+      doctor_fail 'Source transaction recovery data is missing or invalid; restore a verified backup manually or reinstall ReachCommander'
       ;;
     *)
       doctor_fail 'Source transaction state returned an invalid diagnostic result'

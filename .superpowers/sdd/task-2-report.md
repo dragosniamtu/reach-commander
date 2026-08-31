@@ -64,13 +64,19 @@ All REDs were captured before the corresponding production changes. Focused GREE
 
 Follow-up RED checkpoints were captured before implementation for: canonical length and ancestry/identity validation; persisted pairwise overlap; swaps before publication/recreate; failures at live writes 1/2/3; missing parent fsync; prepublication retry wedging; duplicate/ill-typed/semantically invalid journals; transaction/digest manifest mismatch; leaked renderer/journal/stdin exceptions; unsafe ancestry during recovery; missing doctor status; and a failed secondary journal immediately before the first live write. Each focused regression is GREEN.
 
+### Final minor review follow-up
+
+- `doctor` now calls the same strict backup validator before describing any restore-bearing transaction as recoverable. Missing/corrupt manifests, missing files, digest mismatches, and transaction-ID mismatches report `recovery-unavailable` with verified-manual-restore/reinstall guidance. Staging and terminal transactions retain their cleanup-only retry semantics.
+- The command wrapper drains at most 4,097 stdout bytes into one mode-0600 file below the already-validated installer root, discards excess stdout, suppresses stderr, removes the capture on every handled outcome, and releases stdout only after a successful bounded helper run. This does not impose a process-wide file limit on legitimate transaction writes. Nonzero or incompatible startup outcomes ignore all child content and emit fixed JSON selected only from allowlisted statuses 1 through 6. A protected but incompatible helper can no longer expose a traceback, installed path, or exception content; successful source JSON remains unchanged.
+- RED evidence: a corrupt restore-bearing backup was incorrectly reported as `recovery-required` for each of the five material-corruption cases, and a protected incompatible helper exposed its complete Python traceback and injected private path. The focused material/status and command regressions are GREEN.
+
 ## Final verification
 
 | Gate | Result |
 |---|---|
-| `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 79 passed, 3 Windows capability skips |
-| `tests/installer/test_command.sh` | 47/47 passed |
-| `tests/installer/test_install.sh` | 33/33 passed, 2 Windows capability skips |
+| `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 82 passed, 3 Windows capability skips |
+| `tests/installer/test_command.sh` | 48/48 passed |
+| `tests/installer/test_install.sh` | 33/33 passed, 3 Windows capability skips |
 | `tests/installer/test_package.sh` | 7/7 passed |
 | `tests/installer/test_common.sh` | 17/17 passed |
 | `bash -n` on changed production/test shell files | passed |

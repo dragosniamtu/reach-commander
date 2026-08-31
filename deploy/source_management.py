@@ -891,12 +891,18 @@ class SourceTransaction:
                 raise SourceManagementFailure("recovery_failed")
             return "clear"
         if backup_exists:
-            _safe_status(
-                self._transaction_root,
-                kind="directory",
-                mode=0o700,
-                owner=self._owner,
-            )
+            if journal["phase"] in {"staging", "completed", "rolledBack"}:
+                _safe_status(
+                    self._transaction_root,
+                    kind="directory",
+                    mode=0o700,
+                    owner=self._owner,
+                )
+            else:
+                try:
+                    self._validate_backup()
+                except Exception:
+                    return "recovery-unavailable"
             return "recovery-required"
         if journal["phase"] in {
             "publishing",
@@ -978,7 +984,13 @@ def main(arguments: list[str] | None = None) -> int:
             json.dumps({"code": error.code, "detail": str(error)}).encode("utf-8")
             + b"\n",
         )
-        return 2 if error.code in {"invalid_request", "validation_failed"} else 1
+        return {
+            "invalid_request": 2,
+            "validation_failed": 3,
+            "busy": 4,
+            "rolled_back": 5,
+            "recovery_failed": 6,
+        }.get(error.code, 1)
     except Exception:
         error = SourceManagementFailure()
         os.write(

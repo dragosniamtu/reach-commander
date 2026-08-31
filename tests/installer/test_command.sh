@@ -259,6 +259,50 @@ for required_source_file in \
 done
 pass "source add rejects missing trusted dependencies before Python imports or Docker access"
 
+cp -- "$INSTALL_ROOT/bin/source_management.py" "$TEST_ROOT/source-management.compatible.py"
+printf '%s\n' \
+  'raise RuntimeError("protected-helper-startup-/private/source/secret")' \
+  >"$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+run_command_with_input "$source_request" source add
+assert_equal "1" "$last_status" "incompatible protected source helper status"
+assert_equal '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}' \
+  "$last_output" "incompatible protected source helper fixed output"
+[[ "$last_output" != *'Traceback'* ]] || fail "incompatible source helper exposed a traceback"
+[[ "$last_output" != *'/private/source/secret'* ]] || fail "incompatible source helper exposed startup details"
+[[ "$last_output" != *"$INSTALL_ROOT"* ]] || fail "incompatible source helper exposed its installed path"
+if compgen -G "$INSTALL_ROOT/.source-add-*.??????" >/dev/null; then
+  fail "source add retained captured startup output"
+fi
+
+export SOURCE_HELPER_WRITE_PATH="$TEST_ROOT/source-helper-large-write"
+source_python_bin="$TEST_ROOT/source-python-bin"
+original_path="$PATH"
+mkdir -p -- "$source_python_bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -e' \
+  'head -c 20000 /dev/zero >"$SOURCE_HELPER_WRITE_PATH"' \
+  'printf '\''%s\n'\'' '\''{"sourceId":"startup-compatible","displayName":"Startup Compatible"}'\''' \
+  >"$source_python_bin/python3"
+chmod 0755 -- "$source_python_bin/python3"
+export PATH="$source_python_bin:$PATH"
+run_command_with_input "$source_request" source add
+export PATH="$original_path"
+assert_equal "0" "$last_status" "compatible protected source helper status"
+assert_equal '{"sourceId":"startup-compatible","displayName":"Startup Compatible"}' \
+  "$last_output" "compatible protected source helper output"
+assert_equal "20000" "$(wc -c <"$SOURCE_HELPER_WRITE_PATH")" \
+  "source output limit affected helper transaction writes"
+if grep -Eq 'ulimit[[:space:]]+-f' "$COMMAND_SOURCE"; then
+  fail "source output capture applies a process-wide file-size limit"
+fi
+rm -f -- "$SOURCE_HELPER_WRITE_PATH"
+unset SOURCE_HELPER_WRITE_PATH
+cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+pass "source add contains startup output without constraining helper writes"
+
 export FAKE_FLOCK_EXIT=1
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input '{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}' source add
@@ -483,15 +527,62 @@ assert_equal "0" "$last_status" "doctor terminal source journal status"
 [[ "$last_output" == *'[WARN] Source operation journal is present; no recovery transaction is pending'* ]] ||
   fail "doctor terminal source journal warning missing"
 
-mkdir -p -- "$INSTALL_ROOT/backups/.source-transaction"
-chmod 0700 -- "$INSTALL_ROOT/backups/.source-transaction"
+rm -f -- "$INSTALL_ROOT/state/source-operation.json"
+PYTHONDONTWRITEBYTECODE=1 python3 - "$INSTALL_ROOT" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+transaction_id = "12345678-1234-4234-8234-123456789abc"
+transaction_root = root / "backups" / ".source-transaction"
+backup_root = transaction_root / "backup"
+transaction_root.mkdir(mode=0o700)
+backup_root.mkdir(mode=0o700)
+digests = {}
+for relative in ("config/sources.json", "state/source-mounts.json", "compose.yaml"):
+    destination = backup_root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.write_bytes((root / relative).read_bytes())
+    destination.chmod(0o600)
+    digests[relative] = hashlib.sha256(destination.read_bytes()).hexdigest()
+(transaction_root / "manifest.json").write_text(
+    json.dumps(
+        {"schemaVersion": 1, "transactionId": transaction_id, "files": digests}
+    ),
+    encoding="utf-8",
+)
+(transaction_root / "manifest.json").chmod(0o600)
+(root / "state" / "source-operation.json").write_text(
+    json.dumps(
+        {
+            "schemaVersion": 1,
+            "transactionId": transaction_id,
+            "sourceId": "archive",
+            "displayName": "Archive",
+            "phase": "published",
+            "reasonCode": "recovery_required",
+            "updatedAt": "2026-08-31T00:00:00Z",
+        }
+    ),
+    encoding="utf-8",
+)
+(root / "state" / "source-operation.json").chmod(0o600)
+PY
 run_command doctor
 assert_equal "1" "$last_status" "doctor incomplete source transaction status"
 [[ "$last_output" == *'[FAIL] Source transaction recovery is required; retry the original source add'* ]] ||
   fail "doctor actionable source recovery failure missing"
+
+find "$INSTALL_ROOT/backups/.source-transaction" -mindepth 1 -delete
+run_command doctor
+assert_equal "1" "$last_status" "doctor empty recovery material status"
+[[ "$last_output" == *'[FAIL] Source transaction recovery data is missing or invalid; restore a verified backup manually or reinstall ReachCommander'* ]] ||
+  fail "doctor invalid recovery material guidance missing"
 rm -rf -- "$INSTALL_ROOT/backups/.source-transaction"
 rm -f -- "$INSTALL_ROOT/state/source-operation.json"
-pass "doctor reports source journal state and actionable transaction recovery"
+pass "doctor validates source recovery material and reports actionable transaction state"
 
 printf 'do-not-print-/etc/shadow\n' >"$INSTALL_ROOT/state/update-traces/not-a-trace"
 run_command update-log

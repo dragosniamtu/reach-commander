@@ -755,6 +755,71 @@ class SourceTransactionTests(unittest.TestCase):
         self.assertFalse(any("up" in call for call in commands.calls))
         self.assertTrue((self.root / "backups" / ".source-transaction").exists())
 
+    def test_doctor_validates_every_restore_bearing_backup_before_calling_it_recoverable(self) -> None:
+        def remove_manifest(root: Path) -> None:
+            (root / "backups" / ".source-transaction" / "manifest.json").unlink()
+
+        def corrupt_manifest(root: Path) -> None:
+            (root / "backups" / ".source-transaction" / "manifest.json").write_text(
+                "{not-json", encoding="utf-8"
+            )
+
+        def remove_backup_file(root: Path) -> None:
+            (root / "backups" / ".source-transaction" / "backup" / "compose.yaml").unlink()
+
+        def replace_manifest_value(root: Path, key: str, value: str) -> None:
+            path = root / "backups" / ".source-transaction" / "manifest.json"
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            if key == "transactionId":
+                manifest[key] = value
+            else:
+                manifest["files"][key] = value
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            path.chmod(0o600)
+
+        corruptions = (
+            ("missing manifest", remove_manifest),
+            ("corrupt manifest", corrupt_manifest),
+            ("missing backup file", remove_backup_file),
+            (
+                "digest mismatch",
+                lambda root: replace_manifest_value(root, "compose.yaml", "0" * 64),
+            ),
+            (
+                "transaction mismatch",
+                lambda root: replace_manifest_value(
+                    root,
+                    "transactionId",
+                    "87654321-4321-4321-8321-cba987654321",
+                ),
+            ),
+        )
+
+        for label, corrupt in corruptions:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "install"
+                fixture = SourceFixture(root, self.source_management)
+                with self.assertRaises(self.source_management.SimulatedInterruption):
+                    fixture.manager(interrupt_after="published").add(add_request())
+                corrupt(root)
+                self.assertEqual("recovery-unavailable", fixture.manager().doctor_state())
+
+        with self.assertRaises(self.source_management.SimulatedInterruption):
+            self.fixture.manager(interrupt_after="published").add(add_request())
+        self.assertEqual("recovery-required", self.fixture.manager().doctor_state())
+
+    def test_doctor_preserves_cleanup_only_staging_and_terminal_transactions(self) -> None:
+        for phase in ("staging", "completed", "rolledBack"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "install"
+                fixture = SourceFixture(root, self.source_management)
+                manager = fixture.manager()
+                manager._journal(phase, "archive", "Archive")
+                transaction_root = root / "backups" / ".source-transaction"
+                transaction_root.mkdir(mode=0o700)
+                transaction_root.chmod(0o700)
+                self.assertEqual("recovery-required", manager.doctor_state())
+
     def test_public_boundary_sanitizes_append_render_and_journal_failures(self) -> None:
         secret = "/private/source/command-output"
 
@@ -844,6 +909,26 @@ class SourceTransactionTests(unittest.TestCase):
         emitted = b"".join(call.args[1] for call in write.call_args_list)
         self.assertNotIn(secret.encode(), emitted)
         self.assertIn(b"source_management_failed", emitted)
+
+    def test_main_uses_distinct_allowlisted_statuses_for_public_failures(self) -> None:
+        expected_statuses = {
+            "source_management_failed": 1,
+            "invalid_request": 2,
+            "validation_failed": 3,
+            "busy": 4,
+            "rolled_back": 5,
+            "recovery_failed": 6,
+        }
+        fake_stdin = SimpleNamespace(buffer=SimpleNamespace(read=mock.Mock(return_value=b"{}")))
+        for code, expected_status in expected_statuses.items():
+            with self.subTest(code=code), mock.patch.object(
+                self.source_management.sys, "stdin", fake_stdin
+            ), mock.patch.object(
+                self.source_management.SourceTransaction,
+                "add",
+                side_effect=self.source_management.SourceManagementFailure(code),
+            ), mock.patch.object(self.source_management.os, "write"):
+                self.assertEqual(expected_status, self.source_management.main())
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ Implementation and local verification are complete on `master`. The scoped commi
 - Excluded only `POST /api/source-management/sources` from the general mutation-lease middleware so the coordinator can own the drain without waiting on its own request. Ordinary file mutations remain blocked while a source restart is active.
 - Retains the drain for accepted nonterminal operations and starts a bounded internal monitor. Browser polling is not required to release the drain after host validation failure or another terminal result. A reconnect can join an already active operation, and timeout, failure, cancellation, or service disposal releases the local drain.
 - Fixed an atomic monitor handoff race so completion of one operation cannot orphan the monitor for a newly accepted operation.
+- Tracks monitor ownership by operation ID, so a terminal browser poll followed immediately by another accepted operation starts a new monitor even while the prior monitor is still unwinding.
 - Added a strict source-management v5 Unix-socket gateway on the existing bounded transport. It emits only fixed actions and narrow JSON, enforces a 4 KiB message cap, exact duplicate-free schemas, canonical request/operation UUID correlation, exact action/version matching, phase/reason/detail allowlists, source identity rules, UTC timestamp order, and sanitized host errors.
 - Maps an older host protocol to the explicit `supported: false`, `installer_upgrade_required` capability. Other request/action/identifier correlation failures remain fail-closed.
 - Registers the Unix gateway only for enabled Linux deployments whose configured installer socket exists. Windows, macOS, and manual/missing-socket deployments receive a platform/deployment-specific unavailable gateway without probing privileged host state.
@@ -34,6 +35,8 @@ The controller integration suite was added before the API surface. Eleven behavi
 - A deterministic completion/acceptance race timed out because the first monitor cleared operation state before clearing its task, leaving the next operation without a monitor.
 - An old protocol-v3 helper response threw a generic incompatibility failure instead of returning the installer-upgrade capability.
 - Numeric JSON access value `0` was accepted as `readOnly` by the global enum converter instead of being rejected as an invalid public contract.
+- A terminal browser operation poll could release operation one while its monitor was still active; operation two then saw the stale monitor and received no monitor of its own.
+- The trailing-slash form of the Add route retained a general mutation lease, causing the source coordinator to wait on its own request. The optional single trailing slash is now recognized without exempting arbitrary child paths.
 
 Each RED failed for the expected missing or unsafe behavior before the corresponding production change. All focused regressions are now GREEN.
 
@@ -52,11 +55,11 @@ Each RED failed for the expected missing or unsafe behavior before the correspon
 
 | Gate | Result |
 |---|---|
-| Focused source-management unit tests | 26/26 passed |
-| Focused source-management API integration tests | 13/13 passed |
+| Focused source-management unit tests | 27/27 passed |
+| Focused source-management API integration tests | 14/14 passed |
 | Full Debug unit tests | 677/677 passed |
 | Full Debug integration tests before final numeric-contract regression | 124/124 passed |
-| `dotnet test ReachCommander.slnx -c Release --no-restore` | 677 unit + 125 integration passed; zero failures/skips |
+| `dotnet test ReachCommander.slnx -c Release --no-restore` | 678 unit + 126 integration passed; zero failures/skips |
 | `dotnet publish src/ReachCommander.Api/ReachCommander.Api.csproj -c Release --no-restore -o artifacts/task4-publish -p:BuildAngularOnPublish=false` | passed |
 | `git diff --check` | passed |
 

@@ -18,6 +18,7 @@ public sealed class SourceManagementCoordinator(
     private Guid? _activeOperationId;
     private bool _ownsDrain;
     private Task? _activeMonitor;
+    private Guid? _activeMonitorOperationId;
     private int _disposed;
 
     public Task<SourceManagementCapability> GetStatusAsync(
@@ -194,10 +195,12 @@ public sealed class SourceManagementCoordinator(
 
             _activeOperationId = operationId;
             _ownsDrain |= ownsDrain;
-            if (_activeMonitor is not { IsCompleted: false })
+            if (_activeMonitor is not { IsCompleted: false } ||
+                _activeMonitorOperationId != operationId)
             {
                 monitorOwner = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 _activeMonitor = monitorOwner.Task;
+                _activeMonitorOperationId = operationId;
             }
         }
 
@@ -257,6 +260,7 @@ public sealed class SourceManagementCoordinator(
                 if (ReferenceEquals(_activeMonitor, completion.Task))
                 {
                     _activeMonitor = null;
+                    _activeMonitorOperationId = null;
                     if (_activeOperationId == operationId)
                     {
                         _activeOperationId = null;

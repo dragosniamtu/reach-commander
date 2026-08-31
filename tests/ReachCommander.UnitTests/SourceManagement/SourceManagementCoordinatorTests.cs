@@ -210,6 +210,31 @@ public sealed class SourceManagementCoordinatorTests
         Assert.Equal(2, gate.CancelDrainCount);
     }
 
+    [Fact]
+    public async Task Terminal_browser_poll_cannot_orphan_the_next_accepted_operation()
+    {
+        var firstId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var secondId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var gateway = new StubGateway
+        {
+            AddOperations = new Queue<SourceManagementOperation>(
+                [AcceptedOperation(firstId), AcceptedOperation(secondId)]),
+            ObservedOperations = new Queue<SourceManagementOperation>(
+                [CompletedOperation(firstId), CompletedOperation(secondId)]),
+        };
+        var delay = new ReleaseFirstMonitorDelay();
+        var gate = new TrackingMutationGate();
+        var coordinator = Coordinator(gateway, gate: gate, monitorDelay: delay);
+
+        await coordinator.AddAsync(Request, default);
+        await coordinator.GetOperationAsync(firstId, default);
+        await coordinator.AddAsync(Request, default);
+        await gate.SecondDrainCancelled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        delay.ReleaseFirst.TrySetResult();
+
+        Assert.Equal(2, gate.CancelDrainCount);
+    }
+
     private static SourceManagementCoordinator Coordinator(
         StubGateway gateway,
         StubEligibility? eligibility = null,
@@ -348,6 +373,9 @@ public sealed class SourceManagementCoordinatorTests
         public TaskCompletionSource DrainCancelled { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource SecondDrainCancelled { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public IAsyncDisposable? TryEnter() => throw new NotSupportedException();
 
         public Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken)
@@ -361,6 +389,10 @@ public sealed class SourceManagementCoordinatorTests
         {
             CancelDrainCount++;
             DrainCancelled.TrySetResult();
+            if (CancelDrainCount >= 2)
+            {
+                SecondDrainCancelled.TrySetResult();
+            }
         }
     }
 

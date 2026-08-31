@@ -146,6 +146,25 @@ public sealed class SourceManagementApiTests
     }
 
     [Fact]
+    public async Task Add_with_trailing_slash_does_not_self_lease()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        factory.SourceManagement.DrainOnAdd = true;
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/source-management/sources/",
+            new { displayName = "Archive", hostPath = "/srv/archive", access = "readOnly" });
+        using var child = await client.PostAsJsonAsync(
+            "/api/source-management/sources/child",
+            new { });
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal(1, factory.SourceManagement.AddCount);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, child.StatusCode);
+    }
+
+    [Fact]
     public async Task Add_requires_antiforgery_for_real_sessions()
     {
         await using var factory = new ReachCommanderApiFactory(useRealSecurity: true);

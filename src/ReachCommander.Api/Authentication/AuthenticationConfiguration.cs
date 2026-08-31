@@ -73,9 +73,8 @@ public static class AuthenticationConfiguration
                 var supportBundle = context.HttpContext.Request.Path.Equals(
                     "/api/system-update/support-bundle",
                     StringComparison.OrdinalIgnoreCase);
-                var sourceManagement = context.HttpContext.Request.Path.Equals(
-                    "/api/source-management/sources",
-                    StringComparison.OrdinalIgnoreCase);
+                var sourceManagement = IsSourceManagementAddPath(
+                    context.HttpContext.Request.Path);
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
@@ -128,6 +127,13 @@ public static class AuthenticationConfiguration
                 QueueLimit = 0,
                 Window = TimeSpan.FromMinutes(1),
             });
+
+    private static bool IsSourceManagementAddPath(PathString path) =>
+        path.StartsWithSegments(
+            "/api/source-management/sources",
+            StringComparison.OrdinalIgnoreCase,
+            out var remaining) &&
+        (remaining == PathString.Empty || remaining == "/");
 
     private static CookieSecurePolicy CookieSecurePolicy(
         IConfiguration configuration,

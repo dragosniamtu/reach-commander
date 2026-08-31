@@ -461,6 +461,11 @@ class SourceManagementRuntimeTests(unittest.TestCase):
         cases = (
             (TimeoutSourceRunner(), "failed", "source_management_failed"),
             (RecordingSourceRunner(returncode=3), "failed", "validation_failed"),
+            (
+                RecordingSourceRunner(returncode=7),
+                "failed",
+                "untrusted_source_ancestry",
+            ),
             (RecordingSourceRunner(returncode=5), "rolledBack", "rolled_back"),
             (
                 RecordingSourceRunner(output=b'{"sourceId":"bad","displayName":"Archive","hostPath":"/srv/private"}'),

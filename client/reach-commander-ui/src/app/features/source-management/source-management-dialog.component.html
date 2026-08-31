@@ -44,6 +44,13 @@
         </h3>
         <p>{{ operation.detail }}</p>
 
+        @if (operation.phase === 'failed') {
+          <p class="warning" role="alert" data-testid="source-failure-diagnostics">
+            Run <code>sudo reachcommander doctor</code> on the Ubuntu host and collect support
+            diagnostics before retrying.
+          </p>
+        }
+
         @if (store.reconnecting()) {
           <p class="reconnecting" role="status">
             Reconnecting to ReachCommander after the managed restart…
@@ -66,8 +73,11 @@
     } @else {
       <div class="dialog-body">
         <p class="intro">
-          The folder must already exist on the Ubuntu host and be accessible to ReachCommander's
-          configured runtime UID and GID. The host generates the source ID and container path.
+          The folder must already exist and be accessible to ReachCommander's configured runtime
+          UID and GID. Every parent must be root-owned and not group- or world-writable; the source
+          folder itself may be owned by the runtime UID/GID. The host generates the source ID and
+          container path. A normal <code>/home/user/…</code> path fails; use a narrow
+          root-controlled stable mount under <code>/srv</code> instead.
         </p>
 
         <label for="source-display-name">

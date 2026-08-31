@@ -1073,6 +1073,7 @@ class SourceTransactionProgress:
     source_id: str
     display_name: str
     phase: str
+    reason_code: str
     updated_at: str
 
 
@@ -1088,7 +1089,9 @@ class SourceTransactionStatusReader:
         "healthChecking": frozenset({"recovery_required"}),
         "completed": frozenset({"completed"}),
         "rolledBack": frozenset({"rolled_back"}),
-        "failed": frozenset({"source_management_failed", "recovery_failed"}),
+        "failed": frozenset(
+            {"source_management_failed", "recovery_failed", "untrusted_source_ancestry"}
+        ),
     }
 
     def __init__(self, path: Path | str) -> None:
@@ -1164,6 +1167,7 @@ class SourceTransactionStatusReader:
                 source_id,
                 display_name,
                 phase,
+                reason,
                 updated_at,
             )
         except (
@@ -1454,7 +1458,11 @@ class SourceManagementRuntime:
         reason_code = {
             "completed": "completed",
             "rolledBack": "rolled_back",
-            "failed": "source_management_failed",
+            "failed": (
+                "untrusted_source_ancestry"
+                if progress.reason_code == "untrusted_source_ancestry"
+                else "source_management_failed"
+            ),
         }.get(public_phase, "in_progress")
         return SourceManagementOperation(
             operation_id=operation.operation_id,
@@ -1494,6 +1502,8 @@ class SourceManagementRuntime:
                 reason_code = "completed"
             elif result.returncode == 3:
                 reason_code = "validation_failed"
+            elif result.returncode == 7:
+                reason_code = "untrusted_source_ancestry"
             elif result.returncode == 5:
                 phase = "rolledBack"
                 reason_code = "rolled_back"

@@ -322,6 +322,11 @@ test('operator docs define installer-managed Add source behavior and recovery', 
     'clean installations include',
     '/run/reachcommander-updater',
     '/var/run/docker.sock',
+    'root-owned and not group- or world-writable',
+    'runtime-owned leaf',
+    '/home/user',
+    'root-controlled stable mount',
+    'sudo install -d -o root -g root -m 0755',
   ]) {
     assert.ok(
       content.toLowerCase().includes(required.toLowerCase()),

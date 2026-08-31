@@ -374,6 +374,44 @@ class SourceManagementProtocolTests(unittest.TestCase):
         self.assertNotIn("Command output", wire)
         self.assertNotIn("runtime token", wire)
 
+    def test_untrusted_source_ancestry_has_one_fixed_sanitized_public_contract(self) -> None:
+        request_id = str(uuid.uuid4())
+        operation = SourceManagementOperation(
+            operation_id=str(uuid.uuid4()),
+            source_id=None,
+            display_name=None,
+            phase="failed",
+            reason_code="untrusted_source_ancestry",
+            detail="Rejected /home/private because uid=1000 mode=0775",
+            created_at="2026-08-31T10:00:00Z",
+            updated_at="2026-08-31T10:00:01Z",
+        )
+        wire = SourceManagementResponse.from_operation(
+            request_id, "getOperation", operation
+        ).to_wire()
+
+        self.assertEqual(
+            "untrusted_source_ancestry", wire["payload"]["reasonCode"]
+        )
+        self.assertEqual(
+            "The source folder's parent directories must be root-owned and not group- or world-writable.",
+            wire["payload"]["detail"],
+        )
+        self.assertNotIn("/home/private", json.dumps(wire))
+        self.assertNotIn("uid=", json.dumps(wire))
+
+        error = SourceManagementErrorResponse(
+            request_id,
+            "untrusted_source_ancestry",
+            "Rejected /home/private because uid=1000 mode=0775",
+            request_action="addSource",
+        ).to_wire()
+        self.assertEqual("untrusted_source_ancestry", error["payload"]["code"])
+        self.assertEqual(
+            "The source folder's parent directories must be root-owned and not group- or world-writable.",
+            error["payload"]["detail"],
+        )
+
     def test_source_management_response_parser_discriminates_and_correlates_error_envelopes(self) -> None:
         request_id = str(uuid.uuid4())
         operation_id = str(uuid.uuid4())

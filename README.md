@@ -32,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 815 cross-platform .NET tests, 461 Angular unit tests, 2 PWA contract tests, and 64 Chromium browser scenarios |
+| Quality | 818 cross-platform .NET tests, 462 Angular unit tests, 2 PWA contract tests, and 64 Chromium browser scenarios |
 
 ## What ReachCommander includes
 
@@ -159,9 +159,19 @@ Rules:
 
 Manual and development deployments add a source by adding its JSON record and an explicit bind mount to the same container path, then restarting the service. Never mount `/` or `/var/run/docker.sock` for convenience. Narrow sources remain recommended. The macOS installer's advanced whole-home choice is the only documented broad-source exception and always masks its installer-owned application-support subtree.
 
-An Ubuntu deployment created by the current signed installer can instead use **Add source** in the authenticated top toolbar. Enter a display name and one existing absolute Ubuntu host folder. The UI accepts a specific child directory such as `/srv/media/family`, not broad roots such as `/`, `/home`, `/srv`, or `/mnt`. Sources are read-only by default. Read/write requires an explicit read/write confirmation because it lets ReachCommander change or delete files in that host folder.
+An Ubuntu deployment created by the current checksum-verified installer can instead use **Add source** in the authenticated top toolbar. Enter a display name and one existing absolute Ubuntu host folder. The UI accepts a specific child directory such as `/srv/family-media`, not broad roots such as `/`, `/home`, `/srv`, or `/mnt`. Every ancestor must be a stable directory owned by root and not group- or world-writable; the source leaf may be runtime-owned and writable. A typical `/home/user/...` path therefore fails because the user-owned home directory is an ancestor. Use a narrow root-controlled stable mount below `/srv` rather than weakening or changing the home directory. Sources are read-only by default. Read/write requires an explicit read/write confirmation because it lets ReachCommander change or delete files in that host folder.
 
-The host generates the source ID and `/sources/<id>` target, validates the folder as the configured runtime UID/GID, updates the protected source and Compose state transactionally, and restarts only the ReachCommander application container. The blocking dialog reconnects automatically and refreshes both pane selectors. Active file or deployment operations block the change. On failure, the prior configuration is restored and the UI shows bounded recovery guidance without exposing host paths or Docker output.
+The host generates the source ID and `/sources/<id>` target, validates the folder as the configured runtime UID/GID, and revalidates the trusted ancestry of every existing configured source before changing anything. If an existing source no longer meets the ancestry rule, the add is rejected without changing the deployment. A successful transaction updates the protected source and Compose state and restarts only the ReachCommander application container. The blocking dialog reconnects automatically and refreshes both pane selectors. Active file or deployment operations block the change. On failure, the prior configuration is restored and the UI shows bounded recovery guidance without exposing host paths or Docker output.
+
+For example, after confirming `/srv` is root-owned `0755`, create only the source leaf for the configured runtime identity and verify access (replace `1000:1000` when the installer uses different IDs):
+
+```bash
+sudo stat -c 'owner=%u mode=%a path=%n' / /srv
+sudo install -d -o 1000 -g 1000 -m 0750 /srv/family-media
+namei -l /srv/family-media
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -r /srv/family-media
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -x /srv/family-media
+```
 
 Existing, older Ubuntu installations must rerun the latest checksum-verified installer once before **Add source** can work. An image-only update cannot replace the root-owned helper. Clean installations include the source helper, restricted `/run/reachcommander-updater` socket boundary, management command, and systemd service immediately; the application container still never mounts `/var/run/docker.sock`. See [Ubuntu: add a source from the UI](docs/deployment/ubuntu.md#add-a-source-from-the-ui) for permission checks, CLI fallback, and support diagnostics.
 

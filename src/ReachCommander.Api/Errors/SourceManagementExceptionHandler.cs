@@ -43,7 +43,8 @@ public sealed class SourceManagementExceptionHandler(
 
     private static int StatusFor(string code) => code switch
     {
-        "source_management_validation_failed" => StatusCodes.Status400BadRequest,
+        "source_management_validation_failed" or "untrusted_source_ancestry" =>
+            StatusCodes.Status400BadRequest,
         "source_management_busy" or "source_management_blocked_by_operations" =>
             StatusCodes.Status409Conflict,
         "source_management_failed" => StatusCodes.Status500InternalServerError,
@@ -56,6 +57,7 @@ public sealed class SourceManagementExceptionHandler(
         "source_management_busy" => "Source management busy",
         "source_management_blocked_by_operations" => "Source management blocked",
         "source_management_validation_failed" => "Source folder not accepted",
+        "untrusted_source_ancestry" => "Source folder parents are not trusted",
         "source_management_failed" => "Source management failed",
         _ => "Source management unavailable",
     };

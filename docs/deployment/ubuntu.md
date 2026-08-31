@@ -246,19 +246,37 @@ Run `sudo reachcommander doctor` after changing host mounts, permissions, the pr
 
 ### Add a source from the UI
 
-The current Ubuntu installer-managed deployment enables **Add source** in the authenticated top toolbar. This is for one existing absolute Ubuntu host folder at a time. Enter a specific child directory such as `/srv/media/family`; the UI workflow rejects `/`, protected system or installer paths, and broad roots such as `/home`, `/srv`, and `/mnt`. It never accepts a container path, Compose fragment, image reference, environment value, or command.
+The current Ubuntu installer-managed deployment enables **Add source** in the authenticated top toolbar. This is for one existing absolute Ubuntu host folder at a time. Enter a specific child directory such as `/srv/family-media`; the UI workflow rejects `/`, protected system or installer paths, and broad roots such as `/home`, `/srv`, and `/mnt`. It never accepts a container path, Compose fragment, image reference, environment value, or command.
 
-Before opening the UI, create or choose the folder and verify its permissions as the exact runtime UID/GID saved in `/opt/reachcommander/.env`. Every parent directory needs traverse permission. Read-only is selected by default and needs read plus traverse access. Read/write also needs write access and an explicit read/write confirmation because ReachCommander can change or delete files in that host folder. For example, with UID/GID `1000:1000`:
+Before opening the UI, create or choose the folder and verify its permissions as the exact runtime UID/GID saved in `/opt/reachcommander/.env`. Every ancestor, up to and including `/`, must be a directory owned by root and not group- or world-writable. The source folder itself is the leaf: it may be owned by the runtime UID/GID and may be writable. This prevents an unprivileged account from replacing a persisted path between validation and container activation.
+
+For a direct child such as `/srv/family-media`, first verify that the existing `/srv` parent is root-owned and mode `0755`, then create only the leaf for runtime UID/GID `1000:1000`:
 
 ```bash
-namei -l /srv/media/family
-sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -r /srv/media/family
-sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -x /srv/media/family
-# Run this third check only for a requested read/write source.
-sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -w /srv/media/family
+sudo stat -c 'owner=%u mode=%a path=%n' / /srv
+sudo install -d -o 1000 -g 1000 -m 0750 /srv/family-media
 ```
 
-Do not recursively `chown` or `chmod` an existing media tree. Grant only the intended directory the minimum ownership, group, or ACL access, then rerun the checks. The host repeats canonical-path, overlap, count, and runtime-identity validation authoritatively.
+If a dedicated parent is needed for stable mount points, create the parent as root-owned `0755` and each runtime-owned leaf separately:
+
+```bash
+sudo install -d -o root -g root -m 0755 /srv/reachcommander-sources
+sudo install -d -o 1000 -g 1000 -m 0750 /srv/reachcommander-sources/family-media
+```
+
+Mount or bind only the intended storage at the leaf; keep the stable parent under root control. A normal `/home/user/...` path fails because `/home/user` is usually user-owned and writable. Do not broadly `chmod` or `chown` `/home`, a user home, `/srv`, or another existing tree to make the check pass; use a narrow root-controlled stable mount below `/srv` instead.
+
+Read-only is selected by default and needs read plus traverse access. Read/write also needs write access and an explicit read/write confirmation because ReachCommander can change or delete files in that host folder. Verify the complete ancestry and runtime access, for example:
+
+```bash
+namei -l /srv/family-media
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -r /srv/family-media
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -x /srv/family-media
+# Run this third check only for a requested read/write source.
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -w /srv/family-media
+```
+
+Do not recursively `chown` or `chmod` an existing media tree. Grant only the intended leaf the minimum ownership, group, or ACL access, then rerun the checks. The host repeats canonical-path, trusted-ancestry, overlap, count, and runtime-identity validation authoritatively. Each Add source transaction also revalidates every existing configured source before staging any change. If an older mapping has an unsafe ancestor, the new add is rejected and the current deployment is left unchanged; prepare a safe stable mount and reconfigure that mapping through the checksum-verified installer before retrying.
 
 After acceptance, the host writes a durable transaction, validates staged Compose state, and restarts only the ReachCommander application container; Docker Engine and unrelated containers keep running. Keep the blocking dialog open. The browser reconnects automatically, retrieves the durable operation result, and refreshes the catalog so the generated source ID appears in both pane selectors. While the operation is active, duplicate submissions and competing update/file-operation restarts are blocked. If activation or health verification fails, the helper restores the previous files and container configuration before reporting rollback.
 
@@ -274,7 +292,7 @@ print(json.dumps({
     "requestId": str(uuid.uuid4()),
     "action": "addSource",
     "displayName": "Family media",
-    "hostPath": "/srv/media/family",
+    "hostPath": "/srv/family-media",
     "access": "readOnly",
 }, separators=(",", ":")))
 PY
@@ -360,5 +378,5 @@ Keep a verified backup until you have confirmed that you no longer need the acco
 - **The login screen requests first-run setup unexpectedly:** run `sudo reachcommander doctor`, confirm `/opt/reachcommander/data/auth/account.json` is present and valid, and restore the account plus `/opt/reachcommander/data/keys` together if they were lost. Do not create a replacement account until the missing state is understood.
 - **An update was interrupted:** do not edit the transaction marker or protected trace. Run `sudo reachcommander update-log`, `sudo journalctl -u reachcommander-updater.service --since today`, and `sudo reachcommander doctor`; use the retained update backup for recovery.
 - **Add source is disabled:** unsupported platforms remain read-only. On an older installer-managed Ubuntu host, rerun the latest checksum-verified installer once; an image-only update cannot upgrade the root-owned source helper.
-- **A source add is rejected:** enter an existing absolute Ubuntu host folder below a specific child directory, check every parent with `namei -l`, and test read/traverse/write access as the configured runtime UID/GID. Do not weaken a broad parent directory.
+- **A source add is rejected:** enter an existing absolute Ubuntu host folder below a specific child directory, check every parent with `namei -l`, and confirm each ancestor is root-owned and not group- or world-writable. Then test read/traverse/write access as the configured runtime UID/GID. `/home/user/...` normally fails; prepare a narrow root-controlled stable mount below `/srv` instead of weakening a broad parent directory. An unsafe existing configured source also blocks a new add until that mapping is safely reconfigured.
 - **A source add timed out or rolled back:** keep the protected operation/transaction files intact, then collect the `doctor`, `status`, systemd status, and updater journal support diagnostics shown above before retrying.

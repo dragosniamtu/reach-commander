@@ -141,7 +141,7 @@ test("reports rollback without activating the requested mapping", async ({ page 
   await expect(page.getByTestId("source-unsafe-candidate")).toHaveCount(0);
 });
 
-test("shows bounded timeout diagnostics without leaking host paths", async ({ page }) => {
+test("shows bounded failed-operation diagnostics without leaking host paths", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
   await page.getByTestId("toolbar-add-source").click();
@@ -153,14 +153,14 @@ test("shows bounded timeout diagnostics without leaking host paths", async ({ pa
   host.publish(sourceOperation({
     displayName: "Cold storage",
     phase: "failed",
-    reasonCode: "source_timeout",
-    detail: "The host operation timed out. Run reachcommander doctor and collect support diagnostics.",
+    reasonCode: "source_management_failed",
+    detail: "The source-management operation could not be completed.",
   }));
   await expect(page.getByRole("heading", { name: "Source could not be added" })).toBeVisible({
     timeout: 5_000,
   });
   const operationDialog = page.getByTestId("source-management-dialog");
-  await expect(operationDialog).toContainText("reachcommander doctor");
+  await expect(operationDialog).toContainText("sudo reachcommander doctor");
   await expect(operationDialog).toContainText("support diagnostics");
   await expect(operationDialog).not.toContainText(/\/opt\/|\/srv\/|docker|compose|sha256:/i);
 });

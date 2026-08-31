@@ -285,7 +285,7 @@ class SourceValidationTests(unittest.TestCase):
         ):
             with self.subTest(status=unsafe_status), self.assertRaises(
                 module.SourceManagementFailure
-            ):
+            ) as raised:
                 module.capture_trusted_source_identity(
                     "/srv/archive",
                     status_reader=lambda path, unsafe=unsafe_status: (
@@ -296,6 +296,26 @@ class SourceValidationTests(unittest.TestCase):
                         else directory_status()
                     ),
                 )
+            self.assertEqual("untrusted_source_ancestry", raised.exception.code)
+            self.assertEqual(
+                "The source folder's parent directories must be root-owned and not group- or world-writable.",
+                str(raised.exception),
+            )
+            self.assertNotIn("/srv/archive", str(raised.exception))
+
+    def test_trusted_source_ancestry_allows_a_runtime_owned_writable_leaf(self) -> None:
+        module = self.source_management
+
+        identity = module.capture_trusted_source_identity(
+            "/srv/reachcommander/archive",
+            status_reader=lambda path: (
+                directory_status(uid=1000, mode=0o770, inode=40)
+                if path == "/srv/reachcommander/archive"
+                else directory_status(uid=0, mode=0o755)
+            ),
+        )
+
+        self.assertEqual((7, 40), identity)
 
     def test_rejects_installer_overlap_and_duplicate_or_nested_sources(self) -> None:
         module = self.source_management
@@ -918,6 +938,7 @@ class SourceTransactionTests(unittest.TestCase):
             "busy": 4,
             "rolled_back": 5,
             "recovery_failed": 6,
+            "untrusted_source_ancestry": 7,
         }
         fake_stdin = SimpleNamespace(buffer=SimpleNamespace(read=mock.Mock(return_value=b"{}")))
         for code, expected_status in expected_statuses.items():

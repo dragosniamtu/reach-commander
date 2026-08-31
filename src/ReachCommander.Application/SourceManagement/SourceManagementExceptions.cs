@@ -33,6 +33,11 @@ public sealed class SourceManagementValidationException()
         "source_management_validation_failed",
         "The source folder could not be accepted.");
 
+public sealed class SourceManagementAncestryUntrustedException()
+    : SourceManagementException(
+        "untrusted_source_ancestry",
+        "The source folder's parent directories must be root-owned and not group- or world-writable.");
+
 public sealed class SourceManagementFailedException()
     : SourceManagementException(
         "source_management_failed",

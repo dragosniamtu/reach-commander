@@ -72,6 +72,8 @@ internal sealed class UnixSourceManagementGateway(
             ["unsupported"] = "Source management is unavailable on this installation.",
             ["busy"] = "Another source-management operation is in progress.",
             ["validation_failed"] = "The source folder could not be accepted.",
+            ["untrusted_source_ancestry"] =
+                "The source folder's parent directories must be root-owned and not group- or world-writable.",
             ["source_management_failed"] =
                 "The source-management operation could not be completed.",
         };
@@ -327,8 +329,15 @@ internal sealed class UnixSourceManagementGateway(
         SourceManagementPhase phase;
         if (phaseName == "failed")
         {
-            if (reasonCode is not ("validation_failed" or "source_management_failed") ||
-                detail != "The source-management operation could not be completed.")
+            var expectedDetail = reasonCode switch
+            {
+                "validation_failed" or "source_management_failed" =>
+                    "The source-management operation could not be completed.",
+                "untrusted_source_ancestry" =>
+                    "The source folder's parent directories must be root-owned and not group- or world-writable.",
+                _ => null,
+            };
+            if (expectedDetail is null || detail != expectedDetail)
             {
                 throw new SourceManagementFailedException();
             }
@@ -418,6 +427,7 @@ internal sealed class UnixSourceManagementGateway(
             "unsupported" => new SourceManagementUnavailableException(),
             "busy" => new SourceManagementBusyException(),
             "validation_failed" => new SourceManagementValidationException(),
+            "untrusted_source_ancestry" => new SourceManagementAncestryUntrustedException(),
             _ => new SourceManagementFailedException(),
         };
     }

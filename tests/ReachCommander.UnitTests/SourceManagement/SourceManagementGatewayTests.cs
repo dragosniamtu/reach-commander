@@ -130,6 +130,51 @@ public sealed class SourceManagementGatewayTests
         Assert.DoesNotContain("/srv/private", exception.PublicDetail, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Host_ancestry_error_maps_to_one_fixed_sanitized_application_failure()
+    {
+        const string detail =
+            "The source folder's parent directories must be root-owned and not group- or world-writable.";
+        var response = ErrorResponse(
+            "addSource",
+            null,
+            "untrusted_source_ancestry",
+            detail);
+
+        var exception = await Assert.ThrowsAsync<SourceManagementAncestryUntrustedException>(() =>
+            Gateway(response).AddAsync(
+                new SourceAddRequest("Archive", "/home/private/archive", SourceAccess.ReadOnly),
+                default));
+
+        Assert.Equal("untrusted_source_ancestry", exception.Code);
+        Assert.Equal(detail, exception.PublicDetail);
+        Assert.DoesNotContain("/home/private", exception.PublicDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Failed_operation_accepts_only_the_fixed_untrusted_ancestry_detail()
+    {
+        var response = OperationResponse("getOperation", "failed")
+            .Replace("source_management_failed", "untrusted_source_ancestry", StringComparison.Ordinal)
+            .Replace(
+                "The source-management operation could not be completed.",
+                "The source folder's parent directories must be root-owned and not group- or world-writable.",
+                StringComparison.Ordinal);
+
+        var operation = await Gateway(response).GetOperationAsync(OperationId, default);
+
+        Assert.Equal(SourceManagementPhase.Failed, operation.Phase);
+        Assert.Equal("untrusted_source_ancestry", operation.ReasonCode);
+        Assert.DoesNotContain("/home", operation.Detail, StringComparison.Ordinal);
+
+        var unsafeResponse = response.Replace(
+            "root-owned and not group- or world-writable.",
+            "root-owned; rejected /home/private.",
+            StringComparison.Ordinal);
+        await Assert.ThrowsAsync<SourceManagementFailedException>(() =>
+            Gateway(unsafeResponse).GetOperationAsync(OperationId, default));
+    }
+
     [Theory]
     [InlineData(
         "\"operationId\":\"22222222-2222-2222-2222-222222222222\"",

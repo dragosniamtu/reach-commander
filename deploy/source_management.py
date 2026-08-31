@@ -64,7 +64,9 @@ _PHASE_REASON_CODES = {
     "healthChecking": frozenset({"recovery_required"}),
     "completed": frozenset({"completed"}),
     "rolledBack": frozenset({"rolled_back"}),
-    "failed": frozenset({"source_management_failed", "recovery_failed"}),
+    "failed": frozenset(
+        {"source_management_failed", "recovery_failed", "untrusted_source_ancestry"}
+    ),
 }
 _PUBLIC_DETAILS = {
     "invalid_request": "The source-management request is invalid.",
@@ -73,6 +75,10 @@ _PUBLIC_DETAILS = {
     "source_management_failed": "The source-management operation could not be completed.",
     "rolled_back": "The source change was rolled back.",
     "recovery_failed": "The source change requires manual recovery.",
+    "untrusted_source_ancestry": (
+        "The source folder's parent directories must be root-owned and not "
+        "group- or world-writable."
+    ),
 }
 
 
@@ -142,22 +148,26 @@ def capture_trusted_source_identity(
         leaf_status = status_reader(path)
         if not stat.S_ISDIR(leaf_status.st_mode):
             raise SourceManagementFailure("validation_failed")
-        parent = PurePosixPath(path).parent
-        while True:
-            parent_status = status_reader(str(parent))
-            if (
-                not stat.S_ISDIR(parent_status.st_mode)
-                or parent_status.st_uid != 0
-                or stat.S_IMODE(parent_status.st_mode) & 0o022
-            ):
-                raise SourceManagementFailure("validation_failed")
-            if parent == PurePosixPath("/"):
-                break
-            parent = parent.parent
     except SourceManagementFailure:
         raise
     except (OSError, AttributeError, TypeError, ValueError):
         raise SourceManagementFailure("validation_failed") from None
+
+    parent = PurePosixPath(path).parent
+    while True:
+        try:
+            parent_status = status_reader(str(parent))
+        except (OSError, AttributeError, TypeError, ValueError):
+            raise SourceManagementFailure("untrusted_source_ancestry") from None
+        if (
+            not stat.S_ISDIR(parent_status.st_mode)
+            or parent_status.st_uid != 0
+            or stat.S_IMODE(parent_status.st_mode) & 0o022
+        ):
+            raise SourceManagementFailure("untrusted_source_ancestry")
+        if parent == PurePosixPath("/"):
+            break
+        parent = parent.parent
     return (leaf_status.st_dev, leaf_status.st_ino)
 
 
@@ -702,17 +712,26 @@ class SourceTransaction:
             self._remove_transaction_root()
         except SimulatedInterruption:
             raise
-        except Exception:
+        except Exception as error:
             if not publication_started:
+                public_reason = (
+                    "untrusted_source_ancestry"
+                    if isinstance(error, SourceManagementFailure)
+                    and error.code == "untrusted_source_ancestry"
+                    else "source_management_failed"
+                )
                 journal_recorded = self._best_effort_journal(
-                    "failed", source_id, display_name
+                    "failed",
+                    source_id,
+                    display_name,
+                    reason_code=public_reason,
                 )
                 if journal_recorded:
                     try:
                         self._remove_transaction_root()
                     except Exception:
                         pass
-                raise SourceManagementFailure() from None
+                raise SourceManagementFailure(public_reason) from None
             try:
                 self._restore_backup()
                 previous = self._load_installed_request()
@@ -990,6 +1009,7 @@ def main(arguments: list[str] | None = None) -> int:
             "busy": 4,
             "rolled_back": 5,
             "recovery_failed": 6,
+            "untrusted_source_ancestry": 7,
         }.get(error.code, 1)
     except Exception:
         error = SourceManagementFailure()

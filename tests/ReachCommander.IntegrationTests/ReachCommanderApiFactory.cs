@@ -547,6 +547,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
         public bool FailAdd { get; set; }
 
+        public bool FailAncestry { get; set; }
+
         public SourceManagementCapability Capability { get; set; } = new(
             true,
             "supported",
@@ -581,6 +583,11 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             if (FailAdd)
             {
                 throw new SourceManagementFailedException();
+            }
+
+            if (FailAncestry)
+            {
+                throw new SourceManagementAncestryUntrustedException();
             }
 
             Interlocked.Increment(ref _addCount);

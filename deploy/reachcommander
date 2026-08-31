@@ -459,6 +459,10 @@ finally:
       printf '%s\n' '{"code":"recovery_failed","detail":"The source change requires manual recovery."}'
       return 6
       ;;
+    7)
+      printf '%s\n' '{"code":"untrusted_source_ancestry","detail":"The source folder'"'"'s parent directories must be root-owned and not group- or world-writable."}'
+      return 7
+      ;;
     *)
       printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'
       return 1

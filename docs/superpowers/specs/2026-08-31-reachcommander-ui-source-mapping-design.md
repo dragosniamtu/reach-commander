@@ -81,7 +81,7 @@ The existing JSON source catalog is intentionally not hot-reloaded. A successful
 
 ## Installer compatibility
 
-The current image-only updater does not replace the root-owned helper, systemd unit, or management CLI. Therefore an existing installation whose helper predates the source-management protocol cannot gain this privileged capability from a container update alone. It must run the latest signed/checksummed installer once to upgrade the host integration; application data, configured sources, port, access mode, and update channel are preserved by the existing reconfiguration transaction. The UI reports this state explicitly instead of presenting a broken Add source action.
+The current image-only updater does not replace the root-owned helper, systemd unit, or management CLI. Therefore an existing installation whose helper predates the source-management protocol cannot gain this privileged capability from a container update alone. It must run the latest checksum-verified installer once to upgrade the host integration; application data, configured sources, port, access mode, and update channel are preserved by the existing reconfiguration transaction. The UI reports this state explicitly instead of presenting a broken Add source action.
 
 New clean installations made from the source-management release include the compatible helper immediately. This release also records the host-helper capability/version in status and diagnostics so future work can add a separately verified host-integration update path without guessing from the container version.
 

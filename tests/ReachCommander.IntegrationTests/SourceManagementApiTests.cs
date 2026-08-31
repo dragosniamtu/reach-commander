@@ -204,6 +204,26 @@ public sealed class SourceManagementApiTests
     }
 
     [Fact]
+    public async Task Add_untrusted_ancestry_failure_has_a_fixed_actionable_problem_detail()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        factory.SourceManagement.FailAncestry = true;
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/source-management/sources",
+            new { displayName = "Archive", hostPath = "/home/private/archive", access = "readOnly" });
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("untrusted_source_ancestry", payload.GetProperty("code").GetString());
+        Assert.Equal(
+            "The source folder's parent directories must be root-owned and not group- or world-writable.",
+            payload.GetProperty("detail").GetString());
+        Assert.DoesNotContain("/home/private", payload.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Add_has_a_dedicated_per_ip_rate_limit()
     {
         await using var factory = new ReachCommanderApiFactory();

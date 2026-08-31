@@ -103,6 +103,7 @@ _PUBLIC_SOURCE_ERROR_CODES = frozenset(
         "unsupported",
         "busy",
         "validation_failed",
+        "untrusted_source_ancestry",
         "source_management_failed",
     }
 )
@@ -120,6 +121,10 @@ _PUBLIC_SOURCE_ERROR_DETAILS = {
     "unsupported": "Source management is unavailable on this installation.",
     "busy": "Another source-management operation is in progress.",
     "validation_failed": "The source folder could not be accepted.",
+    "untrusted_source_ancestry": (
+        "The source folder's parent directories must be root-owned and not "
+        "group- or world-writable."
+    ),
     "source_management_failed": "The source-management operation could not be completed.",
 }
 _PUBLIC_SOURCE_OPERATION_DETAILS = {
@@ -132,6 +137,14 @@ _PUBLIC_SOURCE_OPERATION_DETAILS = {
     "rolledBack": "The source change was rolled back.",
     "failed": "The source-management operation could not be completed.",
 }
+_PUBLIC_SOURCE_FAILED_OPERATION_DETAILS = {
+    "validation_failed": "The source-management operation could not be completed.",
+    "untrusted_source_ancestry": (
+        "The source folder's parent directories must be root-owned and not "
+        "group- or world-writable."
+    ),
+    "source_management_failed": "The source-management operation could not be completed.",
+}
 _SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _SOURCE_CAPABILITY_REASON_CODES = frozenset(_PUBLIC_SOURCE_CAPABILITY_DETAILS)
 _SOURCE_OPERATION_REASON_CODES = {
@@ -142,7 +155,9 @@ _SOURCE_OPERATION_REASON_CODES = {
     "healthChecking": frozenset({"in_progress"}),
     "completed": frozenset({"completed"}),
     "rolledBack": frozenset({"rolled_back"}),
-    "failed": frozenset({"validation_failed", "source_management_failed"}),
+    "failed": frozenset(
+        {"validation_failed", "untrusted_source_ancestry", "source_management_failed"}
+    ),
 }
 _SOURCE_ERROR_RESPONSE_FIELDS = frozenset(
     {"requestAction", "operationId", "code", "detail"}
@@ -303,7 +318,9 @@ def _public_capability_detail(supported: bool, reason_code: str) -> str:
     )
 
 
-def _public_operation_detail(phase: str) -> str:
+def _public_operation_detail(phase: str, reason_code: str) -> str:
+    if phase == "failed":
+        return _PUBLIC_SOURCE_FAILED_OPERATION_DETAILS[reason_code]
     return _PUBLIC_SOURCE_OPERATION_DETAILS[phase]
 
 
@@ -454,7 +471,11 @@ class SourceManagementOperation:
         )
         if not isinstance(self.detail, str):
             raise ProtocolError("invalid_request", "The source-management detail is invalid.")
-        object.__setattr__(self, "detail", _public_operation_detail(self.phase))
+        object.__setattr__(
+            self,
+            "detail",
+            _public_operation_detail(self.phase, self.reason_code),
+        )
         object.__setattr__(self, "created_at", _public_timestamp(self.created_at))
         object.__setattr__(self, "updated_at", _public_timestamp(self.updated_at))
         if _parse_public_timestamp(self.created_at) > _parse_public_timestamp(

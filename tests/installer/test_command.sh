@@ -412,6 +412,22 @@ cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_man
 chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
 pass "source add independently validates exact successful JSON"
 
+printf '%s\n' \
+  'raise SystemExit(7)' \
+  >"$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+run_command_with_input_split "$source_request" source add
+assert_equal "7" "$last_status" "untrusted source ancestry status"
+assert_equal \
+  '{"code":"untrusted_source_ancestry","detail":"The source folder'"'"'s parent directories must be root-owned and not group- or world-writable."}' \
+  "$last_stdout" "untrusted source ancestry fixed output"
+assert_equal "" "$last_stderr" "untrusted source ancestry stderr"
+[[ "$last_stdout" != *'/srv/private'* ]] ||
+  fail "untrusted source ancestry output exposed a requested path"
+cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+pass "source add preserves the fixed untrusted ancestry reason"
+
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
     pass "source add isolates helper descendants and bounded drain # SKIP POSIX sessions unavailable"

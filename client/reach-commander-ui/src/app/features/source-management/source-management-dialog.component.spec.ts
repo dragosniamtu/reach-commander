@@ -210,6 +210,27 @@ describe('SourceManagementDialogComponent', () => {
     expect(text).not.toContain('/opt/reachcommander');
   });
 
+  it('shows trusted-parent prerequisites and static host diagnostics for a real failed operation', () => {
+    const initialText = fixture.nativeElement.textContent as string;
+    expect(initialText).toContain('root-owned');
+    expect(initialText).toContain('not group- or world-writable');
+    expect(initialText).toContain('source folder itself may be owned by the runtime UID/GID');
+    expect(initialText).toContain('/home/user/…');
+    expect(initialText).toContain('root-controlled stable mount');
+
+    store.operation.set(operation({
+      phase: 'failed',
+      reasonCode: 'untrusted_source_ancestry',
+      detail: "The source folder's parent directories must be root-owned and not group- or world-writable.",
+    }));
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('sudo reachcommander doctor');
+    expect(text).toContain('support diagnostics');
+    expect(text).not.toContain('/home/private');
+  });
+
   it('presents reconnect and completed catalog-refresh states', () => {
     store.pending.set(true);
     store.reconnecting.set(true);

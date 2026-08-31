@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -n "${REACHCOMMANDER_TEST_DRAIN_PID_PATH:-}" &&
+  "${REACHCOMMANDER_SOURCE_DRAIN:-0}" == '1' ]]; then
+  printf '%s\n' "$$" >"$REACHCOMMANDER_TEST_DRAIN_PID_PATH"
+  if command -v cygpath >/dev/null 2>&1; then
+    arguments=("$@")
+    last_argument=$((${#arguments[@]} - 1))
+    arguments[$last_argument]="$(cygpath -w -- "${arguments[$last_argument]}")"
+    set -- "${arguments[@]}"
+  fi
+fi
+
+if [[ -x /usr/bin/setsid ]]; then
+  exec /usr/bin/setsid "$@"
+fi
+
+exec perl -MPOSIX -e '
+my $session = POSIX::setsid();
+die "setsid failed\n" unless defined $session && $session >= 0;
+exec @ARGV or die "exec failed\n";
+' -- "$@"

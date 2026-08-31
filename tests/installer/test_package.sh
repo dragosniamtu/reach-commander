@@ -109,6 +109,8 @@ mkdir -p "$EXTRACTED"
 tar -xzf "$FIRST_OUTPUT/reachcommander-installer.tar.gz" -C "$EXTRACTED"
 PACKAGE_ROOT="$EXTRACTED/reachcommander-installer"
 assert_equal "v1.2.3" "$(cat -- "$PACKAGE_ROOT/VERSION")" "packaged version"
+grep -Eq 'rc_require_commands .*setsid' "$PACKAGE_ROOT/install.sh" ||
+  fail "packaged installer does not require process-session support"
 
 archive_permissions() {
   local archive_path="$1"

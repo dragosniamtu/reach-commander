@@ -160,7 +160,7 @@ assert_updater_layout_safe() {
 }
 
 preflight() {
-  rc_require_commands docker python3 readlink flock install mktemp setpriv sync find systemctl
+  rc_require_commands docker python3 readlink flock install mktemp setpriv setsid sync find systemctl
   require_bundle
   read_bundle_version
 }

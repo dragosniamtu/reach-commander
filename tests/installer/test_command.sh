@@ -298,13 +298,16 @@ mkdir -p -- "$source_python_bin"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -e' \
+  'if [[ "${1:-}" == "-c" ]]; then exec "$SOURCE_REAL_PYTHON" "$@"; fi' \
   'head -c 20000 /dev/zero >"$SOURCE_HELPER_WRITE_PATH"' \
   'printf '\''%s\n'\'' '\''{"sourceId":"startup-compatible","displayName":"Startup Compatible"}'\''' \
   >"$source_python_bin/python3"
 chmod 0755 -- "$source_python_bin/python3"
+export SOURCE_REAL_PYTHON="$FAKE_BIN/python3"
 export PATH="$source_python_bin:$PATH"
 run_command_with_input "$source_request" source add
 export PATH="$original_path"
+unset SOURCE_REAL_PYTHON
 assert_equal "0" "$last_status" "compatible protected source helper status"
 assert_equal '{"sourceId":"startup-compatible","displayName":"Startup Compatible"}' \
   "$last_output" "compatible protected source helper output"
@@ -364,20 +367,74 @@ cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_man
 chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
 pass "source add independently validates exact successful JSON"
 
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    pass "source add isolates helper descendants and bounded drain # SKIP POSIX sessions unavailable"
+    ;;
+  *)
 export SOURCE_HELPER_READY="$TEST_ROOT/source-helper.ready"
+export SOURCE_DESCENDANT_READY="$TEST_ROOT/source-descendant.ready"
+export REACHCOMMANDER_TEST_DRAIN_PID_PATH="$TEST_ROOT/source-drain.pid"
 printf '%s\n' \
   'import os' \
-  'import signal' \
+  'import subprocess' \
+  'import sys' \
   'import time' \
   'from pathlib import Path' \
-  'signal.signal(signal.SIGTERM, signal.SIG_IGN)' \
+  'child = "import os, signal, time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.signal(signal.SIGINT, signal.SIG_IGN); Path(os.environ[\"SOURCE_DESCENDANT_READY\"]).write_text(str(os.getpid()), encoding=\"ascii\"); time.sleep(600)"' \
+  'subprocess.Popen([sys.executable, "-c", child], stdout=sys.stdout, stderr=subprocess.DEVNULL)' \
   'Path(os.environ["SOURCE_HELPER_READY"]).write_text(str(os.getpid()), encoding="ascii")' \
+  'mode = os.environ["SOURCE_HELPER_MODE"]' \
+  'if mode == "success": print("{\"sourceId\":\"descendant-safe\",\"displayName\":\"Descendant Safe\"}", flush=True); raise SystemExit(0)' \
+  'if mode == "validation": raise SystemExit(3)' \
   'while True: time.sleep(1)' \
   >"$INSTALL_ROOT/bin/source_management.py"
 chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
 printf '%s\n' "$source_request" >"$TEST_ROOT/source-interrupt-request.json"
+
+for source_helper_mode in success validation; do
+  rm -f -- "$SOURCE_HELPER_READY" "$SOURCE_DESCENDANT_READY" "$REACHCOMMANDER_TEST_DRAIN_PID_PATH"
+  export SOURCE_HELPER_MODE="$source_helper_mode"
+  set +e
+  timeout -k 1 5 bash "$COMMAND_SOURCE" source add \
+    <"$TEST_ROOT/source-interrupt-request.json" \
+    >"$TEST_ROOT/source-lingering.stdout" \
+    2>"$TEST_ROOT/source-lingering.stderr"
+  last_status=$?
+  set -e
+  [[ -s "$SOURCE_DESCENDANT_READY" ]] || fail "lingering stdout descendant did not start"
+  source_descendant_pid="$(<"$SOURCE_DESCENDANT_READY")"
+  source_drain_pid=''
+  if [[ -s "$REACHCOMMANDER_TEST_DRAIN_PID_PATH" ]]; then
+    source_drain_pid="$(<"$REACHCOMMANDER_TEST_DRAIN_PID_PATH")"
+  fi
+  descendant_alive=0
+  drain_alive=0
+  kill -0 "$source_descendant_pid" 2>/dev/null && descendant_alive=1
+  if [[ "$source_drain_pid" =~ ^[1-9][0-9]*$ ]]; then
+    kill -0 "$source_drain_pid" 2>/dev/null && drain_alive=1
+    kill -KILL "$source_drain_pid" 2>/dev/null || true
+  fi
+  kill -KILL "$source_descendant_pid" 2>/dev/null || true
+  if [[ "$source_helper_mode" == 'success' ]]; then
+    assert_equal "0" "$last_status" "successful helper with lingering stdout descendant status"
+    assert_equal '{"sourceId":"descendant-safe","displayName":"Descendant Safe"}' \
+      "$(<"$TEST_ROOT/source-lingering.stdout")" \
+      "successful helper with lingering stdout descendant output"
+  else
+    assert_equal "3" "$last_status" "failed helper with lingering stdout descendant preserves direct status"
+  fi
+  [[ "$source_drain_pid" =~ ^[1-9][0-9]*$ ]] || fail "normal helper did not start a tracked isolated drain"
+  assert_equal "0" "$descendant_alive" "normal helper left stdout descendant running"
+  assert_equal "0" "$drain_alive" "normal helper left stdout drain running"
+  if compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+    fail "normal helper with lingering stdout descendant retained capture"
+  fi
+done
+
 for source_signal in INT TERM; do
-  rm -f -- "$SOURCE_HELPER_READY"
+  rm -f -- "$SOURCE_HELPER_READY" "$SOURCE_DESCENDANT_READY" "$REACHCOMMANDER_TEST_DRAIN_PID_PATH"
+  export SOURCE_HELPER_MODE=signal
   source_command_pid_path="$TEST_ROOT/source-command.pid"
   rm -f -- "$source_command_pid_path"
   (
@@ -391,14 +448,14 @@ for source_signal in INT TERM; do
     done
     [[ -s "$source_command_pid_path" ]] || exit 1
     kill -s "$source_signal" "$(<"$source_command_pid_path")"
-    sleep 1
+    sleep 2
     if kill -0 "$(<"$source_command_pid_path")" 2>/dev/null; then
-      kill -TERM "$(<"$source_command_pid_path")" 2>/dev/null || true
+      kill -KILL "$(<"$source_command_pid_path")" 2>/dev/null || true
     fi
   ) &
   source_signaler_pid=$!
   set +e
-  bash -c 'trap - INT TERM; printf "%s\n" "$$" >"$2"; exec bash "$1" source add' \
+  timeout -k 1 5 bash -c 'trap - INT TERM; printf "%s\n" "$$" >"$2"; exec bash "$1" source add' \
     reachcommander-interrupt "$COMMAND_SOURCE" "$source_command_pid_path" \
     <"$TEST_ROOT/source-interrupt-request.json" \
     >"$TEST_ROOT/source-interrupt.stdout" \
@@ -407,13 +464,32 @@ for source_signal in INT TERM; do
   set -e
   wait "$source_signaler_pid" || fail "source interrupt signaler failed"
   [[ -s "$SOURCE_HELPER_READY" ]] || fail "interruptible source helper did not start"
+  [[ -s "$SOURCE_DESCENDANT_READY" ]] || fail "interruptible source descendant did not start"
+  source_helper_pid="$(<"$SOURCE_HELPER_READY")"
+  source_descendant_pid="$(<"$SOURCE_DESCENDANT_READY")"
+  source_drain_pid=''
+  if [[ -s "$REACHCOMMANDER_TEST_DRAIN_PID_PATH" ]]; then
+    source_drain_pid="$(<"$REACHCOMMANDER_TEST_DRAIN_PID_PATH")"
+  fi
+  helper_alive=0
+  descendant_alive=0
+  drain_alive=0
+  kill -0 "$source_helper_pid" 2>/dev/null && helper_alive=1
+  kill -0 "$source_descendant_pid" 2>/dev/null && descendant_alive=1
+  if [[ "$source_drain_pid" =~ ^[1-9][0-9]*$ ]]; then
+    kill -0 "$source_drain_pid" 2>/dev/null && drain_alive=1
+    kill -KILL "$source_drain_pid" 2>/dev/null || true
+  fi
+  kill -KILL "$source_helper_pid" "$source_descendant_pid" 2>/dev/null || true
   if [[ "$source_signal" == 'INT' ]]; then
     assert_equal "130" "$last_status" "INT-interrupted source add status"
   else
     assert_equal "143" "$last_status" "TERM-interrupted source add status"
   fi
-  source_helper_pid="$(<"$SOURCE_HELPER_READY")"
-  kill -TERM "$source_helper_pid" 2>/dev/null || true
+  [[ "$source_drain_pid" =~ ^[1-9][0-9]*$ ]] || fail "source interrupt did not start a tracked isolated drain"
+  assert_equal "0" "$helper_alive" "$source_signal-interrupted source helper remained running"
+  assert_equal "0" "$descendant_alive" "$source_signal-interrupted source descendant remained running"
+  assert_equal "0" "$drain_alive" "$source_signal-interrupted source drain remained running"
   for _ in {1..100}; do
     if ! compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
       break
@@ -425,7 +501,10 @@ for source_signal in INT TERM; do
     fail "$source_signal-interrupted source add retained captured stdout"
   fi
 done
-unset SOURCE_HELPER_READY
+unset SOURCE_HELPER_READY SOURCE_DESCENDANT_READY SOURCE_HELPER_MODE REACHCOMMANDER_TEST_DRAIN_PID_PATH
+pass "source add isolates helper descendants and bounded drain"
+    ;;
+esac
 cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_management.py"
 chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
 

@@ -76,12 +76,18 @@ Follow-up RED checkpoints were captured before implementation for: canonical len
 - Exit-zero helper output is independently parsed by fixed inline validator code rather than trusted as public output. It rejects duplicate or extra fields, legacy/private shapes, invalid IDs, and untrimmed, non-printable, empty, or overlong names; valid Unicode is preserved. Only canonical compact `sourceId`/`displayName` JSON is emitted. Validator errors and helper stderr remain suppressed, and all invalid exit-zero output maps to the generic fixed status/result.
 - RED evidence: duplicate-key exit-zero JSON returned status 0 unchanged, and a terminated source command retained `.source-add-stdout.*`. The validator, normal/failure cleanup, forced shell-abort, INT/TERM, and post-interruption uninstall-tree regressions are GREEN.
 
+### Process-group and bounded-drain follow-up
+
+- The helper and bounded stdout drain now run as separate `setsid` session/process-group leaders. Installer preflight requires `setsid`. Cleanup sends `TERM` to the complete helper group, closes the only parent writer, applies bounded grace periods, then sends `KILL` and conditionally reaps only processes already known to be stopped; no cleanup path performs an unconditional wait. The direct helper exit status is captured before group cleanup and remains the sole source for the fixed public status mapping.
+- The drain incrementally reads with fixed `os.read` calls and immediately writes at most 4,097 bytes with `os.write`, while consuming all excess output. Valid output is therefore persisted before EOF even when a descendant inherits stdout. Normal exit, status 3, `INT`, and `TERM` regressions use a TERM-ignoring descendant and assert bounded return, no helper/descendant/drain/capture residue, exact signal status, and a valid uninstall tree.
+- RED evidence: a direct helper that printed valid JSON, spawned a descendant holding stdout, and exited 0 timed out with status 124. The package contract also failed because installer preflight did not require session support. The POSIX behavioral cases execute on Linux CI; this Windows host explicitly skips that one capability because MSYS cannot group-signal native Python descendants, while the test shim starts no descendant in the skipped branch.
+
 ## Final verification
 
 | Gate | Result |
 |---|---|
 | `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 82 passed, 3 Windows capability skips |
-| `tests/installer/test_command.sh` | 50/50 passed |
+| `tests/installer/test_command.sh` | 51/51 passed (1 Windows POSIX-session capability skip) |
 | `tests/installer/test_install.sh` | 33/33 passed, 3 Windows capability skips |
 | `tests/installer/test_package.sh` | 7/7 passed |
 | `tests/installer/test_common.sh` | 17/17 passed |
@@ -103,6 +109,7 @@ ShellCheck was not installed in either PowerShell or Git Bash on this Windows ho
 - `tests/installer/test_command.sh`
 - `tests/installer/test_install.sh`
 - `tests/installer/test_package.sh`
+- `tests/installer/fake-bin/setsid`
 - `.superpowers/sdd/task-2-report.md`
 
 ## Self-review and concerns

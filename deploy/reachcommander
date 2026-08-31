@@ -212,29 +212,92 @@ source_management_dependencies_are_safe() {
 }
 
 SOURCE_ADD_CAPTURE=''
-SOURCE_ADD_CAPTURE_PID=''
+SOURCE_ADD_DRAIN_PID=''
 SOURCE_ADD_HELPER_PID=''
+SOURCE_ADD_HELPER_PGID=''
+SOURCE_ADD_WRITER_OPEN=0
+
+source_add_pid_stopped() {
+  local pid="$1"
+  local process_state=''
+  if [[ -r "/proc/$pid/stat" ]]; then
+    IFS= read -r process_state <"/proc/$pid/stat" || return 1
+    process_state="${process_state##*) }"
+    [[ "${process_state:0:1}" == 'Z' || "${process_state:0:1}" == 'X' ]]
+    return
+  fi
+  ! kill -0 "$pid" 2>/dev/null
+}
+
+source_add_wait_pid_stopped() {
+  local pid="$1"
+  local attempts="$2"
+  local attempt
+  for ((attempt = 0; attempt < attempts; attempt += 1)); do
+    if source_add_pid_stopped "$pid"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  source_add_pid_stopped "$pid"
+}
+
+source_add_wait_group_stopped() {
+  local group_id="$1"
+  local attempts="$2"
+  local attempt
+  for ((attempt = 0; attempt < attempts; attempt += 1)); do
+    if ! kill -0 -- "-$group_id" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  ! kill -0 -- "-$group_id" 2>/dev/null
+}
+
+stop_source_add_processes() {
+  local drain_pid="$SOURCE_ADD_DRAIN_PID"
+  local helper_pid="$SOURCE_ADD_HELPER_PID"
+  local helper_pgid="$SOURCE_ADD_HELPER_PGID"
+  local writer_open="$SOURCE_ADD_WRITER_OPEN"
+  SOURCE_ADD_DRAIN_PID=''
+  SOURCE_ADD_HELPER_PID=''
+  SOURCE_ADD_HELPER_PGID=''
+  SOURCE_ADD_WRITER_OPEN=0
+
+  if [[ "$helper_pgid" =~ ^[1-9][0-9]*$ ]]; then
+    kill -TERM -- "-$helper_pgid" 2>/dev/null || true
+  fi
+  if (( writer_open == 1 )); then
+    exec 8>&- 2>/dev/null || true
+  fi
+  if [[ "$helper_pgid" =~ ^[1-9][0-9]*$ ]] &&
+    ! source_add_wait_group_stopped "$helper_pgid" 3; then
+    kill -KILL -- "-$helper_pgid" 2>/dev/null || true
+    source_add_wait_group_stopped "$helper_pgid" 5 || true
+  fi
+
+  if [[ "$drain_pid" =~ ^[1-9][0-9]*$ ]] &&
+    ! source_add_wait_pid_stopped "$drain_pid" 20; then
+    kill -TERM -- "-$drain_pid" 2>/dev/null || true
+    if ! source_add_wait_pid_stopped "$drain_pid" 3; then
+      kill -KILL -- "-$drain_pid" 2>/dev/null || true
+      source_add_wait_pid_stopped "$drain_pid" 5 || true
+    fi
+  fi
+
+  if [[ "$helper_pid" =~ ^[1-9][0-9]*$ ]] && source_add_pid_stopped "$helper_pid"; then
+    wait "$helper_pid" 2>/dev/null || true
+  fi
+  if [[ "$drain_pid" =~ ^[1-9][0-9]*$ ]] && source_add_pid_stopped "$drain_pid"; then
+    wait "$drain_pid" 2>/dev/null || true
+  fi
+}
 
 cleanup_source_add_capture() {
   local candidate="$SOURCE_ADD_CAPTURE"
-  local capture_pid="$SOURCE_ADD_CAPTURE_PID"
-  local helper_pid="$SOURCE_ADD_HELPER_PID"
   SOURCE_ADD_CAPTURE=''
-  SOURCE_ADD_CAPTURE_PID=''
-  SOURCE_ADD_HELPER_PID=''
-  if [[ "$helper_pid" =~ ^[1-9][0-9]*$ ]]; then
-    kill -TERM "$helper_pid" 2>/dev/null || true
-    for _ in 1 2 3; do
-      kill -0 "$helper_pid" 2>/dev/null || break
-      sleep 0.05
-    done
-    kill -KILL "$helper_pid" 2>/dev/null || true
-    wait "$helper_pid" 2>/dev/null || true
-  fi
-  exec 8>&- 2>/dev/null || true
-  if [[ "$capture_pid" =~ ^[1-9][0-9]*$ ]]; then
-    wait "$capture_pid" 2>/dev/null || true
-  fi
+  stop_source_add_processes
   case "$candidate" in
     "$RC_INSTALL_ROOT"/.source-add-stdout.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9])
       if [[ -f "$candidate" && ! -L "$candidate" ]]; then
@@ -315,25 +378,41 @@ command_source_add() {
     printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'
     return 1
   fi
+  SOURCE_ADD_WRITER_OPEN=1
   exec 8> >(
-    head -c 4097 >"$source_stdout"
-    cat >/dev/null
+    REACHCOMMANDER_SOURCE_DRAIN=1 exec setsid python3 -c '
+import os
+import sys
+
+capture_fd = os.open(sys.argv[1], os.O_WRONLY | os.O_TRUNC)
+remaining = 4097
+try:
+    while True:
+        chunk = os.read(0, 65536)
+        if not chunk:
+            break
+        if remaining:
+            captured = chunk[:remaining]
+            while captured:
+                written = os.write(capture_fd, captured)
+                captured = captured[written:]
+            remaining -= min(remaining, len(chunk))
+finally:
+    os.close(capture_fd)
+' "$source_stdout" 2>/dev/null
   )
   source_capture_pid=$!
-  SOURCE_ADD_CAPTURE_PID="$source_capture_pid"
-  PYTHONDONTWRITEBYTECODE=1 python3 "$source_helper" >&8 2>/dev/null &
+  SOURCE_ADD_DRAIN_PID="$source_capture_pid"
+  PYTHONDONTWRITEBYTECODE=1 setsid python3 "$source_helper" >&8 2>/dev/null &
   SOURCE_ADD_HELPER_PID=$!
+  SOURCE_ADD_HELPER_PGID="$SOURCE_ADD_HELPER_PID"
   if wait "$SOURCE_ADD_HELPER_PID"; then
     source_status=0
   else
     source_status=$?
   fi
   SOURCE_ADD_HELPER_PID=''
-  exec 8>&-
-  if ! wait "$source_capture_pid"; then
-    source_status=1
-  fi
-  SOURCE_ADD_CAPTURE_PID=''
+  stop_source_add_processes
   output_size="$(wc -c <"$source_stdout")"
   if (( source_status == 0 && output_size > 0 && output_size <= 4096 )); then
     if validated_output="$(validate_source_add_success "$source_stdout")" &&

@@ -91,9 +91,9 @@ public sealed class SourceManagementCoordinatorTests
     }
 
     [Fact]
-    public async Task Caller_cancellation_reopens_mutation_gate()
+    public async Task Caller_cancellation_after_submission_is_shielded_until_acceptance()
     {
-        var gateway = new StubGateway { CancelAdd = true };
+        var gateway = new StubGateway { BlockAdd = true };
         var gate = new TrackingMutationGate();
         var coordinator = Coordinator(gateway, gate: gate);
         using var cancellation = new CancellationTokenSource();
@@ -101,9 +101,32 @@ public sealed class SourceManagementCoordinatorTests
         await gateway.AddStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         cancellation.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            pending);
+        Assert.False(pending.IsCompleted);
+        gateway.ReleaseAdd.TrySetResult();
+        var accepted = await pending;
 
+        Assert.Equal(SourceManagementPhase.Accepted, accepted.Phase);
+        Assert.Equal(0, gate.CancelDrainCount);
+    }
+
+    [Fact]
+    public async Task Ambiguous_submission_retains_drain_for_the_bounded_safety_window()
+    {
+        var gateway = new StubGateway { UnknownAddOutcome = true };
+        var gate = new TrackingMutationGate();
+        var delay = new ManualMonitorDelay();
+        var coordinator = Coordinator(gateway, gate: gate, monitorDelay: delay);
+
+        await Assert.ThrowsAsync<SourceManagementMutationOutcomeUnknownException>(() =>
+            coordinator.AddAsync(Request, default));
+        await delay.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(0, gate.CancelDrainCount);
+        await Assert.ThrowsAsync<SourceManagementBusyException>(() =>
+            coordinator.AddAsync(Request, default));
+
+        delay.Release.TrySetResult();
+        await gate.DrainCancelled.Task.WaitAsync(TimeSpan.FromSeconds(1));
         Assert.Equal(1, gate.CancelDrainCount);
     }
 
@@ -315,6 +338,8 @@ public sealed class SourceManagementCoordinatorTests
 
         public bool CancelAdd { get; set; }
 
+        public bool UnknownAddOutcome { get; set; }
+
         public TaskCompletionSource AddStarted { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -330,6 +355,11 @@ public sealed class SourceManagementCoordinatorTests
         {
             AddCount++;
             AddStarted.TrySetResult();
+            if (UnknownAddOutcome)
+            {
+                throw new SourceManagementMutationOutcomeUnknownException();
+            }
+
             if (CancelAdd)
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
@@ -378,20 +408,37 @@ public sealed class SourceManagementCoordinatorTests
 
         public IAsyncDisposable? TryEnter() => throw new NotSupportedException();
 
-        public Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        public Task<ISystemMutationDrain?> BeginDrainAsync(
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
         {
             BeginDrainCount++;
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(true);
+            return Task.FromResult<ISystemMutationDrain?>(new TrackingDrain(this));
         }
 
-        public void CancelDrain()
+        private void CancelDrain()
         {
             CancelDrainCount++;
             DrainCancelled.TrySetResult();
             if (CancelDrainCount >= 2)
             {
                 SecondDrainCancelled.TrySetResult();
+            }
+        }
+
+        private sealed class TrackingDrain(TrackingMutationGate owner) : ISystemMutationDrain
+        {
+            private int _disposed;
+
+            public ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    owner.CancelDrain();
+                }
+
+                return ValueTask.CompletedTask;
             }
         }
     }
@@ -411,6 +458,21 @@ public sealed class SourceManagementCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ManualMonitorDelay : ISourceManagementMonitorDelay
+    {
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            return Release.Task.WaitAsync(cancellationToken);
         }
     }
 
@@ -443,10 +505,12 @@ public sealed class SourceManagementCoordinatorTests
 
         public IAsyncDisposable? TryEnter() => throw new NotSupportedException();
 
-        public Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
-            Task.FromResult(true);
+        public Task<ISystemMutationDrain?> BeginDrainAsync(
+            TimeSpan timeout,
+            CancellationToken cancellationToken) => Task.FromResult<ISystemMutationDrain?>(
+                new BlockingDrain(this));
 
-        public void CancelDrain()
+        private void CancelDrain()
         {
             var count = Interlocked.Increment(ref _cancelCount);
             if (count == 1)
@@ -457,6 +521,22 @@ public sealed class SourceManagementCoordinatorTests
             else
             {
                 SecondCancelCompleted.TrySetResult();
+            }
+        }
+
+        private sealed class BlockingDrain(BlockingFirstCancelMutationGate owner)
+            : ISystemMutationDrain
+        {
+            private int _disposed;
+
+            public ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    owner.CancelDrain();
+                }
+
+                return ValueTask.CompletedTask;
             }
         }
     }

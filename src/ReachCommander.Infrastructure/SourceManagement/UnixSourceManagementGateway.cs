@@ -90,8 +90,9 @@ internal sealed class UnixSourceManagementGateway(
                         requestId,
                         action = "status",
                     }),
-                    ParseCapability,
-                    cancellationToken)
+                ParseCapability,
+                mutation: false,
+                cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (SourceManagementProtocolVersionException)
@@ -127,6 +128,7 @@ internal sealed class UnixSourceManagementGateway(
                     },
                 }),
                 ParseOperation,
+                mutation: true,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (SourceManagementProtocolVersionException)
@@ -152,6 +154,7 @@ internal sealed class UnixSourceManagementGateway(
                     operationId = expectedOperationId,
                 }),
                 ParseOperation,
+                mutation: false,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (SourceManagementProtocolVersionException)
@@ -165,6 +168,7 @@ internal sealed class UnixSourceManagementGateway(
         Guid? operationId,
         Func<Guid, Guid?, string> createRequest,
         Func<JsonElement, T> parsePayload,
+        bool mutation,
         CancellationToken cancellationToken)
     {
         var requestId = requestIds.NewId();
@@ -194,10 +198,17 @@ internal sealed class UnixSourceManagementGateway(
         }
         catch (SystemUpdaterProtocolException)
         {
-            throw new SourceManagementFailedException();
+            throw mutation
+                ? new SourceManagementMutationOutcomeUnknownException()
+                : new SourceManagementFailedException();
         }
-        catch (SystemUpdaterUnavailableException)
+        catch (SystemUpdaterUnavailableException exception)
         {
+            if (mutation && exception.RequestMayHaveBeenAccepted)
+            {
+                throw new SourceManagementMutationOutcomeUnknownException();
+            }
+
             throw new SourceManagementUnavailableException();
         }
         catch
@@ -251,15 +262,21 @@ internal sealed class UnixSourceManagementGateway(
         }
         catch (JsonException)
         {
-            throw new SourceManagementFailedException();
+            throw mutation
+                ? new SourceManagementMutationOutcomeUnknownException()
+                : new SourceManagementFailedException();
         }
         catch (InvalidOperationException)
         {
-            throw new SourceManagementFailedException();
+            throw mutation
+                ? new SourceManagementMutationOutcomeUnknownException()
+                : new SourceManagementFailedException();
         }
         catch (FormatException)
         {
-            throw new SourceManagementFailedException();
+            throw mutation
+                ? new SourceManagementMutationOutcomeUnknownException()
+                : new SourceManagementFailedException();
         }
     }
 

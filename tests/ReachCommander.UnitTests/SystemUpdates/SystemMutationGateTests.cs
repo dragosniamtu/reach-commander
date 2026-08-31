@@ -1,3 +1,4 @@
+using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Infrastructure.SystemUpdates;
 
 namespace ReachCommander.UnitTests.SystemUpdates;
@@ -15,7 +16,7 @@ public sealed class SystemMutationGateTests
         Assert.Null(gate.TryEnter());
         Assert.False(drain.IsCompleted);
         await existing.DisposeAsync();
-        Assert.True(await drain);
+        await using var drainLease = Assert.IsAssignableFrom<ISystemMutationDrain>(await drain);
     }
 
     [Fact]
@@ -24,9 +25,7 @@ public sealed class SystemMutationGateTests
         var gate = new SystemMutationGate();
         var existing = Assert.IsAssignableFrom<IAsyncDisposable>(gate.TryEnter());
 
-        Assert.False(await gate.BeginDrainAsync(TimeSpan.FromMilliseconds(20), default));
-        Assert.Null(gate.TryEnter());
-        gate.CancelDrain();
+        Assert.Null(await gate.BeginDrainAsync(TimeSpan.FromMilliseconds(20), default));
 
         var next = Assert.IsAssignableFrom<IAsyncDisposable>(gate.TryEnter());
         await existing.DisposeAsync();
@@ -45,8 +44,35 @@ public sealed class SystemMutationGateTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             gate.BeginDrainAsync(TimeSpan.FromSeconds(1), cancellation.Token));
 
-        Assert.Null(gate.TryEnter());
-        gate.CancelDrain();
         Assert.NotNull(gate.TryEnter());
+    }
+
+    [Fact]
+    public async Task A_second_drain_cannot_overlap_or_release_the_owner()
+    {
+        var gate = new SystemMutationGate();
+        await using var owner = Assert.IsAssignableFrom<ISystemMutationDrain>(
+            await gate.BeginDrainAsync(TimeSpan.FromSeconds(1), default));
+
+        Assert.Null(await gate.BeginDrainAsync(TimeSpan.FromSeconds(1), default));
+        Assert.Null(gate.TryEnter());
+
+        await owner.DisposeAsync();
+        Assert.NotNull(gate.TryEnter());
+    }
+
+    [Fact]
+    public async Task Disposing_a_stale_drain_cannot_reopen_its_successor()
+    {
+        var gate = new SystemMutationGate();
+        var first = Assert.IsAssignableFrom<ISystemMutationDrain>(
+            await gate.BeginDrainAsync(TimeSpan.FromSeconds(1), default));
+        await first.DisposeAsync();
+        await using var second = Assert.IsAssignableFrom<ISystemMutationDrain>(
+            await gate.BeginDrainAsync(TimeSpan.FromSeconds(1), default));
+
+        await first.DisposeAsync();
+
+        Assert.Null(gate.TryEnter());
     }
 }

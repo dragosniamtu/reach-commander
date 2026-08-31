@@ -36,7 +36,7 @@ internal sealed class SystemUpdateCoordinator(
     private Task<SystemUpdateStatus>? _activeCheck;
     private Task? _activeMonitor;
     private string? _activeMonitorOperationId;
-    private bool _activeMonitorOwnsDrain;
+    private ISystemMutationDrain? _activeMonitorDrain;
     private int _disposed;
     private DateTimeOffset? _lastManualCheckStartedAt;
     private SystemUpdateStatus _status = SystemUpdateStatusFactory.Checking(clock.GetUtcNow());
@@ -111,7 +111,7 @@ internal sealed class SystemUpdateCoordinator(
             throw new SystemUpdateInProgressException();
         }
 
-        var drainStarted = false;
+        ISystemMutationDrain? drain = null;
         var keepDrain = false;
         try
         {
@@ -131,9 +131,9 @@ internal sealed class SystemUpdateCoordinator(
                 throw new SystemUpdateUnavailableException();
             }
 
-            drainStarted = true;
-            if (!await mutationGate.BeginDrainAsync(DrainTimeout, cancellationToken)
-                    .ConfigureAwait(false))
+            drain = await mutationGate.BeginDrainAsync(DrainTimeout, cancellationToken)
+                .ConfigureAwait(false);
+            if (drain is null)
             {
                 throw new SystemUpdateFailedException();
             }
@@ -156,7 +156,7 @@ internal sealed class SystemUpdateCoordinator(
             keepDrain = applied.Phase == SystemUpdatePhase.Applying;
             if (keepDrain)
             {
-                StartOrJoinMonitor(snapshot, ownsDrain: true);
+                StartOrJoinMonitor(snapshot, drain);
             }
 
             return applied;
@@ -171,9 +171,9 @@ internal sealed class SystemUpdateCoordinator(
         }
         finally
         {
-            if (drainStarted && !keepDrain)
+            if (drain is not null && !keepDrain)
             {
-                mutationGate.CancelDrain();
+                await drain.DisposeAsync().ConfigureAwait(false);
             }
 
             _applyGate.Release();
@@ -239,7 +239,7 @@ internal sealed class SystemUpdateCoordinator(
             var published = PublishDiscoveredStatus(status);
             if (published.Phase == SystemUpdatePhase.Applying)
             {
-                StartOrJoinMonitor(snapshot, ownsDrain: false);
+                StartOrJoinMonitor(snapshot, ownedDrain: null);
             }
 
             completion.TrySetResult(published);
@@ -278,7 +278,9 @@ internal sealed class SystemUpdateCoordinator(
         }
     }
 
-    private void StartOrJoinMonitor(UpdaterSnapshot snapshot, bool ownsDrain)
+    private void StartOrJoinMonitor(
+        UpdaterSnapshot snapshot,
+        ISystemMutationDrain? ownedDrain)
     {
         var operationId = Required(snapshot.OperationId);
         TaskCompletionSource? owner = null;
@@ -291,7 +293,7 @@ internal sealed class SystemUpdateCoordinator(
                         operationId,
                         StringComparison.Ordinal))
                 {
-                    _activeMonitorOwnsDrain |= ownsDrain;
+                    _activeMonitorDrain ??= ownedDrain;
                 }
 
                 return;
@@ -301,7 +303,7 @@ internal sealed class SystemUpdateCoordinator(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             _activeMonitor = owner.Task;
             _activeMonitorOperationId = operationId;
-            _activeMonitorOwnsDrain = ownsDrain;
+            _activeMonitorDrain = ownedDrain;
         }
 
         _ = CompleteMonitorAsync(snapshot, owner);
@@ -311,7 +313,7 @@ internal sealed class SystemUpdateCoordinator(
         UpdaterSnapshot applyingSnapshot,
         TaskCompletionSource completion)
     {
-        var releaseDrain = false;
+        ISystemMutationDrain? drain = null;
         try
         {
             var result = await operationMonitor.WaitForTerminalAsync(
@@ -349,7 +351,7 @@ internal sealed class SystemUpdateCoordinator(
                     }
                 }
 
-                releaseDrain = _activeMonitorOwnsDrain;
+                drain = _activeMonitorDrain;
                 ClearMonitorLocked();
             }
         }
@@ -381,16 +383,16 @@ internal sealed class SystemUpdateCoordinator(
                         _status = MonitorFailedStatus(_status);
                     }
 
-                    releaseDrain = _activeMonitorOwnsDrain;
+                    drain = _activeMonitorDrain;
                     ClearMonitorLocked();
                 }
             }
         }
         finally
         {
-            if (releaseDrain)
+            if (drain is not null)
             {
-                mutationGate.CancelDrain();
+                await drain.DisposeAsync().ConfigureAwait(false);
             }
 
             completion.TrySetResult();
@@ -518,7 +520,7 @@ internal sealed class SystemUpdateCoordinator(
     {
         _activeMonitor = null;
         _activeMonitorOperationId = null;
-        _activeMonitorOwnsDrain = false;
+        _activeMonitorDrain = null;
     }
 
     private static SystemUpdateStatus Map(UpdaterSnapshot snapshot, DateTimeOffset now)

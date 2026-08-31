@@ -368,6 +368,80 @@ public sealed class UnixSystemUpdaterGatewayTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Unix_transport_rejects_trailing_frames_and_invalid_utf8(bool invalidUtf8)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var socketPath = Path.Combine(Path.GetTempPath(), $"rc-{Guid.NewGuid():N}.sock");
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            listener.Bind(new UnixDomainSocketEndPoint(socketPath));
+            listener.Listen(1);
+            var server = Task.Run(async () =>
+            {
+                using var connection = await listener.AcceptAsync();
+                var buffer = new byte[64];
+                await connection.ReceiveAsync(buffer, SocketFlags.None);
+                var response = invalidUtf8
+                    ? new byte[] { 0xff, (byte)'\n' }
+                    : Encoding.UTF8.GetBytes("{\"ok\":true}\n{\"extra\":true}\n");
+                await connection.SendAsync(response, SocketFlags.None);
+            });
+            var transport = CreateUnixTransport(socketPath);
+
+            await Assert.ThrowsAsync<SystemUpdaterProtocolException>(() =>
+                transport.ExchangeAsync("{\"request\":true}\n", default));
+            await server;
+        }
+        finally
+        {
+            listener.Close();
+            File.Delete(socketPath);
+        }
+    }
+
+    [Fact]
+    public async Task Unix_transport_marks_a_post_send_disconnect_as_ambiguous()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var socketPath = Path.Combine(Path.GetTempPath(), $"rc-{Guid.NewGuid():N}.sock");
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            listener.Bind(new UnixDomainSocketEndPoint(socketPath));
+            listener.Listen(1);
+            var server = Task.Run(async () =>
+            {
+                using var connection = await listener.AcceptAsync();
+                var buffer = new byte[64];
+                await connection.ReceiveAsync(buffer, SocketFlags.None);
+            });
+            var transport = CreateUnixTransport(socketPath);
+
+            var exception = await Assert.ThrowsAsync<SystemUpdaterUnavailableException>(() =>
+                transport.ExchangeAsync("{\"request\":true}\n", default));
+
+            Assert.True(exception.RequestMayHaveBeenAccepted);
+            await server;
+        }
+        finally
+        {
+            listener.Close();
+            File.Delete(socketPath);
+        }
+    }
+
     private static UnixSystemUpdaterTransport CreateUnixTransport(string socketPath) =>
         new(Options.Create(new SystemUpdateOptions
         {

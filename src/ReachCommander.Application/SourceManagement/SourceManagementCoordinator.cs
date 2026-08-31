@@ -16,7 +16,7 @@ public sealed class SourceManagementCoordinator(
     private readonly object _stateLock = new();
     private readonly CancellationTokenSource _lifetime = new();
     private Guid? _activeOperationId;
-    private bool _ownsDrain;
+    private ISystemMutationDrain? _activeDrain;
     private Task? _activeMonitor;
     private Guid? _activeMonitorOperationId;
     private int _disposed;
@@ -35,13 +35,13 @@ public sealed class SourceManagementCoordinator(
             throw new SourceManagementBusyException();
         }
 
-        var drainStarted = false;
+        ISystemMutationDrain? drain = null;
         var retainDrain = false;
         try
         {
             lock (_stateLock)
             {
-                if (_activeOperationId is not null)
+                if (_activeOperationId is not null || _activeDrain is not null)
                 {
                     throw new SourceManagementBusyException();
                 }
@@ -51,28 +51,40 @@ public sealed class SourceManagementCoordinator(
             EnsureSupported(capability);
             await EnsureRestartSafeAsync(cancellationToken).ConfigureAwait(false);
 
-            drainStarted = true;
-            if (!await mutationGate.BeginDrainAsync(DrainTimeout, cancellationToken)
-                    .ConfigureAwait(false))
+            drain = await mutationGate.BeginDrainAsync(DrainTimeout, cancellationToken)
+                .ConfigureAwait(false);
+            if (drain is null)
             {
                 throw new SourceManagementBlockedException();
             }
 
             await EnsureRestartSafeAsync(cancellationToken).ConfigureAwait(false);
-            var operation = await gateway.AddAsync(request, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            SourceManagementOperation operation;
+            try
+            {
+                operation = await gateway.AddAsync(request, _lifetime.Token).ConfigureAwait(false);
+            }
+            catch (SourceManagementMutationOutcomeUnknownException)
+            {
+                retainDrain = true;
+                TrackAmbiguousOutcome(drain);
+                throw;
+            }
+
             retainDrain = !operation.IsTerminal;
             if (retainDrain)
             {
-                TrackOperation(operation.OperationId, ownsDrain: true);
+                TrackOperation(operation.OperationId, drain);
             }
 
             return operation;
         }
         finally
         {
-            if (drainStarted && !retainDrain)
+            if (drain is not null && !retainDrain)
             {
-                mutationGate.CancelDrain();
+                await drain.DisposeAsync().ConfigureAwait(false);
             }
 
             _mutation.Release();
@@ -93,7 +105,7 @@ public sealed class SourceManagementCoordinator(
             .ConfigureAwait(false);
         if (operation.IsTerminal)
         {
-            ReleaseTrackedOperation(operationId);
+            await ReleaseTrackedOperationAsync(operationId).ConfigureAwait(false);
         }
         else
         {
@@ -129,7 +141,7 @@ public sealed class SourceManagementCoordinator(
             }
         }
 
-        ReleaseTrackedOperation(expectedOperationId: null);
+        await ReleaseTrackedOperationAsync(expectedOperationId: null).ConfigureAwait(false);
         _lifetime.Dispose();
         _mutation.Dispose();
     }
@@ -139,7 +151,7 @@ public sealed class SourceManagementCoordinator(
         CancellationToken cancellationToken)
     {
         await _mutation.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var drainStarted = false;
+        ISystemMutationDrain? drain = null;
         var retainDrain = false;
         try
         {
@@ -149,7 +161,7 @@ public sealed class SourceManagementCoordinator(
                 {
                     retainDrain = true;
                 }
-                else if (_activeOperationId is not null)
+                else if (_activeOperationId is not null || _activeDrain is not null)
                 {
                     throw new SourceManagementBusyException();
                 }
@@ -157,33 +169,33 @@ public sealed class SourceManagementCoordinator(
 
             if (!retainDrain)
             {
-                drainStarted = true;
-                if (!await mutationGate.BeginDrainAsync(DrainTimeout, cancellationToken)
-                        .ConfigureAwait(false))
+                drain = await mutationGate.BeginDrainAsync(DrainTimeout, cancellationToken)
+                    .ConfigureAwait(false);
+                if (drain is null)
                 {
                     throw new SourceManagementBlockedException();
                 }
 
                 retainDrain = true;
-                TrackOperation(operationId, ownsDrain: true);
+                TrackOperation(operationId, drain);
             }
             else
             {
-                TrackOperation(operationId, ownsDrain: false);
+                TrackOperation(operationId, ownedDrain: null);
             }
         }
         finally
         {
-            if (drainStarted && !retainDrain)
+            if (drain is not null && !retainDrain)
             {
-                mutationGate.CancelDrain();
+                await drain.DisposeAsync().ConfigureAwait(false);
             }
 
             _mutation.Release();
         }
     }
 
-    private void TrackOperation(Guid operationId, bool ownsDrain)
+    private void TrackOperation(Guid operationId, ISystemMutationDrain? ownedDrain)
     {
         TaskCompletionSource? monitorOwner = null;
         lock (_stateLock)
@@ -194,7 +206,7 @@ public sealed class SourceManagementCoordinator(
             }
 
             _activeOperationId = operationId;
-            _ownsDrain |= ownsDrain;
+            _activeDrain ??= ownedDrain;
             if (_activeMonitor is not { IsCompleted: false } ||
                 _activeMonitorOperationId != operationId)
             {
@@ -207,6 +219,62 @@ public sealed class SourceManagementCoordinator(
         if (monitorOwner is not null)
         {
             _ = CompleteMonitorAsync(operationId, monitorOwner);
+        }
+    }
+
+    private void TrackAmbiguousOutcome(ISystemMutationDrain ownedDrain)
+    {
+        TaskCompletionSource? monitorOwner = null;
+        lock (_stateLock)
+        {
+            if (_activeOperationId is not null || _activeDrain is not null)
+            {
+                throw new SourceManagementBusyException();
+            }
+
+            _activeDrain = ownedDrain;
+            monitorOwner = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _activeMonitor = monitorOwner.Task;
+            _activeMonitorOperationId = null;
+        }
+
+        _ = CompleteAmbiguousMonitorAsync(ownedDrain, monitorOwner);
+    }
+
+    private async Task CompleteAmbiguousMonitorAsync(
+        ISystemMutationDrain ownedDrain,
+        TaskCompletionSource completion)
+    {
+        try
+        {
+            await monitorDelay.DelayAsync(
+                    MonitorInterval * MaximumMonitorAttempts,
+                    _lifetime.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            var releaseDrain = false;
+            lock (_stateLock)
+            {
+                if (ReferenceEquals(_activeMonitor, completion.Task) &&
+                    ReferenceEquals(_activeDrain, ownedDrain))
+                {
+                    _activeMonitor = null;
+                    _activeMonitorOperationId = null;
+                    _activeDrain = null;
+                    releaseDrain = true;
+                }
+            }
+
+            completion.TrySetResult();
+            if (releaseDrain)
+            {
+                await ownedDrain.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 
@@ -254,7 +322,7 @@ public sealed class SourceManagementCoordinator(
         }
         finally
         {
-            var releaseDrain = false;
+            ISystemMutationDrain? drain = null;
             lock (_stateLock)
             {
                 if (ReferenceEquals(_activeMonitor, completion.Task))
@@ -264,23 +332,23 @@ public sealed class SourceManagementCoordinator(
                     if (_activeOperationId == operationId)
                     {
                         _activeOperationId = null;
-                        releaseDrain = _ownsDrain;
-                        _ownsDrain = false;
+                        drain = _activeDrain;
+                        _activeDrain = null;
                     }
                 }
             }
 
             completion.TrySetResult();
-            if (releaseDrain)
+            if (drain is not null)
             {
-                mutationGate.CancelDrain();
+                await drain.DisposeAsync().ConfigureAwait(false);
             }
         }
     }
 
-    private void ReleaseTrackedOperation(Guid? expectedOperationId)
+    private async Task ReleaseTrackedOperationAsync(Guid? expectedOperationId)
     {
-        var releaseDrain = false;
+        ISystemMutationDrain? drain = null;
         lock (_stateLock)
         {
             if (_activeOperationId is null ||
@@ -291,13 +359,13 @@ public sealed class SourceManagementCoordinator(
             }
 
             _activeOperationId = null;
-            releaseDrain = _ownsDrain;
-            _ownsDrain = false;
+            drain = _activeDrain;
+            _activeDrain = null;
         }
 
-        if (releaseDrain)
+        if (drain is not null)
         {
-            mutationGate.CancelDrain();
+            await drain.DisposeAsync().ConfigureAwait(false);
         }
     }
 

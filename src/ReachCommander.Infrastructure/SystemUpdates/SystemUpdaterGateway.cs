@@ -42,8 +42,12 @@ internal sealed class SystemUpdaterProtocolException(string message)
     public string Code { get; } = "system_update_protocol_incompatible";
 }
 
-internal sealed class SystemUpdaterUnavailableException(string message)
-    : Exception(message);
+internal sealed class SystemUpdaterUnavailableException(
+    string message,
+    bool requestMayHaveBeenAccepted = false) : Exception(message)
+{
+    public bool RequestMayHaveBeenAccepted { get; } = requestMayHaveBeenAccepted;
+}
 
 internal sealed class SystemUpdaterGateway(
     ISystemUpdaterTransport transport,

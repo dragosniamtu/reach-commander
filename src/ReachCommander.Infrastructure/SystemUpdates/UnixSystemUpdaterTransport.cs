@@ -17,6 +17,10 @@ internal interface ISystemUpdaterTransport
 internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> options)
     : ISystemUpdaterTransport
 {
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     public async Task<string> ExchangeAsync(string request, CancellationToken cancellationToken)
         => await ExchangeAsync(
             request,
@@ -36,6 +40,7 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
         }
 
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        var requestMayHaveBeenAccepted = false;
         try
         {
             using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
@@ -48,6 +53,7 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
 
             using var responseTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             responseTimeout.CancelAfter(settings.ResponseTimeout);
+            requestMayHaveBeenAccepted = true;
             await SendAllAsync(socket, requestBytes, responseTimeout.Token).ConfigureAwait(false);
             return await ReceiveLineAsync(
                 socket,
@@ -56,11 +62,15 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new SystemUpdaterUnavailableException("The host updater did not respond in time.");
+            throw new SystemUpdaterUnavailableException(
+                "The host updater did not respond in time.",
+                requestMayHaveBeenAccepted);
         }
         catch (SocketException)
         {
-            throw new SystemUpdaterUnavailableException("The host updater socket is unavailable.");
+            throw new SystemUpdaterUnavailableException(
+                "The host updater socket is unavailable.",
+                requestMayHaveBeenAccepted);
         }
         catch (UnauthorizedAccessException)
         {
@@ -68,7 +78,9 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
         }
         catch (IOException)
         {
-            throw new SystemUpdaterUnavailableException("The host updater connection ended unexpectedly.");
+            throw new SystemUpdaterUnavailableException(
+                "The host updater connection ended unexpectedly.",
+                requestMayHaveBeenAccepted);
         }
     }
 
@@ -98,20 +110,41 @@ internal sealed class UnixSystemUpdaterTransport(IOptions<SystemUpdateOptions> o
     {
         var bytes = new List<byte>(4096);
         var buffer = new byte[4096];
+        var terminated = false;
         while (true)
         {
             var count = await socket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken)
                 .ConfigureAwait(false);
             if (count == 0)
             {
-                throw new IOException("The updater response was not newline terminated.");
+                if (!terminated)
+                {
+                    throw new IOException("The updater response was not newline terminated.");
+                }
+
+                try
+                {
+                    return StrictUtf8.GetString(bytes.ToArray());
+                }
+                catch (DecoderFallbackException)
+                {
+                    throw new SystemUpdaterProtocolException(
+                        "The updater response is not valid UTF-8.");
+                }
             }
 
             for (var index = 0; index < count; index++)
             {
-                if (buffer[index] == (byte)'\n')
+                if (terminated || buffer[index] == (byte)'\n')
                 {
-                    return Encoding.UTF8.GetString(bytes.ToArray());
+                    if (terminated || index != count - 1)
+                    {
+                        throw new SystemUpdaterProtocolException(
+                            "The updater response contains more than one frame.");
+                    }
+
+                    terminated = true;
+                    continue;
                 }
 
                 bytes.Add(buffer[index]);

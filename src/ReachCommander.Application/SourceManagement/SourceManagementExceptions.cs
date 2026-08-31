@@ -37,3 +37,8 @@ public sealed class SourceManagementFailedException()
     : SourceManagementException(
         "source_management_failed",
         "The source-management operation could not be completed.");
+
+public sealed class SourceManagementMutationOutcomeUnknownException()
+    : SourceManagementException(
+        "source_management_failed",
+        "The source-management operation could not be completed.");

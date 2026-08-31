@@ -33,6 +33,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
     private readonly TestSystemUpdateService _systemUpdates = new();
     private readonly TestSourceManagementService _sourceManagement = new();
     private readonly TestSystemUpdateSupportBundleService _systemUpdateSupportBundle = new();
+    private ISystemMutationDrain? _testDrain;
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
 
@@ -192,12 +193,21 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     public void ResetArchiveWorker() => _archiveWorker.Reset();
 
-    public async Task<bool> BeginSystemUpdateDrainAsync() =>
-        await Services.GetRequiredService<ISystemMutationGate>()
+    public async Task<bool> BeginSystemUpdateDrainAsync()
+    {
+        _testDrain = await Services.GetRequiredService<ISystemMutationGate>()
             .BeginDrainAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+        return _testDrain is not null;
+    }
 
-    public void CancelSystemUpdateDrain() =>
-        Services.GetRequiredService<ISystemMutationGate>().CancelDrain();
+    public async Task CancelSystemUpdateDrainAsync()
+    {
+        if (_testDrain is { } drain)
+        {
+            _testDrain = null;
+            await drain.DisposeAsync();
+        }
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -527,6 +537,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         private static readonly DateTimeOffset Now =
             DateTimeOffset.Parse("2026-08-31T10:00:00Z");
         private int _addCount;
+        private ISystemMutationDrain? _drain;
 
         public ISystemMutationGate? MutationGate { get; set; }
 
@@ -557,11 +568,14 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 throw new SourceManagementUnavailableException();
             }
 
-            if (DrainOnAdd &&
-                !await (MutationGate ?? throw new InvalidOperationException())
-                    .BeginDrainAsync(TimeSpan.FromMilliseconds(200), cancellationToken))
+            if (DrainOnAdd)
             {
-                throw new SourceManagementBlockedException();
+                _drain = await (MutationGate ?? throw new InvalidOperationException())
+                    .BeginDrainAsync(TimeSpan.FromMilliseconds(200), cancellationToken);
+                if (_drain is null)
+                {
+                    throw new SourceManagementBlockedException();
+                }
             }
 
             if (FailAdd)

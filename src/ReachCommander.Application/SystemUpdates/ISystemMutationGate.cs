@@ -4,7 +4,9 @@ public interface ISystemMutationGate
 {
     IAsyncDisposable? TryEnter();
 
-    Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken);
-
-    void CancelDrain();
+    Task<ISystemMutationDrain?> BeginDrainAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken);
 }
+
+public interface ISystemMutationDrain : IAsyncDisposable;

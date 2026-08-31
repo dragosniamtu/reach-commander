@@ -191,7 +191,7 @@ public sealed class SystemUpdateCoordinatorTests
         await Assert.ThrowsAsync<SystemUpdateFailedException>(() =>
             coordinator.ApplyAsync(default));
 
-        Assert.Equal(1, gate.CancelCount);
+        Assert.Equal(0, gate.CancelCount);
         Assert.Equal(0, gateway.ApplyCount);
     }
 
@@ -787,10 +787,12 @@ public sealed class SystemUpdateCoordinatorTests
 
         public IAsyncDisposable? TryEnter() => throw new NotSupportedException();
 
-        public Task<bool> BeginDrainAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
-            Task.FromResult(DrainResult);
+        public Task<ISystemMutationDrain?> BeginDrainAsync(
+            TimeSpan timeout,
+            CancellationToken cancellationToken) => Task.FromResult<ISystemMutationDrain?>(
+                DrainResult ? new RecordingDrain(this) : null);
 
-        public void CancelDrain()
+        private void CancelDrain()
         {
             CancelCount++;
             _cancelled.TrySetResult();
@@ -798,5 +800,21 @@ public sealed class SystemUpdateCoordinatorTests
 
         public Task WaitForCancelAsync() =>
             _cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        private sealed class RecordingDrain(RecordingMutationGate owner)
+            : ISystemMutationDrain
+        {
+            private int _disposed;
+
+            public ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    owner.CancelDrain();
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 }

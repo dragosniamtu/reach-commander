@@ -156,6 +156,31 @@ public sealed class SourceManagementGatewayTests
         Assert.Equal(cancellation.Token, transport.ObservedToken);
     }
 
+    [Theory]
+    [InlineData(true, typeof(SourceManagementMutationOutcomeUnknownException))]
+    [InlineData(false, typeof(SourceManagementUnavailableException))]
+    public async Task Add_distinguishes_ambiguous_post_send_transport_failure(
+        bool requestMayHaveBeenAccepted,
+        Type expectedException)
+    {
+        var gateway = new UnixSourceManagementGateway(
+            new FailingTransport(requestMayHaveBeenAccepted),
+            new FixedRequestIdGenerator(RequestId));
+
+        var exception = await Record.ExceptionAsync(() => gateway.AddAsync(
+            new SourceAddRequest("Archive", "/srv/archive", SourceAccess.ReadOnly),
+            default));
+
+        Assert.IsType(expectedException, exception);
+        var sourceException = Assert.IsAssignableFrom<SourceManagementException>(exception);
+        Assert.Equal(
+            requestMayHaveBeenAccepted
+                ? "source_management_failed"
+                : "source_management_unavailable",
+            sourceException.Code);
+        Assert.DoesNotContain("private", sourceException.PublicDetail, StringComparison.Ordinal);
+    }
+
     private static UnixSourceManagementGateway Gateway(string response) => new(
         new StubTransport(response),
         new FixedRequestIdGenerator(RequestId));
@@ -257,6 +282,21 @@ public sealed class SourceManagementGatewayTests
             ObservedToken = cancellationToken;
             return Task.FromCanceled<string>(cancellationToken);
         }
+
+        public Task<string> ExchangeAsync(
+            string request,
+            int maximumResponseBytes,
+            CancellationToken cancellationToken) => ExchangeAsync(request, cancellationToken);
+    }
+
+    private sealed class FailingTransport(bool requestMayHaveBeenAccepted)
+        : ISystemUpdaterTransport
+    {
+        public Task<string> ExchangeAsync(
+            string request,
+            CancellationToken cancellationToken) => throw new SystemUpdaterUnavailableException(
+                "private transport failure",
+                requestMayHaveBeenAccepted);
 
         public Task<string> ExchangeAsync(
             string request,

@@ -6,14 +6,14 @@ internal sealed class SystemMutationGate : ISystemMutationGate
 {
     private readonly object _lock = new();
     private TaskCompletionSource _empty = CompletedSource();
-    private bool _draining;
+    private DrainLease? _activeDrain;
     private int _activeLeases;
 
     public IAsyncDisposable? TryEnter()
     {
         lock (_lock)
         {
-            if (_draining)
+            if (_activeDrain is not null)
             {
                 return null;
             }
@@ -27,7 +27,7 @@ internal sealed class SystemMutationGate : ISystemMutationGate
         }
     }
 
-    public async Task<bool> BeginDrainAsync(
+    public async Task<ISystemMutationDrain?> BeginDrainAsync(
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -37,28 +37,44 @@ internal sealed class SystemMutationGate : ISystemMutationGate
         }
 
         Task empty;
+        DrainLease drain;
         lock (_lock)
         {
-            _draining = true;
+            if (_activeDrain is not null)
+            {
+                return null;
+            }
+
+            drain = new DrainLease(this);
+            _activeDrain = drain;
             empty = _empty.Task;
         }
 
         try
         {
             await empty.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
-            return true;
+            return drain;
         }
         catch (TimeoutException)
         {
-            return false;
+            await drain.DisposeAsync().ConfigureAwait(false);
+            return null;
+        }
+        catch
+        {
+            await drain.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
     }
 
-    public void CancelDrain()
+    private void ReleaseDrain(DrainLease drain)
     {
         lock (_lock)
         {
-            _draining = false;
+            if (ReferenceEquals(_activeDrain, drain))
+            {
+                _activeDrain = null;
+            }
         }
     }
 
@@ -95,6 +111,21 @@ internal sealed class SystemMutationGate : ISystemMutationGate
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
                 owner.Exit();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class DrainLease(SystemMutationGate owner) : ISystemMutationDrain
+    {
+        private int _disposed;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                owner.ReleaseDrain(this);
             }
 
             return ValueTask.CompletedTask;

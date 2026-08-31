@@ -163,7 +163,7 @@ public sealed class SystemUpdatesApiTests
         }
         finally
         {
-            factory.CancelSystemUpdateDrain();
+            await factory.CancelSystemUpdateDrainAsync();
         }
     }
 

@@ -275,8 +275,9 @@ export class CommanderShellComponent implements OnInit {
 
   async retryInitialization(): Promise<void> {
     this.initializationError.set(null);
+    void this.sourceManagement.start().catch(() => undefined);
     try {
-      await Promise.all([this.store.initialize(), this.sourceManagement.start()]);
+      await this.store.initialize();
       await this.fileOperations.restoreTasks();
     } catch {
       this.initializationError.set('The ReachCommander server is unavailable.');

@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation, final-review fixes, and local verification are complete on `master`. The original slice is commit `83107b8`; the follow-up review-fix commit is created after this report update. Nothing is pushed. Independent re-review by the parent workflow remains pending.
+Implementation and local verification are complete on `master`. The original slice is commit `83107b8`, lifecycle hardening is commit `8a3e421`, and the final timeout-hardening commit is created after this report update. Nothing is pushed. Independent final re-review by the parent workflow remains pending.
 
 ## Delivered behavior
 
@@ -19,6 +19,9 @@ Implementation, final-review fixes, and local verification are complete on `mast
 - Restricts dialog-wide Enter handling to text inputs. Cancel, access radios, and the read/write acknowledgement keep their native keyboard behavior and cannot accidentally submit.
 - Moves focus to a stable, tabbable in-dialog progress target when the form becomes an operation and again on each terminal transition. The CDK focus trap returns attempted Tab traversal to the dialog instead of the background toolbar.
 - Makes capability discovery retryable after structured server errors or connection failures. Shell reconnect retries call discovery again, and a capability-only failure turns the existing compact toolbar control into an explicit retry action for the current session.
+- Gives each read-only capability, operation-status, and catalog request a bounded 15-second deadline through a separate injected timer. Operation timeouts consume the existing reconnect budget; catalog timeouts consume their independent refresh budget; capability timeouts release the startup latch and enable the existing toolbar retry.
+- Keeps the mutation POST deliberately outside the read-deadline mechanism so an ambiguous accepted/unknown outcome is never presented as a safe retry. Optional capability discovery runs beside, but never blocks, required shell initialization and task restoration.
+- Cancels read-deadline handles separately from scheduled poll handles on authentication reset and store destruction. Both resolution and rejection handlers stay attached to expired/cancelled requests, so late settlement cannot mutate current state or produce an unhandled rejection.
 - Added source-management help copy and explicit Norton/Windows 95 dialog/backdrop compatibility. Compact toolbar, Norton, and Windows 95 browser acceptance remain green.
 
 ## Strict TDD evidence
@@ -47,15 +50,22 @@ Final review identified four gaps. New regressions failed before the fixes becau
 
 The focused review suite initially failed all seven affected behavioral cases. A separate follow-up RED also proved that structured 503 problem responses must expose retry, not only status-zero connection failures. The final implementation uses separate reconnect and catalog counters, deterministic injected scheduling, generated-ID membership checks against fresh replacement lists, text-input-only Enter handling, explicit transition focus, focus-trap boundary coverage, retryable store startup, shell retry integration, and a same-toolbar capability retry action.
 
+### Timeout-review REDs
+
+The timeout review added never-settling deferred requests for every read-only path. After introducing only the injectable deadline contract, the focused store/shell suite failed five behavioral cases: capability, operation, and catalog reads registered no bounded deadline; protected reset left the read pending; and required shell task restoration remained blocked behind optional capability discovery. A cleanup regression was also verified RED with deadline cancellation temporarily removed: reset and destruction each retained one live deadline handle.
+
+GREEN uses a dedicated injected deadline timer, distinct from the poll scheduler and poll handle. Store-owned deadline wrappers attach resolve and reject handlers before awaiting, expire into the correct capability/reconnect/catalog branch, and cancel on the shared reset/destroy invalidation path. Tests exercise late resolution and rejection after expiry/cancellation and assert that a pending mutation POST owns no read-deadline handle.
+
 ## Verification
 
 | Gate | Result |
 |---|---|
 | Initial focused Angular slice | 6 files, 131/131 tests passed |
 | Final focused store/dialog hardening | 2 files, 33/33 tests passed |
-| Final focused Task 5 slice after review fixes | 6 files, 146/146 tests passed |
-| `npm test -- --watch=false` | 57 files, 455/455 tests passed |
-| `npm run build` | passed; 357.41 kB initial, 94.83 kB estimated transfer |
+| Final focused store/shell timeout slice | 2 files, 52/52 tests passed |
+| Final focused Task 5 slice after timeout hardening | 6 files, 152/152 tests passed |
+| `npm test -- --watch=false` | 57 files, 461/461 tests passed |
+| `npm run build` | passed; 357.41 kB initial, 94.81 kB estimated transfer |
 | `npm run test:pwa` | 2/2 passed |
 | `npm run verify:pwa` | passed |
 | Scoped Chromium active-toolbar acceptance | 6/6 passed |

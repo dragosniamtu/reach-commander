@@ -10,13 +10,16 @@ import {
 import { ProtectedStateResetService } from '../auth/protected-state-reset.service';
 import { CommanderStore } from './commander-store';
 import {
+  SOURCE_MANAGEMENT_DEADLINE_TIMER,
   SOURCE_MANAGEMENT_SCHEDULER,
+  SourceManagementDeadlineTimer,
   SourceManagementScheduler,
   SourceManagementStore,
 } from './source-management.store';
 
 describe('SourceManagementStore', () => {
   let api: FakeSourceManagementApi;
+  let deadline: ManualDeadline;
   let scheduler: ManualScheduler;
   let commander: { reloadSourceCatalog: ReturnType<typeof vi.fn> };
   let protectedState: ProtectedStateResetService;
@@ -24,6 +27,7 @@ describe('SourceManagementStore', () => {
 
   beforeEach(() => {
     api = new FakeSourceManagementApi();
+    deadline = new ManualDeadline();
     scheduler = new ManualScheduler();
     commander = {
       reloadSourceCatalog: vi.fn(() => Promise.resolve([source('family-media')])),
@@ -34,6 +38,7 @@ describe('SourceManagementStore', () => {
         ProtectedStateResetService,
         { provide: CommanderApiPort, useValue: api },
         { provide: CommanderStore, useValue: commander },
+        { provide: SOURCE_MANAGEMENT_DEADLINE_TIMER, useValue: deadline },
         { provide: SOURCE_MANAGEMENT_SCHEDULER, useValue: scheduler },
       ],
     });
@@ -84,6 +89,36 @@ describe('SourceManagementStore', () => {
     expect(store.capability()?.supported).toBe(true);
     expect(store.error()).toBeNull();
     expect(store.canRetryCapability()).toBe(false);
+  });
+
+  it('times out a never-settling capability read and ignores its late completion', async () => {
+    const hanging = deferred<SourceManagementCapabilityDto>();
+    api.statusResults.push(() => hanging.promise);
+
+    const startup = store.start();
+    await flushMicrotasks();
+    expect(store.capabilityPending()).toBe(true);
+    expect(deadline.pendingCount).toBe(1);
+
+    deadline.expireNext();
+    await startup;
+
+    expect(store.capabilityPending()).toBe(false);
+    expect(store.capability()).toBeNull();
+    expect(store.canRetryCapability()).toBe(true);
+    expect(store.error()?.code).toBe('source_management_capability_timeout');
+
+    hanging.resolve({
+      supported: false,
+      reasonCode: 'late_unsupported',
+      detail: 'This late response must not replace current state.',
+    });
+    await flushMicrotasks();
+    expect(store.capability()).toBeNull();
+
+    await store.start();
+    expect(api.statusCount).toBe(2);
+    expect(store.capability()?.supported).toBe(true);
   });
 
   it('polls an accepted operation to completion and refreshes the shared source catalog', async () => {
@@ -205,6 +240,67 @@ describe('SourceManagementStore', () => {
     expect(api.addRequests).toHaveLength(1);
   });
 
+  it('routes a never-settling operation read through reconnect without accepting a late result', async () => {
+    const hanging = deferred<SourceManagementOperationDto>();
+    api.addResult = operation({ phase: 'accepted' });
+    api.operationResults.push(
+      () => hanging.promise,
+      () => Promise.resolve(operation({ phase: 'healthChecking' })),
+    );
+    await store.start();
+    store.open();
+    await store.submit(sourceRequest());
+
+    const timedAttempt = scheduler.runNext();
+    await flushMicrotasks();
+    expect(deadline.pendingCount).toBe(1);
+    deadline.expireNext();
+    await timedAttempt;
+
+    expect(store.reconnecting()).toBe(true);
+    expect(store.operation()?.phase).toBe('accepted');
+    expect(scheduler.pendingCount).toBe(1);
+
+    hanging.resolve(operation({ phase: 'failed', reasonCode: 'late_failure' }));
+    await flushMicrotasks();
+    expect(store.operation()?.phase).toBe('accepted');
+
+    await scheduler.runNext();
+    expect(store.reconnecting()).toBe(false);
+    expect(store.operation()?.phase).toBe('healthChecking');
+    expect(api.addRequests).toHaveLength(1);
+  });
+
+  it('routes a never-settling catalog read through its independent refresh retry', async () => {
+    const hanging = deferred<readonly SourceDto[]>();
+    commander.reloadSourceCatalog
+      .mockImplementationOnce(() => hanging.promise)
+      .mockResolvedValueOnce([source('downloads'), source('family-media')]);
+    api.addResult = operation({ phase: 'completed', sourceId: 'family-media' });
+    await store.start();
+    store.open();
+
+    const submission = store.submit(sourceRequest());
+    await flushMicrotasks();
+    expect(deadline.pendingCount).toBe(1);
+    deadline.expireNext();
+    await submission;
+
+    expect(store.pending()).toBe(true);
+    expect(store.reconnecting()).toBe(false);
+    expect(store.catalogRefreshed()).toBe(false);
+    expect(scheduler.pendingCount).toBe(1);
+
+    hanging.reject(new Error('late private catalog failure'));
+    await flushMicrotasks();
+    expect(store.error()).toBeNull();
+
+    await scheduler.runNext();
+    expect(store.catalogRefreshed()).toBe(true);
+    expect(store.pending()).toBe(false);
+    expect(commander.reloadSourceCatalog).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['rolledBack', 'failed'] as const)(
     'keeps a terminal %s result and its bounded public detail visible',
     async (phase) => {
@@ -258,6 +354,7 @@ describe('SourceManagementStore', () => {
     const first = store.submit(sourceRequest());
     const second = store.submit(sourceRequest());
     expect(api.addRequests).toHaveLength(1);
+    expect(deadline.pendingCount).toBe(0);
     rejectAdd(new HttpErrorResponse({
       status: 400,
       error: {
@@ -287,6 +384,48 @@ describe('SourceManagementStore', () => {
     expect(store.operation()).toBeNull();
     expect(store.dialogOpen()).toBe(false);
     expect(scheduler.pendingCount).toBe(0);
+    expect(deadline.pendingCount).toBe(0);
+  });
+
+  it('cancels a pending read deadline on protected reset and ignores late rejection', async () => {
+    const hanging = deferred<SourceManagementCapabilityDto>();
+    api.statusResults.push(() => hanging.promise);
+    const startup = store.start();
+    await flushMicrotasks();
+    expect(deadline.pendingCount).toBe(1);
+
+    protectedState.reset();
+    expect(deadline.pendingCount).toBe(0);
+    await startup;
+    expect(store.state()).toEqual(expect.objectContaining({
+      capability: null,
+      capabilityPending: false,
+      error: null,
+    }));
+
+    hanging.reject(new Error('late private capability failure'));
+    await flushMicrotasks();
+    expect(store.error()).toBeNull();
+  });
+
+  it('cancels a pending read deadline when the store is destroyed', async () => {
+    const hanging = deferred<SourceManagementCapabilityDto>();
+    api.statusResults.push(() => hanging.promise);
+    const startup = store.start();
+    await flushMicrotasks();
+    expect(deadline.pendingCount).toBe(1);
+
+    TestBed.resetTestingModule();
+    expect(deadline.pendingCount).toBe(0);
+    await startup;
+
+    hanging.resolve({
+      supported: false,
+      reasonCode: 'late_destroyed_response',
+      detail: 'This response belongs to a destroyed store.',
+    });
+    await flushMicrotasks();
+    expect(store.capability()).toBeNull();
   });
 });
 
@@ -354,6 +493,28 @@ class ManualScheduler implements SourceManagementScheduler {
   }
 }
 
+class ManualDeadline implements SourceManagementDeadlineTimer {
+  private requests: Array<{ callback: () => void }> = [];
+
+  get pendingCount(): number { return this.requests.length; }
+
+  schedule(callback: () => void, _delayMilliseconds: number): unknown {
+    const request = { callback };
+    this.requests.push(request);
+    return request;
+  }
+
+  expireNext(): void {
+    const request = this.requests.shift();
+    if (!request) throw new Error('No pending source-management read deadline.');
+    request.callback();
+  }
+
+  cancel(handle: unknown): void {
+    this.requests = this.requests.filter((request) => request !== handle);
+  }
+}
+
 function sourceRequest(): SourceAddRequestDto {
   return { displayName: 'Family media', hostPath: '/srv/media/family', access: 'readOnly' };
 }
@@ -382,4 +543,9 @@ function deferred<T>() {
     reject = fail;
   });
   return { promise, resolve, reject };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }

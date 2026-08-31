@@ -987,6 +987,26 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(store.initialize).toHaveBeenCalledTimes(3);
     expect(sourceManagement.start).toHaveBeenCalledTimes(3);
   });
+
+  it('does not block required shell initialization on optional capability discovery', async () => {
+    let resolveCapability!: () => void;
+    const capability = new Promise<void>((resolve) => { resolveCapability = resolve; });
+    sourceManagement.start.mockReturnValueOnce(capability);
+    fileOperations.restoreTasks.mockClear();
+
+    let settled = false;
+    const initialization = fixture.componentInstance.retryInitialization()
+      .then(() => { settled = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.initialize).toHaveBeenCalled();
+    expect(fileOperations.restoreTasks).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(settled).toBe(true));
+
+    resolveCapability();
+    await initialization;
+  });
 });
 
 function panel(overrides: Partial<PanelState> = {}): PanelState {

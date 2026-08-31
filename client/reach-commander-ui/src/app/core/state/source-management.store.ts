@@ -20,11 +20,47 @@ const initialPollMilliseconds = 1_000;
 const maximumPollMilliseconds = 10_000;
 const maximumReconnectAttempts = 24;
 const maximumCatalogRefreshAttempts = 12;
+const readRequestTimeoutMilliseconds = 15_000;
 
 export interface SourceManagementScheduler {
   schedule(callback: () => Promise<void> | void, delayMilliseconds: number): unknown;
   cancel(handle: unknown): void;
 }
+
+export interface SourceManagementDeadlineTimer {
+  schedule(callback: () => void, delayMilliseconds: number): unknown;
+  cancel(handle: unknown): void;
+}
+
+class SourceManagementDeadlineExceededError extends Error {
+  constructor() {
+    super('The source-management read deadline was exceeded.');
+    this.name = 'SourceManagementDeadlineExceededError';
+  }
+}
+
+class SourceManagementDeadlineCancelledError extends Error {
+  constructor() {
+    super('The source-management read deadline was cancelled.');
+    this.name = 'SourceManagementDeadlineCancelledError';
+  }
+}
+
+interface PendingReadDeadline {
+  handle?: unknown;
+  cancel(): void;
+}
+
+export const SOURCE_MANAGEMENT_DEADLINE_TIMER = new InjectionToken<SourceManagementDeadlineTimer>(
+  'SOURCE_MANAGEMENT_DEADLINE_TIMER',
+  {
+    providedIn: 'root',
+    factory: () => ({
+      schedule: (callback, delay) => setTimeout(callback, delay),
+      cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    }),
+  },
+);
 
 export const SOURCE_MANAGEMENT_SCHEDULER = new InjectionToken<SourceManagementScheduler>(
   'SOURCE_MANAGEMENT_SCHEDULER',
@@ -62,6 +98,7 @@ export class SourceManagementStore {
   private nextRequestToken = 0;
   private reconnectAttempts = 0;
   private catalogRefreshAttempts = 0;
+  private readonly pendingReadDeadlines = new Set<PendingReadDeadline>();
   private started = false;
   private submissionInFlight = false;
   private disposed = false;
@@ -106,6 +143,8 @@ export class SourceManagementStore {
   constructor(
     private readonly api: CommanderApiPort,
     private readonly commander: CommanderStore,
+    @Inject(SOURCE_MANAGEMENT_DEADLINE_TIMER)
+    private readonly deadlineTimer: SourceManagementDeadlineTimer,
     @Inject(SOURCE_MANAGEMENT_SCHEDULER)
     private readonly scheduler: SourceManagementScheduler,
     protectedState: ProtectedStateResetService,
@@ -133,7 +172,9 @@ export class SourceManagementStore {
       requestToken: token,
     }));
     try {
-      const capability = await this.api.getSourceManagementStatus();
+      const capability = await this.withReadDeadline(
+        this.api.getSourceManagementStatus(),
+      );
       if (this.isCurrent(generation, token)) {
         this.mutableState.update((state) => ({
           ...state,
@@ -146,7 +187,12 @@ export class SourceManagementStore {
         this.mutableState.update((state) => ({
           ...state,
           capabilityPending: false,
-          error: safeError(error, 'Source-management capability could not be loaded.'),
+          error: error instanceof SourceManagementDeadlineExceededError
+            ? {
+              code: 'source_management_capability_timeout',
+              detail: 'Source-management capability did not respond in time. Check the server connection, then retry.',
+            }
+            : safeError(error, 'Source-management capability could not be loaded.'),
         }));
         this.started = false;
       }
@@ -240,7 +286,9 @@ export class SourceManagementStore {
     }
 
     try {
-      const operation = await this.api.getSourceManagementOperation(operationId);
+      const operation = await this.withReadDeadline(
+        this.api.getSourceManagementOperation(operationId),
+      );
       if (!this.isCurrentGeneration(generation)) {
         return;
       }
@@ -327,7 +375,9 @@ export class SourceManagementStore {
 
     this.catalogRefreshAttempts++;
     try {
-      const sources = await this.commander.reloadSourceCatalog();
+      const sources = await this.withReadDeadline(
+        this.commander.reloadSourceCatalog(),
+      );
       if (!this.isCurrentGeneration(generation)) {
         return;
       }
@@ -405,11 +455,52 @@ export class SourceManagementStore {
     this.pollHandle = null;
   }
 
+  private withReadDeadline<T>(request: Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const deadline: PendingReadDeadline = {
+        cancel: () => settle(() => reject(new SourceManagementDeadlineCancelledError())),
+      };
+      const settle = (complete: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (deadline.handle !== undefined) {
+          this.deadlineTimer.cancel(deadline.handle);
+        }
+        this.pendingReadDeadlines.delete(deadline);
+        complete();
+      };
+
+      this.pendingReadDeadlines.add(deadline);
+      deadline.handle = this.deadlineTimer.schedule(
+        () => settle(() => reject(new SourceManagementDeadlineExceededError())),
+        readRequestTimeoutMilliseconds,
+      );
+      if (settled) {
+        this.deadlineTimer.cancel(deadline.handle);
+        this.pendingReadDeadlines.delete(deadline);
+      }
+      request.then(
+        (value) => settle(() => resolve(value)),
+        (error: unknown) => settle(() => reject(error)),
+      );
+    });
+  }
+
+  private cancelReadDeadlines(): void {
+    for (const deadline of [...this.pendingReadDeadlines]) {
+      deadline.cancel();
+    }
+  }
+
   private invalidatePolling(): void {
     this.generation++;
     this.reconnectAttempts = 0;
     this.catalogRefreshAttempts = 0;
     this.clearPoll();
+    this.cancelReadDeadlines();
   }
 
   private isCurrent(generation: number, token: number): boolean {
@@ -447,7 +538,8 @@ function isTerminal(operation: SourceManagementOperationDto): boolean {
 }
 
 function isReconnectable(error: unknown): boolean {
-  return error instanceof TypeError ||
+  return error instanceof SourceManagementDeadlineExceededError ||
+    error instanceof TypeError ||
     (error instanceof HttpErrorResponse &&
       (error.status === 0 || error.status === 502 || error.status === 503 || error.status === 504));
 }

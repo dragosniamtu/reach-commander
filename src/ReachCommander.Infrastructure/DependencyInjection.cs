@@ -35,6 +35,8 @@ using ReachCommander.Infrastructure.FileOperations.Persistence;
 using ReachCommander.Infrastructure.FileOperations.Planning;
 using ReachCommander.Infrastructure.Trash;
 using ReachCommander.Application.SystemUpdates;
+using ReachCommander.Application.SourceManagement;
+using ReachCommander.Infrastructure.SourceManagement;
 using ReachCommander.Infrastructure.SystemUpdates;
 
 namespace ReachCommander.Infrastructure;
@@ -185,6 +187,16 @@ public static class DependencyInjection
         services.AddSingleton<ISystemUpdateOperationMonitor, SystemUpdateOperationMonitor>();
         services.AddSingleton<ISystemMutationGate, SystemMutationGate>();
         services.AddSingleton<ISystemUpdateOperationProbe, SystemUpdateOperationProbe>();
+        services.AddSingleton<ISourceManagementOperationEligibility>(provider =>
+            provider.GetRequiredService<ISystemUpdateOperationProbe>() is
+                ISourceManagementOperationEligibility eligibility
+                    ? eligibility
+                    : throw new InvalidOperationException(
+                        "The restart-operation eligibility service is unavailable."));
+        services.AddSingleton<ISourceManagementRequestIdGenerator,
+            SourceManagementRequestIdGenerator>();
+        services.AddSingleton<ISourceManagementMonitorDelay,
+            SourceManagementMonitorDelay>();
         var systemUpdateOptions = configuration
             .GetSection(SystemUpdateOptions.SectionName)
             .Get<SystemUpdateOptions>() ?? new SystemUpdateOptions();
@@ -195,12 +207,16 @@ public static class DependencyInjection
             services.AddSingleton<ISystemUpdaterTransport, UnixSystemUpdaterTransport>();
             services.AddSingleton<ISystemUpdaterGateway, SystemUpdaterGateway>();
             services.AddSingleton<ISystemUpdateDiagnosticsGateway, SystemUpdateDiagnosticsGateway>();
+            services.AddSingleton<ISourceManagementGateway, UnixSourceManagementGateway>();
         }
         else
         {
             services.AddSingleton<ISystemUpdaterGateway, UnavailableSystemUpdaterGateway>();
             services.AddSingleton<ISystemUpdateDiagnosticsGateway,
                 UnavailableSystemUpdateDiagnosticsGateway>();
+            services.AddSingleton<ISourceManagementGateway>(_ =>
+                new UnavailableSourceManagementGateway(
+                    unsupportedPlatform: !OperatingSystem.IsLinux()));
         }
 
         services.AddSingleton<ISystemUpdateSupportBundleService, SystemUpdateSupportBundleService>();
@@ -209,6 +225,7 @@ public static class DependencyInjection
             provider.GetRequiredService<SystemUpdateCoordinator>());
         services.AddHostedService(provider =>
             provider.GetRequiredService<SystemUpdateCoordinator>());
+        services.AddSingleton<ISourceManagementService, SourceManagementCoordinator>();
         return services;
     }
 }

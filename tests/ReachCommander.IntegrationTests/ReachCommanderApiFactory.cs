@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using ReachCommander.Application.Authentication;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Archives;
+using ReachCommander.Application.SourceManagement;
 using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Domain.Archives;
 using ReachCommander.Infrastructure.Archives.Catalog;
@@ -30,6 +31,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
     private readonly TestHardwareMetricsSnapshotProvider _hardwareMetrics = new();
     private readonly TestArchiveWorkerClient _archiveWorker = new();
     private readonly TestSystemUpdateService _systemUpdates = new();
+    private readonly TestSourceManagementService _sourceManagement = new();
     private readonly TestSystemUpdateSupportBundleService _systemUpdateSupportBundle = new();
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
@@ -154,6 +156,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     internal TestSystemUpdateService SystemUpdates => _systemUpdates;
 
+    internal TestSourceManagementService SourceManagement => _sourceManagement;
+
     public HttpClient CreateCookieClient() => CreateClient(new()
     {
         AllowAutoRedirect = false,
@@ -231,6 +235,12 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISystemUpdateService>(_systemUpdates);
             services.RemoveAll<ISystemUpdateSupportBundleService>();
             services.AddSingleton<ISystemUpdateSupportBundleService>(_systemUpdateSupportBundle);
+            services.RemoveAll<ISourceManagementService>();
+            services.AddSingleton<ISourceManagementService>(provider =>
+            {
+                _sourceManagement.MutationGate = provider.GetRequiredService<ISystemMutationGate>();
+                return _sourceManagement;
+            });
             if (!_useRealSecurity)
             {
                 services
@@ -510,6 +520,85 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 "stable", "v1.3.0", "v1.4.0", "operation-1", Now, Now);
             return Task.FromResult(_status);
         }
+    }
+
+    internal sealed class TestSourceManagementService : ISourceManagementService
+    {
+        private static readonly DateTimeOffset Now =
+            DateTimeOffset.Parse("2026-08-31T10:00:00Z");
+        private int _addCount;
+
+        public ISystemMutationGate? MutationGate { get; set; }
+
+        public int AddCount => Volatile.Read(ref _addCount);
+
+        public bool DrainOnAdd { get; set; }
+
+        public bool FailAdd { get; set; }
+
+        public SourceManagementCapability Capability { get; set; } = new(
+            true,
+            "supported",
+            "Source management is available.");
+
+        public Task<SourceManagementCapability> GetStatusAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Capability);
+        }
+
+        public async Task<SourceManagementOperation> AddAsync(
+            SourceAddRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!Capability.Supported)
+            {
+                throw new SourceManagementUnavailableException();
+            }
+
+            if (DrainOnAdd &&
+                !await (MutationGate ?? throw new InvalidOperationException())
+                    .BeginDrainAsync(TimeSpan.FromMilliseconds(200), cancellationToken))
+            {
+                throw new SourceManagementBlockedException();
+            }
+
+            if (FailAdd)
+            {
+                throw new SourceManagementFailedException();
+            }
+
+            Interlocked.Increment(ref _addCount);
+            return Accepted(Guid.NewGuid(), request.DisplayName.Trim());
+        }
+
+        public Task<SourceManagementOperation> GetOperationAsync(
+            Guid operationId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new SourceManagementOperation(
+                operationId,
+                "archive",
+                "Archive",
+                SourceManagementPhase.Completed,
+                "completed",
+                "The source has been added.",
+                Now,
+                Now.AddSeconds(1)));
+        }
+
+        private static SourceManagementOperation Accepted(Guid operationId, string displayName) =>
+            new(
+                operationId,
+                null,
+                null,
+                SourceManagementPhase.Accepted,
+                "accepted",
+                "Source change accepted.",
+                Now,
+                Now);
     }
 
     private sealed class TestSystemUpdateSupportBundleService : ISystemUpdateSupportBundleService

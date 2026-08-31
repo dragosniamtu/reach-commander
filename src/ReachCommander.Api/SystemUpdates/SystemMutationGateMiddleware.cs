@@ -38,5 +38,8 @@ public sealed class SystemMutationGateMiddleware(RequestDelegate next)
     private static bool IsMutation(HttpRequest request) =>
         request.Path.StartsWithSegments("/api") &&
         !request.Path.StartsWithSegments("/api/system-update") &&
+        !request.Path.Equals(
+            "/api/source-management/sources",
+            StringComparison.OrdinalIgnoreCase) &&
         request.Method is "POST" or "PUT" or "PATCH" or "DELETE";
 }

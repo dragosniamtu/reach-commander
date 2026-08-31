@@ -1,5 +1,6 @@
 using ReachCommander.Application.Archives;
 using ReachCommander.Application.FileOperations;
+using ReachCommander.Application.SourceManagement;
 using ReachCommander.Infrastructure.Archives.Extraction;
 
 namespace ReachCommander.Infrastructure.SystemUpdates;
@@ -11,7 +12,9 @@ internal interface ISystemUpdateOperationProbe
 
 internal sealed class SystemUpdateOperationProbe(
     IFileOperationService fileOperations,
-    ArchiveExtractionOperationStore? archiveOperations = null) : ISystemUpdateOperationProbe
+    ArchiveExtractionOperationStore? archiveOperations = null) :
+    ISystemUpdateOperationProbe,
+    ISourceManagementOperationEligibility
 {
     public async Task<bool> HasActiveOperationsAsync(CancellationToken cancellationToken)
     {

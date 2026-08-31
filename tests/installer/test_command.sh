@@ -139,6 +139,8 @@ cp -- "$UPDATER_UNIT" "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH"
 tests_run=0
 last_status=0
 last_output=''
+last_stdout=''
+last_stderr=''
 
 pass() {
   tests_run=$((tests_run + 1))
@@ -216,6 +218,20 @@ run_command_with_input() {
   last_output="$(printf '%s\n' "$input" | bash "$COMMAND_SOURCE" "$@" 2>&1)"
   last_status=$?
   set -e
+}
+
+run_command_with_input_split() {
+  local input="$1"
+  local stdout_path="$TEST_ROOT/source-command.stdout"
+  local stderr_path="$TEST_ROOT/source-command.stderr"
+  shift
+  set +e
+  printf '%s\n' "$input" |
+    bash "$COMMAND_SOURCE" "$@" >"$stdout_path" 2>"$stderr_path"
+  last_status=$?
+  set -e
+  last_stdout="$(<"$stdout_path")"
+  last_stderr="$(<"$stderr_path")"
 }
 
 for invocation in \
@@ -302,6 +318,134 @@ unset SOURCE_HELPER_WRITE_PATH
 cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_management.py"
 chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
 pass "source add contains startup output without constraining helper writes"
+
+printf '%s\n' \
+  'import os' \
+  'import sys' \
+  'sys.stdout.buffer.write(os.environ["SOURCE_HELPER_OUTPUT"].encode("utf-8") + b"\n")' \
+  'print("validator-private-/private/source/secret", file=sys.stderr)' \
+  >"$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+invalid_source_outputs=(
+  '{"sourceId":"archive","sourceId":"other","displayName":"Archive"}'
+  '{"id":"archive","name":"Archive"}'
+  '{"sourceId":"archive","displayName":"Archive","hostPath":"/private/source/secret"}'
+  '{"sourceId":"Not_Valid","displayName":"Archive"}'
+  '{"sourceId":"archive","displayName":" Archive "}'
+  '{"sourceId":"archive","displayName":"Archive\u0001"}'
+)
+invalid_source_outputs+=(
+  '{"sourceId":"archive","displayName":"'"$(printf 'x%.0s' {1..81})"'"}'
+)
+for invalid_source_output in "${invalid_source_outputs[@]}"; do
+  export SOURCE_HELPER_OUTPUT="$invalid_source_output"
+  run_command_with_input_split "$source_request" source add
+  assert_equal "1" "$last_status" "invalid successful helper output status"
+  assert_equal '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}' \
+    "$last_stdout" "invalid successful helper fixed output"
+  assert_equal "" "$last_stderr" "invalid successful helper stderr"
+  [[ "$last_stdout" != *'/private/source/secret'* ]] ||
+    fail "invalid successful helper output exposed a private path"
+  if compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+    fail "invalid successful helper retained captured stdout"
+  fi
+done
+export SOURCE_HELPER_OUTPUT='{"displayName":"Média 媒体","sourceId":"archive"}'
+run_command_with_input_split "$source_request" source add
+assert_equal "0" "$last_status" "valid Unicode helper output status"
+assert_equal '{"sourceId":"archive","displayName":"Média 媒体"}' \
+  "$last_stdout" "valid Unicode helper canonical output"
+assert_equal "" "$last_stderr" "valid Unicode helper stderr"
+if compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+  fail "valid successful helper retained captured stdout"
+fi
+unset SOURCE_HELPER_OUTPUT
+cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+pass "source add independently validates exact successful JSON"
+
+export SOURCE_HELPER_READY="$TEST_ROOT/source-helper.ready"
+printf '%s\n' \
+  'import os' \
+  'import signal' \
+  'import time' \
+  'from pathlib import Path' \
+  'signal.signal(signal.SIGTERM, signal.SIG_IGN)' \
+  'Path(os.environ["SOURCE_HELPER_READY"]).write_text(str(os.getpid()), encoding="ascii")' \
+  'while True: time.sleep(1)' \
+  >"$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+printf '%s\n' "$source_request" >"$TEST_ROOT/source-interrupt-request.json"
+for source_signal in INT TERM; do
+  rm -f -- "$SOURCE_HELPER_READY"
+  source_command_pid_path="$TEST_ROOT/source-command.pid"
+  rm -f -- "$source_command_pid_path"
+  (
+    for _ in {1..100}; do
+      if [[ -s "$source_command_pid_path" ]] &&
+        [[ -s "$SOURCE_HELPER_READY" ]] &&
+        compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    [[ -s "$source_command_pid_path" ]] || exit 1
+    kill -s "$source_signal" "$(<"$source_command_pid_path")"
+    sleep 1
+    if kill -0 "$(<"$source_command_pid_path")" 2>/dev/null; then
+      kill -TERM "$(<"$source_command_pid_path")" 2>/dev/null || true
+    fi
+  ) &
+  source_signaler_pid=$!
+  set +e
+  bash -c 'trap - INT TERM; printf "%s\n" "$$" >"$2"; exec bash "$1" source add' \
+    reachcommander-interrupt "$COMMAND_SOURCE" "$source_command_pid_path" \
+    <"$TEST_ROOT/source-interrupt-request.json" \
+    >"$TEST_ROOT/source-interrupt.stdout" \
+    2>"$TEST_ROOT/source-interrupt.stderr"
+  last_status=$?
+  set -e
+  wait "$source_signaler_pid" || fail "source interrupt signaler failed"
+  [[ -s "$SOURCE_HELPER_READY" ]] || fail "interruptible source helper did not start"
+  if [[ "$source_signal" == 'INT' ]]; then
+    assert_equal "130" "$last_status" "INT-interrupted source add status"
+  else
+    assert_equal "143" "$last_status" "TERM-interrupted source add status"
+  fi
+  source_helper_pid="$(<"$SOURCE_HELPER_READY")"
+  kill -TERM "$source_helper_pid" 2>/dev/null || true
+  for _ in {1..100}; do
+    if ! compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+    find "$INSTALL_ROOT" -maxdepth 1 -name '.source-add-stdout.*' -printf 'retained capture: %f\n' >&2
+    fail "$source_signal-interrupted source add retained captured stdout"
+  fi
+done
+unset SOURCE_HELPER_READY
+cp -- "$TEST_ROOT/source-management.compatible.py" "$INSTALL_ROOT/bin/source_management.py"
+chmod 0755 -- "$INSTALL_ROOT/bin/source_management.py"
+
+source_abort_bin="$TEST_ROOT/source-abort-bin"
+original_path="$PATH"
+mkdir -p -- "$source_abort_bin"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 70' >"$source_abort_bin/wc"
+chmod 0755 -- "$source_abort_bin/wc"
+export PATH="$source_abort_bin:$PATH"
+run_command_with_input "$source_request" source add
+export PATH="$original_path"
+assert_equal "70" "$last_status" "aborted source add status"
+if compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+  fail "aborted source add retained captured stdout"
+fi
+run_command_with_input $'retain\ncancel' uninstall
+assert_equal "1" "$last_status" "post-interruption uninstall cancellation status"
+[[ "$last_output" == *'uninstall cancelled; confirmation did not match'* ]] ||
+  fail "post-interruption install tree did not reach uninstall confirmation"
+pass "source add interruption cleans capture and preserves uninstall validity"
 
 export FAKE_FLOCK_EXIT=1
 : >"$FAKE_DOCKER_LOG"

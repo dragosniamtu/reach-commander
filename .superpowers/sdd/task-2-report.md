@@ -70,12 +70,18 @@ Follow-up RED checkpoints were captured before implementation for: canonical len
 - The command wrapper drains at most 4,097 stdout bytes into one mode-0600 file below the already-validated installer root, discards excess stdout, suppresses stderr, removes the capture on every handled outcome, and releases stdout only after a successful bounded helper run. This does not impose a process-wide file limit on legitimate transaction writes. Nonzero or incompatible startup outcomes ignore all child content and emit fixed JSON selected only from allowlisted statuses 1 through 6. A protected but incompatible helper can no longer expose a traceback, installed path, or exception content; successful source JSON remains unchanged.
 - RED evidence: a corrupt restore-bearing backup was incorrectly reported as `recovery-required` for each of the five material-corruption cases, and a protected incompatible helper exposed its complete Python traceback and injected private path. The focused material/status and command regressions are GREEN.
 
+### Capture cleanup and success validation follow-up
+
+- Source-add capture now has a scoped cleanup lifecycle with an exact validated temporary-name contract. Normal success, fixed helper failure, unexpected shell exit, `INT`, and `TERM` all close the bounded drain, give the tracked helper a bounded termination grace period with a kill fallback, reap it, remove the mode-0600 capture, and restore default traps before returning normally. Interrupted execution no longer leaves an entry that invalidates the uninstall allowlist.
+- Exit-zero helper output is independently parsed by fixed inline validator code rather than trusted as public output. It rejects duplicate or extra fields, legacy/private shapes, invalid IDs, and untrimmed, non-printable, empty, or overlong names; valid Unicode is preserved. Only canonical compact `sourceId`/`displayName` JSON is emitted. Validator errors and helper stderr remain suppressed, and all invalid exit-zero output maps to the generic fixed status/result.
+- RED evidence: duplicate-key exit-zero JSON returned status 0 unchanged, and a terminated source command retained `.source-add-stdout.*`. The validator, normal/failure cleanup, forced shell-abort, INT/TERM, and post-interruption uninstall-tree regressions are GREEN.
+
 ## Final verification
 
 | Gate | Result |
 |---|---|
 | `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 82 passed, 3 Windows capability skips |
-| `tests/installer/test_command.sh` | 48/48 passed |
+| `tests/installer/test_command.sh` | 50/50 passed |
 | `tests/installer/test_install.sh` | 33/33 passed, 3 Windows capability skips |
 | `tests/installer/test_package.sh` | 7/7 passed |
 | `tests/installer/test_common.sh` | 17/17 passed |

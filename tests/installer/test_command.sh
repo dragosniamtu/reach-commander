@@ -305,6 +305,7 @@ pass "source add rejects missing trusted dependencies before Python imports or D
 source_preassign_bin="$TEST_ROOT/source-preassign-bin"
 source_preassign_request="$TEST_ROOT/source-preassign-request.json"
 mkdir -p -- "$source_preassign_bin"
+# shellcheck disable=SC2016 # The generated helper expands these values at runtime.
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -Eeuo pipefail' \
@@ -322,6 +323,7 @@ export PATH="$source_preassign_bin:$PATH"
 for source_preassign_signal in INT TERM; do
   export SOURCE_PREASSIGN_SIGNAL="$source_preassign_signal"
   set +e
+  # shellcheck disable=SC2016 # The child shell expands its own PID and positional parameters.
   timeout -k 1 5 bash -c \
     'export SOURCE_PREASSIGN_COMMAND_PID=$$; exec bash "$1" source add' \
     reachcommander-preassign "$COMMAND_SOURCE" \
@@ -367,6 +369,7 @@ export SOURCE_HELPER_WRITE_PATH="$TEST_ROOT/source-helper-large-write"
 source_python_bin="$TEST_ROOT/source-python-bin"
 original_path="$PATH"
 mkdir -p -- "$source_python_bin"
+# shellcheck disable=SC2016 # The generated launcher expands these values at runtime.
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -e' \
@@ -548,6 +551,7 @@ for source_signal in INT TERM; do
   ) &
   source_signaler_pid=$!
   set +e
+  # shellcheck disable=SC2016 # The child shell expands its own PID and positional parameters.
   timeout -k 1 5 bash -c 'trap - INT TERM; printf "%s\n" "$$" >"$2"; exec bash "$1" source add' \
     reachcommander-interrupt "$COMMAND_SOURCE" "$source_command_pid_path" \
     <"$TEST_ROOT/source-interrupt-request.json" \

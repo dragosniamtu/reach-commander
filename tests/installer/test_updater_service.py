@@ -645,6 +645,29 @@ class SourceManagementRuntimeTests(unittest.TestCase):
             self.assertEqual("archive", progress["payload"]["sourceId"])
             self.assertEqual(helper_contents, helper_journal.read_bytes())
 
+    def test_helper_progress_rejects_boolean_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "source-operation.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": True,
+                        "transactionId": str(uuid.uuid4()),
+                        "sourceId": "archive",
+                        "displayName": "Archive",
+                        "phase": "staging",
+                        "reasonCode": "in_progress",
+                        "updatedAt": "2026-08-25T12:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            if os.name != "nt":
+                path.chmod(0o600)
+
+            with self.assertRaises(updater_service.JournalError):
+                updater_service.SourceTransactionStatusReader(path).read_optional()
+
 
 class AtomicSourceOperationStoreTests(unittest.TestCase):
     @staticmethod
@@ -688,6 +711,7 @@ class AtomicSourceOperationStoreTests(unittest.TestCase):
             invalid_values = (
                 valid.replace('"schemaVersion":1', '"schemaVersion":1,"schemaVersion":1'),
                 valid.replace('"schemaVersion":1', '"schemaVersion":1,"hostPath":"/srv/private"'),
+                valid.replace('"schemaVersion":1', '"schemaVersion":true'),
                 "x" * 4_097,
             )
             for invalid in invalid_values:

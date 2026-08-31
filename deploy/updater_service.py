@@ -968,7 +968,10 @@ class AtomicSourceOperationStore:
                     "operation",
                 }:
                     raise ValueError
-                if value["schemaVersion"] != self.SCHEMA_VERSION:
+                if (
+                    type(value["schemaVersion"]) is not int
+                    or value["schemaVersion"] != self.SCHEMA_VERSION
+                ):
                     raise ValueError
                 operation = value["operation"]
                 if not isinstance(operation, dict) or set(operation) != {
@@ -1123,7 +1126,7 @@ class SourceTransactionStatusReader:
                 "updatedAt",
             }:
                 raise ValueError
-            if value["schemaVersion"] != 1:
+            if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
                 raise ValueError
             transaction_id = value["transactionId"]
             if not isinstance(transaction_id, str) or str(uuid.UUID(transaction_id)) != transaction_id:

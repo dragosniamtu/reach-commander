@@ -37,7 +37,7 @@ An initially proposed systemd assertion that allowed writes only to exact files 
 ### GREEN
 
 - `python -m unittest tests.installer.test_updater_protocol tests.installer.test_updater_service tests.installer.test_support_bundle tests.installer.test_updater_trace`
-  - 107 tests passed; 9 expected Windows skips for Unix/POSIX-only behavior.
+  - 108 tests passed; 9 expected Windows skips for Unix/POSIX-only behavior.
 - `tests/installer/test_install.sh`
   - 33/33 passed; expected Windows skips for POSIX filesystem properties.
 - `tests/installer/test_command.sh`
@@ -61,6 +61,7 @@ An initially proposed systemd assertion that allowed writes only to exact files 
 - The runner always uses an exact argv with `shell=False`, a sanitized fixed environment, bounded stdin, bounded timeout, process-tree termination, and bounded output reads.
 - The operation store never shares or overwrites the helper's recovery transaction file.
 - Unsafe state paths fail closed; existing symlinks, nonregular entries, unexpected keys, duplicate keys, wrong ownership/modes on POSIX, and oversized state are rejected.
+- Exact schema-version checks reject JSON booleans rather than accepting Python's `True == 1` numeric equivalence.
 - Public state and errors use enumerated reasons and generic bounded detail; raw command output and host paths are not logged or persisted.
 - Source/update exclusion is enforced in both directions for one service process. The management command's existing host lock remains the cross-process authority.
 - Update, diagnostic, support-bundle, and trace response schemas are unchanged.
@@ -78,3 +79,7 @@ An initially proposed systemd assertion that allowed writes only to exact files 
 - `.superpowers/sdd/progress.md`
 
 The unrelated untracked `NC-theme.png` was not touched or staged.
+
+## Independent review
+
+The independent review found no Critical or Important issues. Its exact-schema Minor was fixed with a RED/GREEN regression for both runtime and helper journals. The remaining observation is intentionally retained at the transport boundary: after the universal 64 KiB socket cap is exceeded, the service returns the existing uncorrelated transport error because it cannot safely establish v5 protocol identity by parsing or guessing from an oversized, potentially duplicate-bearing object. Complete v5 objects from 4,097 through 65,536 bytes are identified and receive the strict v5 `request_too_large` response.

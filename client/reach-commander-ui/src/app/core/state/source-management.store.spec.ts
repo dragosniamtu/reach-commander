@@ -3,6 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import {
   CommanderApiPort,
   SourceAddRequestDto,
+  SourceDto,
   SourceManagementCapabilityDto,
   SourceManagementOperationDto,
 } from '../api/api.models';
@@ -24,7 +25,9 @@ describe('SourceManagementStore', () => {
   beforeEach(() => {
     api = new FakeSourceManagementApi();
     scheduler = new ManualScheduler();
-    commander = { reloadSourceCatalog: vi.fn(() => Promise.resolve()) };
+    commander = {
+      reloadSourceCatalog: vi.fn(() => Promise.resolve([source('family-media')])),
+    };
     TestBed.configureTestingModule({
       providers: [
         SourceManagementStore,
@@ -52,6 +55,35 @@ describe('SourceManagementStore', () => {
     expect(store.capability()).toEqual(api.capability);
     expect(store.canOpen()).toBe(false);
     expect(store.disabledReason()).toContain('Rerun the latest Ubuntu installer once');
+  });
+
+  it('allows a transient capability failure to be retried in the same session', async () => {
+    api.statusResults.push(
+      () => Promise.reject(new HttpErrorResponse({
+        status: 503,
+        error: {
+          code: 'source_management_unavailable',
+          detail: 'Source-management capability could not be loaded.',
+        },
+      })),
+      () => Promise.resolve({
+        supported: true,
+        reasonCode: 'supported',
+        detail: 'Source management is available.',
+      }),
+    );
+
+    await store.start();
+    expect(store.capability()).toBeNull();
+    expect(store.disabledReason()).toContain('could not be loaded');
+    expect(store.canRetryCapability()).toBe(true);
+
+    await store.start();
+
+    expect(api.statusCount).toBe(2);
+    expect(store.capability()?.supported).toBe(true);
+    expect(store.error()).toBeNull();
+    expect(store.canRetryCapability()).toBe(false);
   });
 
   it('polls an accepted operation to completion and refreshes the shared source catalog', async () => {
@@ -82,7 +114,7 @@ describe('SourceManagementStore', () => {
   });
 
   it('keeps the blocking dialog active until a completed operation reloads the catalog', async () => {
-    const refresh = deferred<void>();
+    const refresh = deferred<readonly SourceDto[]>();
     commander.reloadSourceCatalog.mockImplementationOnce(() => refresh.promise);
     api.addResult = operation({ phase: 'accepted' });
     api.operationResults.push(
@@ -100,10 +132,57 @@ describe('SourceManagementStore', () => {
     store.close();
     expect(store.dialogOpen()).toBe(true);
 
-    refresh.resolve();
+    refresh.resolve([source('family-media')]);
     await completion;
     expect(store.pending()).toBe(false);
     expect(store.catalogRefreshed()).toBe(true);
+  });
+
+  it('retries fresh catalog replacement until the generated source ID appears', async () => {
+    commander.reloadSourceCatalog
+      .mockResolvedValueOnce([source('downloads')])
+      .mockResolvedValueOnce([source('downloads'), source('family-media')]);
+    api.addResult = operation({ phase: 'accepted' });
+    api.operationResults.push(
+      () => Promise.resolve(operation({ phase: 'completed', sourceId: 'family-media' })),
+    );
+    await store.start();
+    store.open();
+    await store.submit(sourceRequest());
+
+    await scheduler.runNext();
+
+    expect(store.catalogRefreshed()).toBe(false);
+    expect(store.pending()).toBe(true);
+    expect(scheduler.pendingCount).toBe(1);
+    await scheduler.runNext();
+
+    expect(store.catalogRefreshed()).toBe(true);
+    expect(store.pending()).toBe(false);
+    expect(commander.reloadSourceCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops bounded catalog retries with an actionable public error', async () => {
+    commander.reloadSourceCatalog.mockResolvedValue([source('downloads')]);
+    api.addResult = operation({ phase: 'accepted' });
+    api.operationResults.push(
+      () => Promise.resolve(operation({ phase: 'completed', sourceId: 'family-media' })),
+    );
+    await store.start();
+    store.open();
+    await store.submit(sourceRequest());
+
+    await scheduler.runNext();
+    for (let attempt = 1; attempt < 12; attempt++) {
+      await scheduler.runNext();
+    }
+
+    expect(store.catalogRefreshed()).toBe(false);
+    expect(store.pending()).toBe(false);
+    expect(store.error()?.code).toBe('source_management_catalog_refresh_timeout');
+    expect(store.error()?.detail).toMatch(/refresh the page/i);
+    expect(store.error()?.detail).toContain('reachcommander doctor');
+    expect(scheduler.pendingCount).toBe(0);
   });
 
   it('retains operation context while disconnected and reconnects without resubmitting', async () => {
@@ -219,11 +298,12 @@ class FakeSourceManagementApi {
   addPromise: Promise<SourceManagementOperationDto> | null = null;
   readonly addRequests: SourceAddRequestDto[] = [];
   readonly operationResults: Array<() => Promise<SourceManagementOperationDto>> = [];
+  readonly statusResults: Array<() => Promise<SourceManagementCapabilityDto>> = [];
   statusCount = 0;
 
   getSourceManagementStatus(): Promise<SourceManagementCapabilityDto> {
     this.statusCount++;
-    return Promise.resolve(this.capability);
+    return this.statusResults.shift()?.() ?? Promise.resolve(this.capability);
   }
 
   addSource(request: SourceAddRequestDto): Promise<SourceManagementOperationDto> {
@@ -234,6 +314,20 @@ class FakeSourceManagementApi {
   getSourceManagementOperation(): Promise<SourceManagementOperationDto> {
     return this.operationResults.shift()?.() ?? Promise.resolve(this.addResult);
   }
+}
+
+function source(id: string): SourceDto {
+  return {
+    id,
+    name: id,
+    isAvailable: true,
+    isReadOnly: false,
+    totalBytes: 100,
+    usedBytes: 25,
+    freeBytes: 75,
+    defaultLeft: false,
+    defaultRight: false,
+  };
 }
 
 class ManualScheduler implements SourceManagementScheduler {

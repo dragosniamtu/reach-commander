@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation and local verification are complete on `master`. The scoped commit is created after this report is written. Nothing is pushed. Independent review by the parent workflow remains pending.
+Implementation, final-review fixes, and local verification are complete on `master`. The original slice is commit `83107b8`; the follow-up review-fix commit is created after this report update. Nothing is pushed. Independent re-review by the parent workflow remains pending.
 
 ## Delivered behavior
 
@@ -15,6 +15,10 @@ Implementation and local verification are complete on `master`. The scoped commi
 - Added phase-specific progress copy for validation, configuration, restart, health checking, reconnect, completion, rollback, and failure. Only bounded API problem details are surfaced; arbitrary exception text is replaced with fixed client copy.
 - Replaces the in-memory source catalog from a fresh `/api/sources` response after host completion. Both pane selectors receive the new immutable list without merging stale definitions, while current pane locations are retained.
 - Holds the blocking state until the completed operation's catalog refresh finishes, preventing a user from dismissing the dialog before the source is visible.
+- Confirms completion against the generated `sourceId` in each freshly replaced catalog. Missing IDs and transient catalog failures use a separate deterministic 12-attempt retry budget; success is never inferred from a stale or merged list, and exhaustion returns fixed page-refresh plus `reachcommander doctor` guidance.
+- Restricts dialog-wide Enter handling to text inputs. Cancel, access radios, and the read/write acknowledgement keep their native keyboard behavior and cannot accidentally submit.
+- Moves focus to a stable, tabbable in-dialog progress target when the form becomes an operation and again on each terminal transition. The CDK focus trap returns attempted Tab traversal to the dialog instead of the background toolbar.
+- Makes capability discovery retryable after structured server errors or connection failures. Shell reconnect retries call discovery again, and a capability-only failure turns the existing compact toolbar control into an explicit retry action for the current session.
 - Added source-management help copy and explicit Norton/Windows 95 dialog/backdrop compatibility. Compact toolbar, Norton, and Windows 95 browser acceptance remain green.
 
 ## Strict TDD evidence
@@ -32,14 +36,26 @@ After the first GREEN pass, focused regressions proved two lifecycle/input gaps:
 
 Both REDs failed for the expected behavior and are now GREEN. Catalog refresh keeps the modal pending until replacement succeeds or a bounded public refresh error is available, and protected system paths receive immediate user-facing validation while host validation remains authoritative.
 
+### Final-review REDs
+
+Final review identified four gaps. New regressions failed before the fixes because:
+
+- any successful `/api/sources` request marked the operation refreshed even when its returned replacement list did not contain the host-generated source ID, and no bounded catalog retry existed;
+- the host-level Enter listener submitted from Cancel, radio, and checkbox focus;
+- replacing the form with progress content left focus on `body`, with no explicit terminal focus transition;
+- a failed capability request left the store's `started` latch set and shell reconnect did not retry discovery.
+
+The focused review suite initially failed all seven affected behavioral cases. A separate follow-up RED also proved that structured 503 problem responses must expose retry, not only status-zero connection failures. The final implementation uses separate reconnect and catalog counters, deterministic injected scheduling, generated-ID membership checks against fresh replacement lists, text-input-only Enter handling, explicit transition focus, focus-trap boundary coverage, retryable store startup, shell retry integration, and a same-toolbar capability retry action.
+
 ## Verification
 
 | Gate | Result |
 |---|---|
 | Initial focused Angular slice | 6 files, 131/131 tests passed |
 | Final focused store/dialog hardening | 2 files, 33/33 tests passed |
-| `npm test -- --watch=false` | 57 files, 446/446 tests passed |
-| `npm run build` | passed; 357.41 kB initial, 94.80 kB estimated transfer |
+| Final focused Task 5 slice after review fixes | 6 files, 146/146 tests passed |
+| `npm test -- --watch=false` | 57 files, 455/455 tests passed |
+| `npm run build` | passed; 357.41 kB initial, 94.83 kB estimated transfer |
 | `npm run test:pwa` | 2/2 passed |
 | `npm run verify:pwa` | passed |
 | Scoped Chromium active-toolbar acceptance | 6/6 passed |

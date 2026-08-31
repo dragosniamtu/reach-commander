@@ -15,7 +15,9 @@
       [sourceManagementSupported]="sourceManagement.capability()?.supported === true"
       [sourceManagementPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
       [sourceManagementDisabledReason]="sourceManagement.disabledReason()"
+      [sourceManagementRetryAvailable]="sourceManagement.canRetryCapability()"
       (sourceRequested)="openSourceManagement($event)"
+      (sourceCapabilityRetryRequested)="retrySourceCapability()"
     />
     <div class="top-actions">
       <span class="read-mode"><i></i> CONTROLLED FILE OPERATIONS</span>

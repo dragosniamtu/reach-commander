@@ -19,6 +19,7 @@ import { CommanderStore } from './commander-store';
 const initialPollMilliseconds = 1_000;
 const maximumPollMilliseconds = 10_000;
 const maximumReconnectAttempts = 24;
+const maximumCatalogRefreshAttempts = 12;
 
 export interface SourceManagementScheduler {
   schedule(callback: () => Promise<void> | void, delayMilliseconds: number): unknown;
@@ -60,6 +61,7 @@ export class SourceManagementStore {
   private generation = 0;
   private nextRequestToken = 0;
   private reconnectAttempts = 0;
+  private catalogRefreshAttempts = 0;
   private started = false;
   private submissionInFlight = false;
   private disposed = false;
@@ -80,6 +82,10 @@ export class SourceManagementStore {
   });
   readonly canOpen = computed(() =>
     this.capability()?.supported === true && !this.pending() && !this.dialogOpen(),
+  );
+  readonly canRetryCapability = computed(() =>
+    this.capability() === null && !this.capabilityPending() && !this.pending() &&
+    this.error() !== null,
   );
   readonly disabledReason = computed(() => {
     if (this.capabilityPending()) {
@@ -142,6 +148,7 @@ export class SourceManagementStore {
           capabilityPending: false,
           error: safeError(error, 'Source-management capability could not be loaded.'),
         }));
+        this.started = false;
       }
     }
   }
@@ -184,6 +191,7 @@ export class SourceManagementStore {
 
     this.submissionInFlight = true;
     this.reconnectAttempts = 0;
+    this.catalogRefreshAttempts = 0;
     const generation = ++this.generation;
     const token = ++this.nextRequestToken;
     this.mutableState.update((state) => ({
@@ -292,31 +300,94 @@ export class SourceManagementStore {
     }));
 
     if (operation.phase === 'completed') {
-      try {
-        await this.commander.reloadSourceCatalog();
-        if (this.isCurrentGeneration(generation)) {
-          this.mutableState.update((state) => ({
-            ...state,
-            pending: false,
-            catalogRefreshed: true,
-          }));
-        }
-      } catch (error: unknown) {
-        if (this.isCurrentGeneration(generation)) {
-          this.mutableState.update((state) => ({
-            ...state,
-            pending: false,
-            catalogRefreshed: false,
-            error: safeError(error, 'The source was added, but the source list could not be refreshed.'),
-          }));
-        }
-      }
+      await this.refreshCompletedCatalog(operation, generation);
       return;
     }
 
     if (!terminal && this.isCurrentGeneration(generation)) {
       this.schedulePoll(generation);
     }
+  }
+
+  private async refreshCompletedCatalog(
+    operation: SourceManagementOperationDto,
+    generation: number,
+  ): Promise<void> {
+    if (!this.isCurrentGeneration(generation)) {
+      return;
+    }
+
+    if (!operation.sourceId) {
+      this.finishCatalogRefreshWithError(
+        'source_management_catalog_refresh_failed',
+        'The source was added, but its generated ID was unavailable. Refresh the page; if it is still missing, run reachcommander doctor on the Ubuntu host.',
+      );
+      return;
+    }
+
+    this.catalogRefreshAttempts++;
+    try {
+      const sources = await this.commander.reloadSourceCatalog();
+      if (!this.isCurrentGeneration(generation)) {
+        return;
+      }
+      if (sources.some((source) => source.id === operation.sourceId)) {
+        this.catalogRefreshAttempts = 0;
+        this.mutableState.update((state) => ({
+          ...state,
+          pending: false,
+          reconnecting: false,
+          catalogRefreshed: true,
+          error: null,
+        }));
+        return;
+      }
+    } catch {
+      if (!this.isCurrentGeneration(generation)) {
+        return;
+      }
+    }
+
+    if (this.catalogRefreshAttempts >= maximumCatalogRefreshAttempts) {
+      this.finishCatalogRefreshWithError(
+        'source_management_catalog_refresh_timeout',
+        'The host completed the source change, but the new source did not appear in time. Refresh the page; if it is still missing, run reachcommander doctor on the Ubuntu host.',
+      );
+      return;
+    }
+
+    this.mutableState.update((state) => ({
+      ...state,
+      pending: true,
+      reconnecting: false,
+      catalogRefreshed: false,
+      error: null,
+    }));
+    this.scheduleCatalogRefresh(operation, generation);
+  }
+
+  private scheduleCatalogRefresh(
+    operation: SourceManagementOperationDto,
+    generation: number,
+  ): void {
+    this.clearPoll();
+    const exponent = Math.max(0, this.catalogRefreshAttempts - 1);
+    const delay = Math.min(initialPollMilliseconds * (2 ** exponent), maximumPollMilliseconds);
+    this.pollHandle = this.scheduler.schedule(async () => {
+      this.pollHandle = null;
+      await this.refreshCompletedCatalog(operation, generation);
+    }, delay);
+  }
+
+  private finishCatalogRefreshWithError(code: string, detail: string): void {
+    this.clearPoll();
+    this.mutableState.update((state) => ({
+      ...state,
+      pending: false,
+      reconnecting: false,
+      catalogRefreshed: false,
+      error: { code, detail },
+    }));
   }
 
   private schedulePoll(generation: number): void {
@@ -337,6 +408,7 @@ export class SourceManagementStore {
   private invalidatePolling(): void {
     this.generation++;
     this.reconnectAttempts = 0;
+    this.catalogRefreshAttempts = 0;
     this.clearPoll();
   }
 

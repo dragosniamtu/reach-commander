@@ -16,6 +16,7 @@ describe('ActivePanelToolbarComponent', () => {
     fixture.componentRef.setInput('sourceManagementSupported', true);
     fixture.componentRef.setInput('sourceManagementPending', false);
     fixture.componentRef.setInput('sourceManagementDisabledReason', null);
+    fixture.componentRef.setInput('sourceManagementRetryAvailable', false);
   });
 
   it('shows the active context and accessible logical path', () => {
@@ -148,6 +149,28 @@ describe('ActivePanelToolbarComponent', () => {
     expect(wrapper?.getAttribute('tabindex')).toBe('0');
     expect(wrapper?.getAttribute('title')).toContain('Rerun the latest Ubuntu installer once');
     expect(wrapper?.textContent).toContain('Add source');
+  });
+
+  it('uses the same compact control to retry transient capability discovery', () => {
+    const sourceRequested = vi.fn();
+    const retryRequested = vi.fn();
+    fixture.componentInstance.sourceRequested.subscribe(sourceRequested);
+    fixture.componentInstance.sourceCapabilityRetryRequested.subscribe(retryRequested);
+    fixture.componentRef.setInput('sourceManagementSupported', false);
+    fixture.componentRef.setInput('sourceManagementRetryAvailable', true);
+    fixture.componentRef.setInput(
+      'sourceManagementDisabledReason',
+      'Source-management capability could not be loaded.',
+    );
+    fixture.detectChanges();
+
+    const retry = button('toolbar-add-source');
+    expect(retry.disabled).toBe(false);
+    expect(retry.getAttribute('aria-label')).toBe('Retry source-management capability check');
+    retry.click();
+
+    expect(retryRequested).toHaveBeenCalledOnce();
+    expect(sourceRequested).not.toHaveBeenCalled();
   });
 
   function setInputs(toolbarContext: ActivePanelToolbarContext, filter: string): void {

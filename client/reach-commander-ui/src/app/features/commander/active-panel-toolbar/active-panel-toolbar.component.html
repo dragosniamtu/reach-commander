@@ -15,7 +15,7 @@
   <span
     class="action-wrapper"
     role="group"
-    [attr.tabindex]="sourceReason ? 0 : null"
+    [attr.tabindex]="sourceReason && !sourceManagementRetryAvailable() ? 0 : null"
     [attr.aria-describedby]="sourceReason ? 'source-management-disabled-reason' : null"
     [title]="sourceReason ?? 'Add an installer-managed Ubuntu host source'"
   >
@@ -23,13 +23,16 @@
       #addSourceButton
       type="button"
       data-testid="toolbar-add-source"
-      [disabled]="sourceReason !== null"
+      [disabled]="sourceReason !== null && !sourceManagementRetryAvailable()"
+      [attr.aria-label]="sourceManagementRetryAvailable() ? 'Retry source-management capability check' : null"
       (click)="requestSource()"
     >
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
         <path d="M3 5h6l2 2h6v9H3zM10 9v5m-2.5-2.5h5" vector-effect="non-scaling-stroke" />
       </svg>
-      <span class="action-text">Add source</span>
+      <span class="action-text">
+        {{ sourceManagementRetryAvailable() ? 'Retry source' : 'Add source' }}
+      </span>
     </button>
     @if (sourceReason) {
       <span id="source-management-disabled-reason" class="sr-only">{{ sourceReason }}</span>

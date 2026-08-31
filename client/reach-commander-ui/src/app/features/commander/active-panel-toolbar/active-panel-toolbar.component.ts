@@ -33,12 +33,14 @@ export class ActivePanelToolbarComponent {
   readonly sourceManagementSupported = input(false);
   readonly sourceManagementPending = input(false);
   readonly sourceManagementDisabledReason = input<string | null>(null);
+  readonly sourceManagementRetryAvailable = input(false);
   readonly renameRequested = output<void>();
   readonly filesSelected = output<readonly File[]>();
   readonly extractRequested = output<void>();
   readonly trashRequested = output<void>();
   readonly filterChanged = output<string>();
   readonly sourceRequested = output<HTMLElement>();
+  readonly sourceCapabilityRetryRequested = output<void>();
 
   @ViewChild('searchInput', { read: ElementRef })
   private searchInput?: ElementRef<HTMLInputElement>;
@@ -60,6 +62,10 @@ export class ActivePanelToolbarComponent {
   }
 
   requestSource(): void {
+    if (this.sourceManagementRetryAvailable()) {
+      this.sourceCapabilityRetryRequested.emit();
+      return;
+    }
     if (this.sourceManagementReason() === null && this.addSourceButton) {
       this.sourceRequested.emit(this.addSourceButton.nativeElement);
     }

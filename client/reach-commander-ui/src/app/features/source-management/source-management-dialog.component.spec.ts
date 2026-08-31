@@ -123,6 +123,75 @@ describe('SourceManagementDialogComponent', () => {
     expect((fixture.nativeElement.querySelector('[data-testid="add-source-submit"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('submits Enter from text fields without hijacking Cancel, radios, or the RW checkbox', async () => {
+    fixture.componentInstance.setDisplayName('Family media');
+    fixture.componentInstance.setHostPath('/srv/media/family');
+    fixture.detectChanges();
+    const name = fixture.nativeElement.querySelector('#source-display-name') as HTMLInputElement;
+    name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await fixture.whenStable();
+    expect(store.submit).toHaveBeenCalledOnce();
+
+    store.submit.mockClear();
+    const cancel = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Cancel'))!;
+    cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const readOnly = fixture.nativeElement.querySelector(
+      'input[type="radio"][value="readOnly"]',
+    ) as HTMLInputElement;
+    readOnly.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    fixture.componentInstance.setAccess('readWrite');
+    fixture.detectChanges();
+    const confirmation = fixture.nativeElement.querySelector(
+      '[data-testid="read-write-warning"] input',
+    ) as HTMLInputElement;
+    confirmation.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await fixture.whenStable();
+
+    expect(store.submit).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to a stable in-dialog target across operation and terminal transitions', async () => {
+    store.pending.set(true);
+    store.operation.set(operation({ phase: 'accepted' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const target = fixture.nativeElement.querySelector(
+      '[data-testid="source-operation-focus"]',
+    ) as HTMLElement;
+    expect(document.activeElement).toBe(target);
+
+    store.pending.set(false);
+    store.operation.set(operation({ phase: 'failed' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(document.activeElement).toBe(target);
+  });
+
+  it('keeps Tab traversal trapped away from the background toolbar opener', async () => {
+    store.pending.set(true);
+    store.operation.set(operation({ phase: 'restarting' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const anchors = fixture.nativeElement.querySelectorAll('.cdk-focus-trap-anchor');
+    (anchors.item(anchors.length - 1) as HTMLElement).focus();
+    await fixture.whenStable();
+
+    expect(document.activeElement).not.toBe(opener);
+    expect(fixture.nativeElement.contains(document.activeElement)).toBe(true);
+  });
+
+  it('does not announce catalog success until the generated source is in the fresh catalog', () => {
+    store.operation.set(operation({ phase: 'completed', sourceId: 'family-media' }));
+    store.catalogRefreshed.set(false);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Refreshing source list');
+    expect(fixture.nativeElement.textContent).not.toContain('available in both panes');
+    expect(fixture.nativeElement.querySelector('.operation-icon.success')).toBeNull();
+  });
+
   it('shows only bounded public store errors and terminal rollback guidance', () => {
     store.error.set({
       code: 'source_management_validation_failed',

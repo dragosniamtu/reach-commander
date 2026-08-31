@@ -270,14 +270,13 @@ export class CommanderShellComponent implements OnInit {
     this.keyboard.start();
     this.metricsStore.start();
     void this.systemUpdate.start();
-    void this.sourceManagement.start();
     void this.retryInitialization();
   }
 
   async retryInitialization(): Promise<void> {
     this.initializationError.set(null);
     try {
-      await this.store.initialize();
+      await Promise.all([this.store.initialize(), this.sourceManagement.start()]);
       await this.fileOperations.restoreTasks();
     } catch {
       this.initializationError.set('The ReachCommander server is unavailable.');
@@ -413,6 +412,10 @@ export class CommanderShellComponent implements OnInit {
     const opener = this.sourceManagementOpener();
     this.sourceManagementOpener.set(null);
     queueMicrotask(() => opener?.focus());
+  }
+
+  retrySourceCapability(): void {
+    void this.sourceManagement.start();
   }
 
   openSystemUpdate(): void {

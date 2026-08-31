@@ -7,6 +7,7 @@ import {
   HostListener,
   ViewChild,
   computed,
+  effect,
   inject,
   input,
   output,
@@ -41,6 +42,24 @@ export class SourceManagementDialogComponent implements AfterViewInit {
 
   @ViewChild('displayNameInput', { read: ElementRef })
   private displayNameInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('operationFocusTarget', { read: ElementRef })
+  private operationFocusTarget?: ElementRef<HTMLElement>;
+
+  private lastFocusedStage: string | null = null;
+  private readonly focusOperationTransitions = effect(() => {
+    const operation = this.store.operation();
+    const catalogRefreshed = this.store.catalogRefreshed();
+    if (!operation) {
+      this.lastFocusedStage = null;
+      return;
+    }
+    const stage = `${operation.operationId}:${operation.phase}:${catalogRefreshed}`;
+    if (stage === this.lastFocusedStage) {
+      return;
+    }
+    this.lastFocusedStage = stage;
+    queueMicrotask(() => this.operationFocusTarget?.nativeElement.focus());
+  });
 
   ngAfterViewInit(): void {
     queueMicrotask(() => this.displayNameInput?.nativeElement.focus());
@@ -120,7 +139,12 @@ export class SourceManagementDialogComponent implements AfterViewInit {
     if (event.key === 'Escape') {
       event.preventDefault();
       this.close();
-    } else if (event.key === 'Enter' && this.store.operation() === null) {
+    } else if (
+      event.key === 'Enter' &&
+      this.store.operation() === null &&
+      event.target instanceof HTMLInputElement &&
+      event.target.type === 'text'
+    ) {
       event.preventDefault();
       void this.submit();
     }

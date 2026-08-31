@@ -19,18 +19,29 @@
     </header>
 
     @if (store.operation(); as operation) {
-      <div class="operation-body" aria-live="polite">
+      <div
+        #operationFocusTarget
+        class="operation-body"
+        data-testid="source-operation-focus"
+        role="status"
+        aria-live="polite"
+        tabindex="0"
+      >
         <div
           class="operation-icon"
           [class.busy]="store.pending()"
-          [class.success]="operation.phase === 'completed'"
+          [class.success]="operation.phase === 'completed' && store.catalogRefreshed()"
           [class.failure]="operation.phase === 'rolledBack' || operation.phase === 'failed'"
           aria-hidden="true"
         >
           <i></i><i></i><i></i>
         </div>
         <span class="eyebrow">{{ operation.displayName }}</span>
-        <h3>{{ phaseLabel(operation.phase) }}</h3>
+        <h3>
+          {{ operation.phase === 'completed' && !store.catalogRefreshed()
+            ? 'Refreshing source list'
+            : phaseLabel(operation.phase) }}
+        </h3>
         <p>{{ operation.detail }}</p>
 
         @if (store.reconnecting()) {

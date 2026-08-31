@@ -4,6 +4,7 @@ import { Subject } from 'rxjs';
 import { CommanderKeyboardService } from '../../../core/keyboard/commander-keyboard.service';
 import {
   SourceDto,
+  SourceManagementCapabilityDto,
   SourceManagementOperationDto,
   SystemUpdateStatusDto,
 } from '../../../core/api/api.models';
@@ -167,13 +168,14 @@ describe('CommanderShellComponent system metrics integration', () => {
     overlayVisible: signal(false),
   };
   const sourceManagement = {
-    capability: signal({
+    capability: signal<SourceManagementCapabilityDto | null>({
       supported: true,
       reasonCode: 'supported',
       detail: 'Source management is available.',
     }),
     capabilityPending: signal(false),
     canOpen: signal(true),
+    canRetryCapability: signal(false),
     disabledReason: signal<string | null>(null),
     dialogOpen: signal(false),
     pending: signal(false),
@@ -223,6 +225,7 @@ describe('CommanderShellComponent system metrics integration', () => {
       detail: 'Source management is available.',
     });
     sourceManagement.canOpen.set(true);
+    sourceManagement.canRetryCapability.set(false);
     sourceManagement.disabledReason.set(null);
     await TestBed.configureTestingModule({
       imports: [CommanderShellComponent],
@@ -353,6 +356,22 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(sourceManagement.open).toHaveBeenCalledOnce();
     expect(fixture.nativeElement.querySelector('[data-testid="source-management-dialog"]'))
       .not.toBeNull();
+  });
+
+  it('retries transient source capability discovery from the same toolbar control', () => {
+    sourceManagement.start.mockClear();
+    sourceManagement.capability.set(null);
+    sourceManagement.canOpen.set(false);
+    sourceManagement.canRetryCapability.set(true);
+    sourceManagement.disabledReason.set('Source-management capability could not be loaded.');
+    fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector(
+      '[data-testid="toolbar-add-source"]',
+    ) as HTMLButtonElement).click();
+
+    expect(sourceManagement.start).toHaveBeenCalledOnce();
+    expect(sourceManagement.open).not.toHaveBeenCalled();
   });
 
   it('stops polling when the shell is destroyed', () => {
@@ -966,6 +985,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     await fixture.whenStable();
 
     expect(store.initialize).toHaveBeenCalledTimes(3);
+    expect(sourceManagement.start).toHaveBeenCalledTimes(3);
   });
 });
 

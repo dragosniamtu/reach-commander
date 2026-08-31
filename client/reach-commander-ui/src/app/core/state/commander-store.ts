@@ -558,11 +558,11 @@ export class CommanderStore {
     return this.initialization;
   }
 
-  async reloadSourceCatalog(): Promise<void> {
+  async reloadSourceCatalog(): Promise<readonly SourceDto[]> {
     const sessionGeneration = this.sessionGeneration;
     const sources = await this.api.getSources();
     if (sessionGeneration !== this.sessionGeneration) {
-      return;
+      return this.sourceState();
     }
 
     if (sources.length === 0) {
@@ -571,6 +571,7 @@ export class CommanderStore {
 
     this.sourceState.set(sources);
     this.persist();
+    return sources;
   }
 
   reset(): void {

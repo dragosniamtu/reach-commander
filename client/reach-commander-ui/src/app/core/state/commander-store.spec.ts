@@ -74,11 +74,12 @@ describe('CommanderStore', () => {
       source('family-media', { name: 'Family media' }),
     ];
 
-    await store.reloadSourceCatalog();
+    const refreshed = await store.reloadSourceCatalog();
 
     expect(store.sources().map(({ id }) => id)).toEqual([
       'downloads', 'media', 'family-media',
     ]);
+    expect(refreshed.map(({ id }) => id)).toEqual(['downloads', 'media', 'family-media']);
     expect(store.leftPanel().tabs[0]?.location).toEqual(leftLocation);
     expect(store.rightPanel().tabs[0]?.location).toEqual(rightLocation);
   });

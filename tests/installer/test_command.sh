@@ -445,6 +445,11 @@ printf '%s\n' \
   'child = "import os, signal, time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.signal(signal.SIGINT, signal.SIG_IGN); Path(os.environ[\"SOURCE_DESCENDANT_READY\"]).write_text(str(os.getpid()), encoding=\"ascii\"); time.sleep(600)"' \
   'subprocess.Popen([sys.executable, "-c", child], stdout=sys.stdout, stderr=subprocess.DEVNULL)' \
   'Path(os.environ["SOURCE_HELPER_READY"]).write_text(str(os.getpid()), encoding="ascii")' \
+  'descendant_ready = Path(os.environ["SOURCE_DESCENDANT_READY"])' \
+  'for _ in range(200):' \
+  '    if descendant_ready.is_file(): break' \
+  '    time.sleep(0.01)' \
+  'else: raise RuntimeError("descendant did not become ready")' \
   'mode = os.environ["SOURCE_HELPER_MODE"]' \
   'if mode == "success": print("{\"sourceId\":\"descendant-safe\",\"displayName\":\"Descendant Safe\"}", flush=True); raise SystemExit(0)' \
   'if mode == "validation": raise SystemExit(3)' \

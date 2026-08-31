@@ -275,6 +275,51 @@ for required_source_file in \
 done
 pass "source add rejects missing trusted dependencies before Python imports or Docker access"
 
+source_preassign_bin="$TEST_ROOT/source-preassign-bin"
+source_preassign_request="$TEST_ROOT/source-preassign-request.json"
+mkdir -p -- "$source_preassign_bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -Eeuo pipefail' \
+  'capture_path="${1%XXXXXX}EARLY1"' \
+  ': >"$capture_path"' \
+  'chmod 0600 -- "$capture_path"' \
+  'kill -s "$SOURCE_PREASSIGN_SIGNAL" "$SOURCE_PREASSIGN_COMMAND_PID"' \
+  'sleep 0.2' \
+  'printf "%s\n" "$capture_path"' \
+  >"$source_preassign_bin/mktemp"
+chmod 0755 -- "$source_preassign_bin/mktemp"
+printf '%s\n' "$source_request" >"$source_preassign_request"
+source_preassign_original_path="$PATH"
+export PATH="$source_preassign_bin:$PATH"
+for source_preassign_signal in INT TERM; do
+  export SOURCE_PREASSIGN_SIGNAL="$source_preassign_signal"
+  set +e
+  timeout -k 1 5 bash -c \
+    'export SOURCE_PREASSIGN_COMMAND_PID=$$; exec bash "$1" source add' \
+    reachcommander-preassign "$COMMAND_SOURCE" \
+    <"$source_preassign_request" \
+    >"$TEST_ROOT/source-preassign.stdout" \
+    2>"$TEST_ROOT/source-preassign.stderr"
+  last_status=$?
+  set -e
+  if [[ "$source_preassign_signal" == 'INT' ]]; then
+    assert_equal "130" "$last_status" "INT during source capture creation status"
+  else
+    assert_equal "143" "$last_status" "TERM during source capture creation status"
+  fi
+  if compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
+    fail "$source_preassign_signal during source capture creation retained capture"
+  fi
+done
+export PATH="$source_preassign_original_path"
+unset SOURCE_PREASSIGN_SIGNAL
+run_command_with_input $'retain\ncancel' uninstall
+assert_equal "1" "$last_status" "post-capture-creation-interrupt uninstall cancellation status"
+[[ "$last_output" == *'uninstall cancelled; confirmation did not match'* ]] ||
+  fail "post-capture-creation-interrupt install tree did not reach uninstall confirmation"
+pass "source add cleans capture when signalled before mktemp returns"
+
 cp -- "$INSTALL_ROOT/bin/source_management.py" "$TEST_ROOT/source-management.compatible.py"
 printf '%s\n' \
   'raise RuntimeError("protected-helper-startup-/private/source/secret")' \

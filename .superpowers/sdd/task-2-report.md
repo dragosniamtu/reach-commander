@@ -82,12 +82,17 @@ Follow-up RED checkpoints were captured before implementation for: canonical len
 - The drain incrementally reads with fixed `os.read` calls and immediately writes at most 4,097 bytes with `os.write`, while consuming all excess output. Valid output is therefore persisted before EOF even when a descendant inherits stdout. Normal exit, status 3, `INT`, and `TERM` regressions use a TERM-ignoring descendant and assert bounded return, no helper/descendant/drain/capture residue, exact signal status, and a valid uninstall tree.
 - RED evidence: a direct helper that printed valid JSON, spawned a descendant holding stdout, and exited 0 timed out with status 124. The package contract also failed because installer preflight did not require session support. The POSIX behavioral cases execute on Linux CI; this Windows host explicitly skips that one capability because MSYS cannot group-signal native Python descendants, while the test shim starts no descendant in the skipped branch.
 
+### Pre-capture signal follow-up
+
+- Source-add installs its scoped `EXIT`/`INT`/`TERM` cleanup before invoking `mktemp`. If a signal arrives after the exact capture is created but before its pathname is assigned, cleanup uses the already-held shared lock to inspect only depth-one `.source-add-stdout.??????` entries below the trusted install root and removes only regular, non-symlink files whose six-character suffix is strictly alphanumeric. Assigned candidates retain the narrower single-path cleanup behavior.
+- RED evidence: a fake `mktemp` created `.source-add-stdout.EARLY1`, signalled the exact command PID before returning its pathname, and the INT case retained the capture. Both INT and TERM now return 130/143 without residue, and the post-interruption uninstall confirmation remains reachable.
+
 ## Final verification
 
 | Gate | Result |
 |---|---|
 | `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 82 passed, 3 Windows capability skips |
-| `tests/installer/test_command.sh` | 51/51 passed (1 Windows POSIX-session capability skip) |
+| `tests/installer/test_command.sh` | 52/52 passed (1 Windows POSIX-session capability skip) |
 | `tests/installer/test_install.sh` | 33/33 passed, 3 Windows capability skips |
 | `tests/installer/test_package.sh` | 7/7 passed |
 | `tests/installer/test_common.sh` | 17/17 passed |

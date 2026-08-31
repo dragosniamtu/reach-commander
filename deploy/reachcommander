@@ -298,6 +298,18 @@ cleanup_source_add_capture() {
   local candidate="$SOURCE_ADD_CAPTURE"
   SOURCE_ADD_CAPTURE=''
   stop_source_add_processes
+  if [[ -z "$candidate" ]]; then
+    for candidate in "$RC_INSTALL_ROOT"/.source-add-stdout.??????; do
+      case "$candidate" in
+        "$RC_INSTALL_ROOT"/.source-add-stdout.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9])
+          if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+            rm -f -- "$candidate" || true
+          fi
+          ;;
+      esac
+    done
+    return
+  fi
   case "$candidate" in
     "$RC_INSTALL_ROOT"/.source-add-stdout.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9])
       if [[ -f "$candidate" && ! -L "$candidate" ]]; then
@@ -365,14 +377,16 @@ command_source_add() {
     rc_die 'source-management helper is unavailable or unsafe'
     return 1
   fi
+  SOURCE_ADD_CAPTURE=''
+  trap cleanup_source_add_capture EXIT
+  trap 'cleanup_source_add_capture; exit 130' INT
+  trap 'cleanup_source_add_capture; exit 143' TERM
   source_stdout="$(mktemp "$RC_INSTALL_ROOT/.source-add-stdout.XXXXXX")" || {
+    finish_source_add_capture
     printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'
     return 1
   }
   SOURCE_ADD_CAPTURE="$source_stdout"
-  trap cleanup_source_add_capture EXIT
-  trap 'cleanup_source_add_capture; exit 130' INT
-  trap 'cleanup_source_add_capture; exit 143' TERM
   if ! chmod 0600 -- "$source_stdout"; then
     finish_source_add_capture
     printf '%s\n' '{"code":"source_management_failed","detail":"The source-management operation could not be completed."}'

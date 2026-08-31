@@ -163,8 +163,7 @@ command_support_bundle() {
   PYTHONDONTWRITEBYTECODE=1 python3 "$support_bundle_cli"
 }
 
-command_source_add() {
-  local source_helper="$RC_INSTALL_ROOT/bin/source_management.py"
+source_management_dependencies_are_safe() {
   local specification
   local relative_path
   local expected_mode
@@ -182,19 +181,16 @@ command_source_add() {
     'lib/updater_protocol.py:644'
     'lib/compose.release.yaml:600'
   )
-  rc_acquire_lock || return 1
   for specification in "${source_directories[@]}"; do
     IFS=: read -r relative_path expected_mode <<<"$specification"
     installed_path="$RC_INSTALL_ROOT/$relative_path"
     if [[ ! -d "$installed_path" || -L "$installed_path" ]]; then
-      rc_die 'source-management helper is unsafe'
       return 1
     fi
     if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]]; then
       owner="$(stat -c '%u:%g' -- "$installed_path" 2>/dev/null || true)"
       mode="$(stat -c '%a' -- "$installed_path" 2>/dev/null || true)"
       if [[ "$owner" != '0:0' || "$mode" != "$expected_mode" ]]; then
-        rc_die 'source-management helper is unsafe'
         return 1
       fi
     fi
@@ -203,18 +199,25 @@ command_source_add() {
     IFS=: read -r relative_path expected_mode <<<"$specification"
     installed_path="$RC_INSTALL_ROOT/$relative_path"
     if [[ ! -f "$installed_path" || -L "$installed_path" ]]; then
-      rc_die 'source-management helper is unavailable'
       return 1
     fi
     if [[ "${REACHCOMMANDER_TESTING:-0}" != '1' ]]; then
       owner="$(stat -c '%u:%g' -- "$installed_path" 2>/dev/null || true)"
       mode="$(stat -c '%a' -- "$installed_path" 2>/dev/null || true)"
       if [[ "$owner" != '0:0' || "$mode" != "$expected_mode" ]]; then
-        rc_die 'source-management helper is unsafe'
         return 1
       fi
     fi
   done
+}
+
+command_source_add() {
+  local source_helper="$RC_INSTALL_ROOT/bin/source_management.py"
+  rc_acquire_lock || return 1
+  if ! source_management_dependencies_are_safe; then
+    rc_die 'source-management helper is unavailable or unsafe'
+    return 1
+  fi
   PYTHONDONTWRITEBYTECODE=1 python3 "$source_helper"
 }
 
@@ -1178,6 +1181,38 @@ doctor_fail() {
   printf '[FAIL] %s\n' "$1"
 }
 
+doctor_source_transaction_state() {
+  local source_helper="$RC_INSTALL_ROOT/bin/source_management.py"
+  local source_state=''
+  if ! source_management_dependencies_are_safe; then
+    doctor_fail 'Source transaction state cannot be validated because its helper is unavailable or unsafe'
+    return
+  fi
+  if ! source_state="$(
+    PYTHONDONTWRITEBYTECODE=1 python3 "$source_helper" --doctor-state 2>/dev/null
+  )"; then
+    doctor_fail 'Source transaction state is invalid; reinstall or restore the installer-managed state'
+    return
+  fi
+  case "$source_state" in
+    clear)
+      doctor_pass 'No source operation journal or recovery transaction is present'
+      ;;
+    journal)
+      doctor_warn 'Source operation journal is present; no recovery transaction is pending'
+      ;;
+    recovery-required)
+      doctor_fail 'Source transaction recovery is required; retry the original source add, then reinstall if recovery still fails'
+      ;;
+    recovery-unavailable)
+      doctor_fail 'Source transaction recovery data is missing; reinstall or restore the installer-managed state'
+      ;;
+    *)
+      doctor_fail 'Source transaction state returned an invalid diagnostic result'
+      ;;
+  esac
+}
+
 read_env_value() {
   local key="$1"
   local line
@@ -1383,6 +1418,7 @@ command_doctor() {
   else
     doctor_pass 'No incomplete reconfiguration transaction is present'
   fi
+  doctor_source_transaction_state
 
   if python3 -m json.tool "$RC_INSTALL_ROOT/config/sources.json" >/dev/null 2>&1; then
     doctor_pass 'Application source configuration is valid JSON'

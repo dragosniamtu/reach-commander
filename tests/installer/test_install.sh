@@ -322,6 +322,8 @@ run_installer $'n\n' "$TEST_ROOT/incomplete-source-transaction.out"
 assert_equal "1" "$last_status" "incomplete source transaction reconfiguration status"
 assert_equal "$deployment_before" "$(active_deployment_fingerprint)" "incomplete source transaction deployment"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "incomplete source transaction reconfiguration invoked Docker"
+grep -q 'retry the original source add' "$TEST_ROOT/incomplete-source-transaction.out" ||
+  fail "incomplete source transaction recovery guidance missing"
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/backups/.source-transaction"
 pass "reconfiguration fails closed while a source transaction requires recovery"
 

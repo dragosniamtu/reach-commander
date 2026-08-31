@@ -454,6 +454,8 @@ fi
 assert_equal "0" "$last_status" "healthy doctor status"
 [[ "$last_output" == *'[PASS] Docker Engine is available'* ]] || fail "doctor Docker pass missing"
 [[ "$last_output" == *'[PASS] Container is healthy'* ]] || fail "doctor health pass missing"
+[[ "$last_output" == *'[PASS] No source operation journal or recovery transaction is present'* ]] ||
+  fail "doctor clear source transaction status missing"
 [[ "$last_output" != *'[FAIL]'* ]] || fail "healthy doctor reported a failure"
 [[ ! -s "$FAKE_FLOCK_LOG" ]] || fail "doctor acquired a mutating lock"
 assert_equal "$deployment_before" "$(find "$INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "doctor deployment mutation"
@@ -472,6 +474,24 @@ for container_path in \
     fail "doctor did not probe fixed container path: $container_path"
 done
 pass "doctor reports a healthy deployment without mutating it"
+
+printf '%s\n' '{"schemaVersion":1,"transactionId":"12345678-1234-4234-8234-123456789abc","sourceId":"archive","displayName":"Archive","phase":"completed","reasonCode":"completed","updatedAt":"2026-08-31T00:00:00Z"}' \
+  >"$INSTALL_ROOT/state/source-operation.json"
+chmod 0600 -- "$INSTALL_ROOT/state/source-operation.json"
+run_command doctor
+assert_equal "0" "$last_status" "doctor terminal source journal status"
+[[ "$last_output" == *'[WARN] Source operation journal is present; no recovery transaction is pending'* ]] ||
+  fail "doctor terminal source journal warning missing"
+
+mkdir -p -- "$INSTALL_ROOT/backups/.source-transaction"
+chmod 0700 -- "$INSTALL_ROOT/backups/.source-transaction"
+run_command doctor
+assert_equal "1" "$last_status" "doctor incomplete source transaction status"
+[[ "$last_output" == *'[FAIL] Source transaction recovery is required; retry the original source add'* ]] ||
+  fail "doctor actionable source recovery failure missing"
+rm -rf -- "$INSTALL_ROOT/backups/.source-transaction"
+rm -f -- "$INSTALL_ROOT/state/source-operation.json"
+pass "doctor reports source journal state and actionable transaction recovery"
 
 printf 'do-not-print-/etc/shadow\n' >"$INSTALL_ROOT/state/update-traces/not-a-trace"
 run_command update-log

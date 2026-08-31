@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from deploy import render_config
@@ -19,6 +20,15 @@ ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy" / "compose.release.yaml"
 IMAGE = "ghcr.io/dragosniamtu/reach-commander@sha256:" + "a" * 64
 IMAGE_ID = "sha256:" + "a" * 64
+
+
+def directory_status(*, uid: int = 0, mode: int = 0o755, inode: int = 1):
+    return SimpleNamespace(
+        st_mode=stat.S_IFDIR | mode,
+        st_uid=uid,
+        st_dev=7,
+        st_ino=inode,
+    )
 
 
 def add_request(
@@ -66,6 +76,43 @@ class FakeCommands:
         if call[:2] == ("docker", "inspect"):
             return (self.health_statuses.pop(0) if self.health_statuses else "healthy") + "\n"
         raise AssertionError(f"unexpected command: {call!r}")
+
+
+class InjectedAtomicWriter:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        fail_publish_index: int | None = None,
+        fail_restore: bool = False,
+    ) -> None:
+        self.root = root
+        self.fail_publish_index = fail_publish_index
+        self.fail_restore = fail_restore
+        self.live_calls = 0
+        self.publish_failed = False
+        self.restore_attempted = False
+
+    def __call__(self, path: Path, content: str, mode: int = 0o600) -> None:
+        destination = Path(path)
+        live_paths = {
+            self.root / "config" / "sources.json",
+            self.root / "state" / "source-mounts.json",
+            self.root / "compose.yaml",
+        }
+        if destination in live_paths:
+            self.live_calls += 1
+            if (
+                not self.publish_failed
+                and self.fail_publish_index == self.live_calls
+            ):
+                self.publish_failed = True
+                raise OSError("write failure contains /private/source")
+            if self.publish_failed:
+                self.restore_attempted = True
+                if self.fail_restore:
+                    raise OSError("restore failure contains /private/source")
+        render_config.atomic_write(destination, content, mode)
 
 
 class SourceFixture:
@@ -148,9 +195,35 @@ class SourceFixture:
         access_allowed: bool = True,
         interrupt_after: str | None = None,
         uuid_factory=None,
+        status_reader=None,
+        atomic_writer=None,
+        fsync_directory=None,
     ):
         commands = commands or FakeCommands()
-        canonical = canonical or {"/srv/archive": "/srv/archive"}
+        canonical = {
+            self.existing: self.existing,
+            **(canonical or {"/srv/archive": "/srv/archive"}),
+        }
+        if status_reader is None:
+            leaf_inodes = {
+                path: 100 + index for index, path in enumerate(canonical.values())
+            }
+
+            def status_reader(path: str):
+                if path in leaf_inodes:
+                    return directory_status(
+                        uid=self.runtime_uid,
+                        mode=0o750,
+                        inode=leaf_inodes[path],
+                    )
+                return directory_status()
+
+        options = {}
+        options["status_reader"] = status_reader
+        if atomic_writer is not None:
+            options["atomic_writer"] = atomic_writer
+        if fsync_directory is not None:
+            options["fsync_directory"] = fsync_directory
         return self.module.SourceTransaction(
             self.root,
             command_runner=commands,
@@ -162,6 +235,7 @@ class SourceFixture:
             or (lambda: uuid.UUID("12345678-1234-4234-8234-123456789abc")),
             interrupt_after=interrupt_after,
             sleep=lambda _: None,
+            **options,
         )
 
 
@@ -194,6 +268,33 @@ class SourceValidationTests(unittest.TestCase):
                     requested,
                     canonicalizer=lambda _, result=canonical: result,
                     directory_exists=lambda _: requested != "/missing",
+                )
+
+        with self.assertRaises(module.SourceManagementFailure):
+            module.canonical_source_path(
+                "/srv/link",
+                canonicalizer=lambda _: "/srv/" + "a" * 1_020,
+                directory_exists=lambda _: True,
+            )
+
+    def test_trusted_source_ancestry_rejects_writable_or_non_root_parent(self) -> None:
+        module = self.source_management
+        for unsafe_status in (
+            directory_status(mode=0o775),
+            directory_status(uid=1000),
+        ):
+            with self.subTest(status=unsafe_status), self.assertRaises(
+                module.SourceManagementFailure
+            ):
+                module.capture_trusted_source_identity(
+                    "/srv/archive",
+                    status_reader=lambda path, unsafe=unsafe_status: (
+                        directory_status(uid=1000, mode=0o770, inode=40)
+                        if path == "/srv/archive"
+                        else unsafe
+                        if path == "/srv"
+                        else directory_status()
+                    ),
                 )
 
     def test_rejects_installer_overlap_and_duplicate_or_nested_sources(self) -> None:
@@ -304,6 +405,78 @@ class SourceTransactionTests(unittest.TestCase):
         self.assertNotIn("/srv/archive", str(raised.exception))
         self.assertFalse(any("up" in call for call in commands.calls))
 
+        commands.compose_config_status = 0
+        retry = self.fixture.manager(commands).add(add_request())
+        self.assertEqual("archive", retry["sourceId"])
+
+    def test_each_partial_publish_write_is_rolled_back_and_a_retry_succeeds(self) -> None:
+        for failure_index in (1, 2, 3):
+            with self.subTest(failure_index=failure_index):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory) / "install"
+                    fixture = SourceFixture(root, self.source_management)
+                    before = tuple(
+                        (root / relative).read_bytes()
+                        for relative in (
+                            "config/sources.json",
+                            "state/source-mounts.json",
+                            "compose.yaml",
+                        )
+                    )
+                    writer = InjectedAtomicWriter(
+                        root, fail_publish_index=failure_index
+                    )
+                    commands = FakeCommands()
+
+                    with self.assertRaises(
+                        self.source_management.SourceManagementFailure
+                    ) as raised:
+                        fixture.manager(
+                            commands, atomic_writer=writer
+                        ).add(add_request())
+
+                    self.assertEqual("rolled_back", raised.exception.code)
+                    self.assertTrue(writer.restore_attempted)
+                    self.assertEqual(
+                        before,
+                        tuple(
+                            (root / relative).read_bytes()
+                            for relative in (
+                                "config/sources.json",
+                                "state/source-mounts.json",
+                                "compose.yaml",
+                            )
+                        ),
+                    )
+                    result = fixture.manager().add(add_request())
+                    self.assertEqual("archive", result["sourceId"])
+
+    def test_partial_publish_with_failed_restore_retains_backup_for_retry(self) -> None:
+        before = self.fingerprint()
+        writer = InjectedAtomicWriter(
+            self.root, fail_publish_index=2, fail_restore=True
+        )
+        with self.assertRaises(self.source_management.SourceManagementFailure) as raised:
+            self.fixture.manager(atomic_writer=writer).add(add_request())
+        self.assertEqual("recovery_failed", raised.exception.code)
+        self.assertTrue((self.root / "backups" / ".source-transaction").is_dir())
+
+        result = self.fixture.manager(
+            canonical={"/srv/second": "/srv/second"}
+        ).add(add_request("Second", "/srv/second"))
+        self.assertEqual("second", result["sourceId"])
+        self.assertNotEqual(before, self.fingerprint())
+
+    def test_transaction_root_creation_fsyncs_backups_parent_first(self) -> None:
+        fsync_calls: list[Path] = []
+        manager = self.fixture.manager(
+            fsync_directory=lambda path: fsync_calls.append(Path(path))
+        )
+        manager._transaction_id = "12345678-1234-4234-8234-123456789abc"
+        manager._create_backup()
+
+        self.assertEqual(self.root / "backups", fsync_calls[0])
+
     def test_unhealthy_candidate_rolls_back_exact_files_and_verifies_recovery(self) -> None:
         commands = FakeCommands()
         commands.health_statuses = ["unhealthy", "healthy"]
@@ -324,6 +497,11 @@ class SourceTransactionTests(unittest.TestCase):
         self.assertEqual("recovery_failed", raised.exception.code)
         self.assertEqual("failed", self.journal()["phase"])
         self.assertTrue((self.root / "backups" / ".source-transaction").is_dir())
+
+        shutil.rmtree(self.root / "backups" / ".source-transaction")
+        with self.assertRaises(self.source_management.SourceManagementFailure) as retry:
+            self.fixture.manager().add(add_request())
+        self.assertEqual("recovery_failed", retry.exception.code)
 
     def test_interrupted_publish_is_recovered_before_the_next_add(self) -> None:
         before = self.fingerprint()
@@ -377,6 +555,95 @@ class SourceTransactionTests(unittest.TestCase):
         with self.assertRaises(self.source_management.SourceManagementFailure):
             self.fixture.manager(access_allowed=False).add(add_request(access="readWrite"))
 
+    def test_existing_persisted_sources_must_be_canonical_and_pairwise_separate(self) -> None:
+        request = render_config.DeploymentRequest.from_mapping(
+            {
+                "accessMode": "secure-https",
+                "bindAddress": "127.0.0.1",
+                "port": 8092,
+                "allowInsecureHttp": False,
+                "uid": self.fixture.runtime_uid,
+                "gid": self.fixture.runtime_gid,
+                "image": IMAGE,
+                "sources": [
+                    {
+                        "id": "media",
+                        "name": "Media",
+                        "hostPath": "/srv/media",
+                        "readOnly": True,
+                        "defaultLeft": True,
+                        "defaultRight": True,
+                    },
+                    {
+                        "id": "nested",
+                        "name": "Nested",
+                        "hostPath": "/srv/media/nested",
+                        "readOnly": True,
+                        "defaultLeft": False,
+                        "defaultRight": False,
+                    },
+                ],
+            }
+        )
+        render_config.render_deployment(request, self.fixture.template, self.root)
+        self.fixture.override.write_text("services: {}\n", encoding="utf-8")
+        self.fixture.protect()
+
+        with self.assertRaises(self.source_management.SourceManagementFailure):
+            self.fixture.manager(
+                canonical={
+                    "/srv/archive": "/srv/archive",
+                    "/srv/media": "/srv/media",
+                    "/srv/media/nested": "/srv/media/nested",
+                }
+            ).add(add_request())
+
+    def test_source_leaf_identity_is_revalidated_before_live_publication(self) -> None:
+        leaf_reads = 0
+
+        def status_reader(path: str):
+            nonlocal leaf_reads
+            if path == "/srv/archive":
+                leaf_reads += 1
+                return directory_status(uid=1000, mode=0o770, inode=40 + leaf_reads)
+            if path == "/srv/media":
+                return directory_status(uid=1000, mode=0o750, inode=30)
+            return directory_status()
+
+        before = self.fingerprint()
+        with self.assertRaises(self.source_management.SourceManagementFailure):
+            self.fixture.manager(
+                canonical={
+                    "/srv/archive": "/srv/archive",
+                    "/srv/media": "/srv/media",
+                },
+                status_reader=status_reader,
+            ).add(add_request())
+
+        self.assertEqual(before, self.fingerprint())
+
+    def test_source_leaf_identity_is_revalidated_before_service_recreate(self) -> None:
+        leaf_reads = 0
+
+        def status_reader(path: str):
+            nonlocal leaf_reads
+            if path == "/srv/archive":
+                leaf_reads += 1
+                inode = 41 if leaf_reads < 3 else 42
+                return directory_status(uid=1000, mode=0o770, inode=inode)
+            if path == "/srv/media":
+                return directory_status(uid=1000, mode=0o750, inode=30)
+            return directory_status()
+
+        before = self.fingerprint()
+        with self.assertRaises(self.source_management.SourceManagementFailure):
+            self.fixture.manager(
+                canonical={"/srv/archive": "/srv/archive"},
+                status_reader=status_reader,
+            ).add(add_request())
+
+        self.assertEqual(before, self.fingerprint())
+
     def test_journal_retains_one_transaction_identity_and_rejects_invalid_identity(self) -> None:
         identities = iter(
             (
@@ -399,6 +666,184 @@ class SourceTransactionTests(unittest.TestCase):
         (self.root / "state" / "source-operation.json").chmod(0o600)
         with self.assertRaises(self.source_management.SourceManagementFailure):
             manager._read_journal()
+
+    def test_journal_rejects_duplicates_invalid_fields_and_phase_reason_mismatch(self) -> None:
+        manager = self.fixture.manager()
+        manager._journal("validating", "archive", "Archive")
+        journal_path = self.root / "state" / "source-operation.json"
+        valid = self.journal()
+        invalid_documents: list[str] = []
+
+        duplicate = journal_path.read_text(encoding="utf-8").replace(
+            '"phase": "validating",',
+            '"phase": "validating",\n  "phase": "validating",',
+        )
+        invalid_documents.append(duplicate)
+        for key, value in (
+            ("sourceId", 7),
+            ("sourceId", "Not_Canonical"),
+            ("displayName", "x" * 81),
+            ("displayName", None),
+            ("reasonCode", "completed"),
+            ("updatedAt", "2026-08-31T00:00:00+02:00"),
+            ("updatedAt", "2026-08-31Z"),
+            ("updatedAt", "not-a-timestamp"),
+        ):
+            changed = dict(valid)
+            changed[key] = value
+            invalid_documents.append(json.dumps(changed))
+
+        for document in invalid_documents:
+            with self.subTest(document=document[:80]):
+                journal_path.write_text(document, encoding="utf-8")
+                journal_path.chmod(0o600)
+                with self.assertRaises(
+                    self.source_management.SourceManagementFailure
+                ):
+                    manager._read_journal()
+
+    def test_backup_manifest_matches_journal_and_mismatch_fails_closed(self) -> None:
+        with self.assertRaises(self.source_management.SimulatedInterruption):
+            self.fixture.manager(interrupt_after="published").add(add_request())
+
+        journal = self.journal()
+        manifest_path = self.root / "backups" / ".source-transaction" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(journal["transactionId"], manifest["transactionId"])
+        self.assertEqual(
+            {
+                "compose.yaml",
+                "config/sources.json",
+                "state/source-mounts.json",
+            },
+            set(manifest["files"]),
+        )
+
+        manifest["transactionId"] = "87654321-4321-4321-8321-cba987654321"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        manifest_path.chmod(0o600)
+        with self.assertRaises(self.source_management.SourceManagementFailure) as raised:
+            self.fixture.manager().add(add_request())
+        self.assertEqual("recovery_failed", raised.exception.code)
+        self.assertTrue(manifest_path.exists())
+
+        manifest["transactionId"] = journal["transactionId"]
+        manifest["files"]["compose.yaml"] = "0" * 64
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        manifest_path.chmod(0o600)
+        with self.assertRaises(self.source_management.SourceManagementFailure):
+            self.fixture.manager().add(add_request())
+
+    def test_recovery_revalidates_persisted_source_ancestry_before_recreate(self) -> None:
+        with self.assertRaises(self.source_management.SimulatedInterruption):
+            self.fixture.manager(interrupt_after="published").add(add_request())
+
+        commands = FakeCommands()
+
+        def status_reader(path: str):
+            if path == "/srv/media":
+                return directory_status(uid=1000, mode=0o750, inode=30)
+            if path == "/srv":
+                return directory_status(mode=0o777)
+            return directory_status()
+
+        with self.assertRaises(self.source_management.SourceManagementFailure) as raised:
+            self.fixture.manager(
+                commands, status_reader=status_reader
+            ).add(add_request())
+        self.assertEqual("recovery_failed", raised.exception.code)
+        self.assertFalse(any("up" in call for call in commands.calls))
+        self.assertTrue((self.root / "backups" / ".source-transaction").exists())
+
+    def test_public_boundary_sanitizes_append_render_and_journal_failures(self) -> None:
+        secret = "/private/source/command-output"
+
+        def assert_sanitized(action) -> None:
+            with self.assertRaises(self.source_management.SourceManagementFailure) as raised:
+                action()
+            self.assertEqual("source_management_failed", raised.exception.code)
+            self.assertNotIn(secret, str(raised.exception))
+
+        with mock.patch.object(
+            self.source_management.renderer,
+            "append_source",
+            side_effect=RuntimeError(secret),
+        ):
+            assert_sanitized(lambda: self.fixture.manager().add(add_request()))
+
+        with mock.patch.object(
+            self.source_management,
+            "_write_json",
+            side_effect=OSError(secret),
+        ):
+            assert_sanitized(lambda: self.fixture.manager().add(add_request()))
+
+        with mock.patch.object(
+            self.source_management.renderer,
+            "render_deployment",
+            side_effect=RuntimeError(secret),
+        ):
+            assert_sanitized(lambda: self.fixture.manager().add(add_request()))
+
+        original_write = self.source_management._write_json
+
+        def fail_error_journal(path, value, mode=0o600):
+            if isinstance(value, dict) and value.get("phase") == "failed":
+                raise OSError(secret)
+            return original_write(path, value, mode)
+
+        commands = FakeCommands()
+        commands.compose_config_status = 1
+        with mock.patch.object(
+            self.source_management, "_write_json", side_effect=fail_error_journal
+        ):
+            assert_sanitized(lambda: self.fixture.manager(commands).add(add_request()))
+
+    def test_failed_error_journal_before_first_write_retains_recoverable_backup(self) -> None:
+        leaf_reads = 0
+
+        def status_reader(path: str):
+            nonlocal leaf_reads
+            if path == "/srv/archive":
+                leaf_reads += 1
+                return directory_status(
+                    uid=1000, mode=0o770, inode=40 + leaf_reads
+                )
+            if path == "/srv/media":
+                return directory_status(uid=1000, mode=0o750, inode=30)
+            return directory_status()
+
+        original_write = self.source_management._write_json
+
+        def fail_error_journal(path, value, mode=0o600):
+            if isinstance(value, dict) and value.get("phase") == "failed":
+                raise OSError("/private/source/error-journal")
+            return original_write(path, value, mode)
+
+        with mock.patch.object(
+            self.source_management, "_write_json", side_effect=fail_error_journal
+        ):
+            with self.assertRaises(self.source_management.SourceManagementFailure):
+                self.fixture.manager(status_reader=status_reader).add(add_request())
+
+        self.assertTrue((self.root / "backups" / ".source-transaction").is_dir())
+        result = self.fixture.manager().add(add_request())
+        self.assertEqual("archive", result["sourceId"])
+
+    def test_main_sanitizes_unexpected_stdin_failure_without_traceback(self) -> None:
+        secret = "/private/source/stdin"
+        fake_stdin = SimpleNamespace(
+            buffer=SimpleNamespace(read=mock.Mock(side_effect=OSError(secret)))
+        )
+        with mock.patch.object(self.source_management.sys, "stdin", fake_stdin), mock.patch.object(
+            self.source_management.os, "write"
+        ) as write:
+            status = self.source_management.main()
+
+        self.assertEqual(1, status)
+        emitted = b"".join(call.args[1] for call in write.call_args_list)
+        self.assertNotIn(secret.encode(), emitted)
+        self.assertIn(b"source_management_failed", emitted)
 
 
 if __name__ == "__main__":

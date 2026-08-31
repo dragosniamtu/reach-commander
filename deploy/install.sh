@@ -842,7 +842,7 @@ recover_incomplete_reconfiguration() {
 reject_incomplete_source_transaction() {
   local transaction_root="$RC_INSTALL_ROOT/backups/.source-transaction"
   if [[ -e "$transaction_root" || -L "$transaction_root" ]]; then
-    rc_die 'an incomplete source transaction must be recovered before reconfiguration'
+    rc_die 'an incomplete source transaction must be recovered before reconfiguration; retry the original source add first'
     return 1
   fi
 }

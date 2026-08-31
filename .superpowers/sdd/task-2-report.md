@@ -54,12 +54,22 @@
 
 All REDs were captured before the corresponding production changes. Focused GREEN coverage includes successful publication, Compose validation failure, unhealthy rollback, failed rollback persistence, interrupted recovery, journal identity validation, path/count/ID/access rules, installer state hardening, dependency preflight, shared-lock contention, and output sanitization.
 
+## Security review follow-up
+
+- Persisted paths now have a deliberately strict pathname trust contract: the leaf is a real directory and may be owned/writable by the configured runtime identity, while every ancestor through `/` must be a real, root-owned directory with no group/other write bits. All existing sources are revalidated, including pairwise separation, before an add; leaf device/inode identities are captured and checked again immediately before publication and service recreation. The renderer must preserve the exact canonical string, and canonicalized paths are capped at 1,024 characters. This excludes otherwise-accessible sources below user-writable ancestors because such path entries are replaceable across later service restarts.
+- Publication records `recovery_required` before the first live replacement. Failures injected at each of the three replacements restore the exact digest-verified backup, verify the prior service, and permit retry. Failed restoration, invalid ancestry during recovery, missing/mismatched backup state, and failed secondary journal writes retain recovery material and fail closed.
+- The transaction directory is protected and its parent `backups` directory is fsynced immediately, before backup population or publication. A strict manifest binds the three backup files and their SHA-256 digests to the journal transaction UUID.
+- Journal parsing rejects duplicate keys, non-canonical UUIDs, wrong JSON types, out-of-bound source/display/timestamp values, non-UTC timestamps, and invalid phase/reason combinations. Clean prepublication failure is distinguished from recovery-required failure so a valid retry is not wedged.
+- The whole public Python boundary, including stdin, renderer append/render, and initial/error journal operations, maps ordinary unexpected exceptions to fixed public details. The test-only interruption still crosses rollback handlers unchanged. `reachcommander doctor` now reports clear, terminal-journal, recoverable-transaction, and missing/invalid-recovery states with bounded guidance.
+
+Follow-up RED checkpoints were captured before implementation for: canonical length and ancestry/identity validation; persisted pairwise overlap; swaps before publication/recreate; failures at live writes 1/2/3; missing parent fsync; prepublication retry wedging; duplicate/ill-typed/semantically invalid journals; transaction/digest manifest mismatch; leaked renderer/journal/stdin exceptions; unsafe ancestry during recovery; missing doctor status; and a failed secondary journal immediately before the first live write. Each focused regression is GREEN.
+
 ## Final verification
 
 | Gate | Result |
 |---|---|
-| `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 66 passed, 3 Windows capability skips |
-| `tests/installer/test_command.sh` | 46/46 passed |
+| `python -m unittest tests.installer.test_source_management tests.installer.test_render_config tests.installer.test_updater_protocol -v` | 79 passed, 3 Windows capability skips |
+| `tests/installer/test_command.sh` | 47/47 passed |
 | `tests/installer/test_install.sh` | 33/33 passed, 2 Windows capability skips |
 | `tests/installer/test_package.sh` | 7/7 passed |
 | `tests/installer/test_common.sh` | 17/17 passed |

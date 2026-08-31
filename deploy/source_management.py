@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -36,6 +37,7 @@ else:
 
 
 MAX_SOURCES = 32
+MAX_CANONICAL_SOURCE_CHARS = 1_024
 _SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _PROTECTED_ROOTS = ("/", "/proc", "/sys", "/dev", "/run", "/var/run")
 _BROAD_ROOTS = frozenset({"/home", "/srv", "/mnt"})
@@ -53,6 +55,17 @@ _TRANSACTION_FILES = (
     "compose.yaml",
 )
 _JOURNAL_MAX_BYTES = 4_096
+_PHASE_REASON_CODES = {
+    "validating": frozenset({"in_progress"}),
+    "staging": frozenset({"in_progress"}),
+    "publishing": frozenset({"recovery_required"}),
+    "published": frozenset({"recovery_required"}),
+    "restarting": frozenset({"recovery_required"}),
+    "healthChecking": frozenset({"recovery_required"}),
+    "completed": frozenset({"completed"}),
+    "rolledBack": frozenset({"rolled_back"}),
+    "failed": frozenset({"source_management_failed", "recovery_failed"}),
+}
 _PUBLIC_DETAILS = {
     "invalid_request": "The source-management request is invalid.",
     "validation_failed": "The source folder could not be accepted.",
@@ -105,7 +118,11 @@ def canonical_source_path(
         canonical = canonicalizer(requested)
     except (OSError, RuntimeError, ValueError):
         raise SourceManagementFailure("validation_failed") from None
-    if not _is_posix_absolute(canonical) or not directory_exists(canonical):
+    if (
+        not _is_posix_absolute(canonical)
+        or len(canonical) > MAX_CANONICAL_SOURCE_CHARS
+        or not directory_exists(canonical)
+    ):
         raise SourceManagementFailure("validation_failed")
     normalized = str(PurePosixPath(canonical))
     if normalized in _BROAD_ROOTS or any(
@@ -113,6 +130,65 @@ def canonical_source_path(
     ):
         raise SourceManagementFailure("validation_failed")
     return normalized
+
+
+def capture_trusted_source_identity(
+    path: str,
+    *,
+    status_reader: Callable[[str], os.stat_result] = os.lstat,
+) -> tuple[int, int]:
+    """Require an unprivileged process cannot replace the persisted path entry."""
+    try:
+        leaf_status = status_reader(path)
+        if not stat.S_ISDIR(leaf_status.st_mode):
+            raise SourceManagementFailure("validation_failed")
+        parent = PurePosixPath(path).parent
+        while True:
+            parent_status = status_reader(str(parent))
+            if (
+                not stat.S_ISDIR(parent_status.st_mode)
+                or parent_status.st_uid != 0
+                or stat.S_IMODE(parent_status.st_mode) & 0o022
+            ):
+                raise SourceManagementFailure("validation_failed")
+            if parent == PurePosixPath("/"):
+                break
+            parent = parent.parent
+    except SourceManagementFailure:
+        raise
+    except (OSError, AttributeError, TypeError, ValueError):
+        raise SourceManagementFailure("validation_failed") from None
+    return (leaf_status.st_dev, leaf_status.st_ino)
+
+
+def validate_installed_source_paths(
+    paths: Iterable[str],
+    *,
+    installer_owned: Iterable[str],
+    canonicalizer: Callable[[str], str] = os.path.realpath,
+    directory_exists: Callable[[str], bool] = os.path.isdir,
+    status_reader: Callable[[str], os.stat_result] = os.lstat,
+) -> dict[str, tuple[int, int]]:
+    canonical_paths: list[str] = []
+    identities: dict[str, tuple[int, int]] = {}
+    for persisted in paths:
+        canonical = canonical_source_path(
+            persisted,
+            canonicalizer=canonicalizer,
+            directory_exists=directory_exists,
+        )
+        if canonical != persisted:
+            raise SourceManagementFailure("validation_failed")
+        validate_source_separation(
+            canonical,
+            existing=canonical_paths,
+            installer_owned=installer_owned,
+        )
+        identities[canonical] = capture_trusted_source_identity(
+            canonical, status_reader=status_reader
+        )
+        canonical_paths.append(canonical)
+    return identities
 
 
 def validate_source_separation(
@@ -249,6 +325,34 @@ def _write_json(path: Path, value: object, mode: int = 0o600) -> None:
     path.chmod(mode)
 
 
+def _strict_json_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
+def _read_bounded_json(path: Path, maximum_bytes: int) -> object:
+    if not 0 < path.stat().st_size <= maximum_bytes:
+        raise ValueError("invalid JSON size")
+    return json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_strict_json_pairs,
+    )
+
+
+def _is_utc_timestamp(value: object) -> bool:
+    if type(value) is not str or not 1 <= len(value) <= 40 or not value.endswith("Z"):
+        return False
+    try:
+        parsed = dt.datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == dt.timedelta(0)
+
+
 def _safe_status(path: Path, *, kind: str, mode: int, owner: int | None) -> None:
     try:
         status = path.lstat()
@@ -272,6 +376,9 @@ class SourceTransaction:
         canonicalizer: Callable[[str], str] = os.path.realpath,
         directory_exists: Callable[[str], bool] = os.path.isdir,
         access_checker: Callable[[str, int, int, bool], bool] = _default_access_checker,
+        status_reader: Callable[[str], os.stat_result] = os.lstat,
+        atomic_writer: Callable[[Path | str, str, int], None] = renderer.atomic_write,
+        fsync_directory: Callable[[Path], None] = _fsync_directory,
         expected_owner: int | None = None,
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         interrupt_after: str | None = None,
@@ -282,6 +389,9 @@ class SourceTransaction:
         self._canonicalizer = canonicalizer
         self._directory_exists = directory_exists
         self._access = access_checker
+        self._status = status_reader
+        self._atomic_write = atomic_writer
+        self._fsync_directory = fsync_directory
         self._owner = installed_state_owner() if expected_owner is None else expected_owner
         self._uuid = uuid_factory
         self._interrupt_after = interrupt_after
@@ -290,8 +400,19 @@ class SourceTransaction:
         self._journal_path = self.root / "state" / "source-operation.json"
         self._transaction_root = self.root / "backups" / ".source-transaction"
         self._backup_root = self._transaction_root / "backup"
+        self._manifest_path = self._transaction_root / "manifest.json"
 
     def add(self, raw_request: bytes) -> dict[str, str]:
+        try:
+            return self._add(raw_request)
+        except SimulatedInterruption:
+            raise
+        except SourceManagementFailure:
+            raise
+        except Exception:
+            raise SourceManagementFailure() from None
+
+    def _add(self, raw_request: bytes) -> dict[str, str]:
         request = self._parse_request(raw_request)
         self._validate_installer_state()
         self._recover_interrupted_transaction()
@@ -299,19 +420,20 @@ class SourceTransaction:
         self._validate_installer_state()
         installed = self._load_installed_request()
         require_source_capacity(len(installed.sources))
+        installer_owned = self._installer_owned_paths()
+        source_identities = self._capture_installed_source_identities(installed)
         canonical = canonical_source_path(
             request.host_path or "",
             canonicalizer=self._canonicalizer,
             directory_exists=self._directory_exists,
         )
-        installer_owned = list(_PRODUCTION_OWNED)
-        root_text = str(self.root.resolve())
-        if root_text.startswith("/"):
-            installer_owned.append(root_text)
         validate_source_separation(
             canonical,
             existing=(source.host_path for source in installed.sources),
             installer_owned=installer_owned,
+        )
+        source_identities[canonical] = capture_trusted_source_identity(
+            canonical, status_reader=self._status
         )
         source_id = generate_source_id(
             request.display_name or "",
@@ -333,7 +455,14 @@ class SourceTransaction:
             host_path=canonical,
             access="rw" if writable else "ro",
         )
-        self._apply(updated, source_id, request.display_name or "")
+        if updated.sources[-1].host_path != canonical:
+            raise SourceManagementFailure("validation_failed")
+        self._apply(
+            updated,
+            source_id,
+            request.display_name or "",
+            source_identities,
+        )
         return {"sourceId": source_id, "displayName": request.display_name or ""}
 
     @staticmethod
@@ -386,14 +515,43 @@ class SourceTransaction:
         except (OSError, UnicodeError, ValueError):
             raise SourceManagementFailure("validation_failed") from None
 
-    def _journal(self, phase: str, source_id: str | None, display_name: str | None) -> None:
+    def _installer_owned_paths(self) -> list[str]:
+        installer_owned = list(_PRODUCTION_OWNED)
+        root_text = str(self.root.resolve())
+        if root_text.startswith("/"):
+            installer_owned.append(root_text)
+        return installer_owned
+
+    def _capture_installed_source_identities(
+        self, installed
+    ) -> dict[str, tuple[int, int]]:
+        return validate_installed_source_paths(
+            (source.host_path for source in installed.sources),
+            installer_owned=self._installer_owned_paths(),
+            canonicalizer=self._canonicalizer,
+            directory_exists=self._directory_exists,
+            status_reader=self._status,
+        )
+
+    def _journal(
+        self,
+        phase: str,
+        source_id: str | None,
+        display_name: str | None,
+        *,
+        reason_code: str | None = None,
+    ) -> None:
         if self._transaction_id is None:
             self._transaction_id = str(self._uuid())
         now = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
-        reason = {
+        reason = reason_code or {
             "completed": "completed",
             "rolledBack": "rolled_back",
             "failed": "source_management_failed",
+            "publishing": "recovery_required",
+            "published": "recovery_required",
+            "restarting": "recovery_required",
+            "healthChecking": "recovery_required",
         }.get(phase, "in_progress")
         _write_json(
             self._journal_path,
@@ -408,15 +566,32 @@ class SourceTransaction:
             },
         )
 
+    def _best_effort_journal(
+        self,
+        phase: str,
+        source_id: str | None,
+        display_name: str | None,
+        *,
+        reason_code: str | None = None,
+    ) -> bool:
+        try:
+            self._journal(
+                phase,
+                source_id,
+                display_name,
+                reason_code=reason_code,
+            )
+        except Exception:
+            return False
+        return True
+
     def _read_journal(self) -> dict[str, object] | None:
         if not self._journal_path.exists() and not self._journal_path.is_symlink():
             return None
         _safe_status(self._journal_path, kind="file", mode=0o600, owner=self._owner)
         try:
-            if self._journal_path.stat().st_size > _JOURNAL_MAX_BYTES:
-                raise SourceManagementFailure("recovery_failed")
-            value = json.loads(self._journal_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            value = _read_bounded_json(self._journal_path, _JOURNAL_MAX_BYTES)
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
             raise SourceManagementFailure("recovery_failed") from None
         expected = {
             "schemaVersion",
@@ -427,7 +602,12 @@ class SourceTransaction:
             "reasonCode",
             "updatedAt",
         }
-        if type(value) is not dict or set(value) != expected or value["schemaVersion"] != 1:
+        if (
+            type(value) is not dict
+            or set(value) != expected
+            or type(value["schemaVersion"]) is not int
+            or value["schemaVersion"] != 1
+        ):
             raise SourceManagementFailure("recovery_failed")
         transaction_id = value["transactionId"]
         try:
@@ -440,23 +620,49 @@ class SourceTransaction:
             or str(parsed_transaction_id) != transaction_id
         ):
             raise SourceManagementFailure("recovery_failed")
-        if value["phase"] not in {
-            "validating",
-            "staging",
-            "publishing",
-            "published",
-            "restarting",
-            "healthChecking",
-            "completed",
-            "rolledBack",
-            "failed",
-        }:
+        source_id = value["sourceId"]
+        display_name = value["displayName"]
+        phase = value["phase"]
+        reason_code = value["reasonCode"]
+        if (
+            type(source_id) is not str
+            or _SOURCE_ID.fullmatch(source_id) is None
+            or type(display_name) is not str
+            or not 1 <= len(display_name) <= 80
+            or display_name != display_name.strip()
+            or any(not character.isprintable() for character in display_name)
+            or type(phase) is not str
+            or phase not in _PHASE_REASON_CODES
+            or type(reason_code) is not str
+            or reason_code not in _PHASE_REASON_CODES[phase]
+            or not _is_utc_timestamp(value["updatedAt"])
+        ):
             raise SourceManagementFailure("recovery_failed")
         self._transaction_id = transaction_id
         return value
 
-    def _apply(self, updated, source_id: str, display_name: str) -> None:
-        published = False
+    def _revalidate_source_identities(
+        self, expected: dict[str, tuple[int, int]]
+    ) -> None:
+        for path, identity in expected.items():
+            canonical = canonical_source_path(
+                path,
+                canonicalizer=self._canonicalizer,
+                directory_exists=self._directory_exists,
+            )
+            if canonical != path or capture_trusted_source_identity(
+                path, status_reader=self._status
+            ) != identity:
+                raise SourceManagementFailure("validation_failed")
+
+    def _apply(
+        self,
+        updated,
+        source_id: str,
+        display_name: str,
+        source_identities: dict[str, tuple[int, int]],
+    ) -> None:
+        publication_started = False
         self._journal("validating", source_id, display_name)
         try:
             self._journal("staging", source_id, display_name)
@@ -482,11 +688,13 @@ class SourceTransaction:
                 30,
             )
             self._journal("publishing", source_id, display_name)
+            self._revalidate_source_identities(source_identities)
+            publication_started = True
             self._publish(stage_root)
-            published = True
             self._journal("published", source_id, display_name)
             self._interrupt("published")
             self._journal("restarting", source_id, display_name)
+            self._revalidate_source_identities(source_identities)
             self._recreate_service()
             self._journal("healthChecking", source_id, display_name)
             self._verify_identity_and_health(updated.image)
@@ -494,27 +702,44 @@ class SourceTransaction:
             self._remove_transaction_root()
         except SimulatedInterruption:
             raise
-        except BaseException:
-            if not published:
-                self._journal("failed", source_id, display_name)
-                self._remove_transaction_root()
+        except Exception:
+            if not publication_started:
+                journal_recorded = self._best_effort_journal(
+                    "failed", source_id, display_name
+                )
+                if journal_recorded:
+                    try:
+                        self._remove_transaction_root()
+                    except Exception:
+                        pass
                 raise SourceManagementFailure() from None
             try:
                 self._restore_backup()
                 previous = self._load_installed_request()
+                self._capture_installed_source_identities(previous)
                 self._recreate_service()
                 self._verify_identity_and_health(previous.image)
-                self._journal("rolledBack", source_id, display_name)
-                self._remove_transaction_root()
-            except BaseException:
-                self._journal("failed", source_id, display_name)
+                if self._best_effort_journal(
+                    "rolledBack", source_id, display_name
+                ):
+                    self._remove_transaction_root()
+            except Exception:
+                self._best_effort_journal(
+                    "failed",
+                    source_id,
+                    display_name,
+                    reason_code="recovery_failed",
+                )
                 raise SourceManagementFailure("recovery_failed") from None
             raise SourceManagementFailure("rolled_back") from None
 
     def _create_backup(self) -> None:
         if self._transaction_root.exists() or self._transaction_root.is_symlink():
             raise SourceManagementFailure("recovery_failed")
-        self._backup_root.mkdir(parents=True, mode=0o700)
+        self._transaction_root.mkdir(mode=0o700)
+        self._transaction_root.chmod(0o700)
+        self._fsync_directory(self.root / "backups")
+        self._backup_root.mkdir(mode=0o700)
         self._backup_root.chmod(0o700)
         for relative in _TRANSACTION_FILES:
             source = self.root / relative
@@ -525,21 +750,37 @@ class SourceTransaction:
             destination.chmod(0o600)
             with destination.open("r+b") as stream:
                 os.fsync(stream.fileno())
-            _fsync_directory(destination.parent)
-        _fsync_directory(self._backup_root)
-        _fsync_directory(self._transaction_root)
+            self._fsync_directory(destination.parent)
+        if self._transaction_id is None:
+            raise SourceManagementFailure("recovery_failed")
+        _write_json(
+            self._manifest_path,
+            {
+                "schemaVersion": 1,
+                "transactionId": self._transaction_id,
+                "files": {
+                    relative: hashlib.sha256(
+                        (self._backup_root / relative).read_bytes()
+                    ).hexdigest()
+                    for relative in _TRANSACTION_FILES
+                },
+            },
+        )
+        self._fsync_directory(self._backup_root)
+        self._fsync_directory(self._transaction_root)
 
     def _publish(self, stage_root: Path) -> None:
         for relative in _TRANSACTION_FILES:
             source = stage_root / relative
             destination = self.root / relative
             mode = 0o644 if relative == "config/sources.json" else 0o600
-            renderer.atomic_write(destination, source.read_text(encoding="utf-8"), mode)
+            self._atomic_write(destination, source.read_text(encoding="utf-8"), mode)
             destination.chmod(mode)
 
     def _validate_backup(self) -> None:
         _safe_status(self._transaction_root, kind="directory", mode=0o700, owner=self._owner)
         _safe_status(self._backup_root, kind="directory", mode=0o700, owner=self._owner)
+        _safe_status(self._manifest_path, kind="file", mode=0o600, owner=self._owner)
         expected_files = {self._backup_root / relative for relative in _TRANSACTION_FILES}
         actual_files: set[Path] = set()
         for path in self._backup_root.rglob("*"):
@@ -553,6 +794,30 @@ class SourceTransaction:
             raise SourceManagementFailure("recovery_failed")
         for path in expected_files:
             _safe_status(path, kind="file", mode=0o600, owner=self._owner)
+        try:
+            manifest = _read_bounded_json(self._manifest_path, _JOURNAL_MAX_BYTES)
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+            raise SourceManagementFailure("recovery_failed") from None
+        if (
+            type(manifest) is not dict
+            or set(manifest) != {"schemaVersion", "transactionId", "files"}
+            or type(manifest["schemaVersion"]) is not int
+            or manifest["schemaVersion"] != 1
+            or manifest["transactionId"] != self._transaction_id
+            or type(manifest["files"]) is not dict
+            or set(manifest["files"]) != set(_TRANSACTION_FILES)
+        ):
+            raise SourceManagementFailure("recovery_failed")
+        for relative, digest in manifest["files"].items():
+            if (
+                type(digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or hashlib.sha256(
+                    (self._backup_root / relative).read_bytes()
+                ).hexdigest()
+                != digest
+            ):
+                raise SourceManagementFailure("recovery_failed")
 
     def _restore_backup(self) -> None:
         self._validate_backup()
@@ -560,7 +825,7 @@ class SourceTransaction:
             source = self._backup_root / relative
             destination = self.root / relative
             mode = 0o644 if relative == "config/sources.json" else 0o600
-            renderer.atomic_write(destination, source.read_text(encoding="utf-8"), mode)
+            self._atomic_write(destination, source.read_text(encoding="utf-8"), mode)
             destination.chmod(mode)
 
     def _remove_transaction_root(self) -> None:
@@ -572,7 +837,7 @@ class SourceTransaction:
             if path.is_symlink():
                 raise SourceManagementFailure("recovery_failed")
         shutil.rmtree(self._transaction_root)
-        _fsync_directory(self.root / "backups")
+        self._fsync_directory(self.root / "backups")
 
     def _recover_interrupted_transaction(self) -> None:
         journal = self._read_journal()
@@ -583,7 +848,9 @@ class SourceTransaction:
             return
         phase = journal["phase"]
         if not backup_exists:
-            if phase in {"publishing", "published", "restarting", "healthChecking", "failed"}:
+            if phase in {"publishing", "published", "restarting", "healthChecking"} or (
+                phase == "failed" and journal["reasonCode"] == "recovery_failed"
+            ):
                 raise SourceManagementFailure("recovery_failed")
             return
         source_id = journal["sourceId"] if isinstance(journal["sourceId"], str) else None
@@ -591,8 +858,8 @@ class SourceTransaction:
             journal["displayName"] if isinstance(journal["displayName"], str) else None
         )
         if phase == "staging":
-            self._remove_transaction_root()
-            self._journal("rolledBack", source_id, display_name)
+            if self._best_effort_journal("rolledBack", source_id, display_name):
+                self._remove_transaction_root()
             return
         if phase in {"completed", "rolledBack"}:
             self._remove_transaction_root()
@@ -600,13 +867,48 @@ class SourceTransaction:
         try:
             self._restore_backup()
             previous = self._load_installed_request()
+            self._capture_installed_source_identities(previous)
             self._recreate_service()
             self._verify_identity_and_health(previous.image)
-            self._journal("rolledBack", source_id, display_name)
-            self._remove_transaction_root()
-        except BaseException:
-            self._journal("failed", source_id, display_name)
+            if self._best_effort_journal("rolledBack", source_id, display_name):
+                self._remove_transaction_root()
+        except Exception:
+            self._best_effort_journal(
+                "failed",
+                source_id,
+                display_name,
+                reason_code="recovery_failed",
+            )
             raise SourceManagementFailure("recovery_failed") from None
+
+    def doctor_state(self) -> str:
+        """Return one fixed, non-mutating source-transaction diagnostic token."""
+        self._validate_installer_state()
+        journal = self._read_journal()
+        backup_exists = self._transaction_root.exists() or self._transaction_root.is_symlink()
+        if journal is None:
+            if backup_exists:
+                raise SourceManagementFailure("recovery_failed")
+            return "clear"
+        if backup_exists:
+            _safe_status(
+                self._transaction_root,
+                kind="directory",
+                mode=0o700,
+                owner=self._owner,
+            )
+            return "recovery-required"
+        if journal["phase"] in {
+            "publishing",
+            "published",
+            "restarting",
+            "healthChecking",
+        } or (
+            journal["phase"] == "failed"
+            and journal["reasonCode"] == "recovery_failed"
+        ):
+            return "recovery-unavailable"
+        return "journal"
 
     def _recreate_service(self) -> None:
         self._run(
@@ -659,9 +961,16 @@ def _installed_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def main() -> int:
-    raw = sys.stdin.buffer.read(MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES + 1)
+def main(arguments: list[str] | None = None) -> int:
+    arguments = [] if arguments is None else arguments
     try:
+        if arguments == ["--doctor-state"]:
+            state = SourceTransaction(_installed_root()).doctor_state()
+            os.write(1, state.encode("ascii") + b"\n")
+            return 0
+        if arguments:
+            raise SourceManagementFailure("invalid_request")
+        raw = sys.stdin.buffer.read(MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES + 1)
         result = SourceTransaction(_installed_root()).add(raw)
     except SourceManagementFailure as error:
         os.write(
@@ -670,9 +979,17 @@ def main() -> int:
             + b"\n",
         )
         return 2 if error.code in {"invalid_request", "validation_failed"} else 1
+    except Exception:
+        error = SourceManagementFailure()
+        os.write(
+            2,
+            json.dumps({"code": error.code, "detail": str(error)}).encode("utf-8")
+            + b"\n",
+        )
+        return 1
     os.write(1, json.dumps(result, separators=(",", ":")).encode("utf-8") + b"\n")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

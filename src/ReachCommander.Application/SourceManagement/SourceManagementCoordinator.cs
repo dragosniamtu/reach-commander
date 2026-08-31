@@ -24,12 +24,32 @@ public sealed class SourceManagementCoordinator(
     public Task<SourceManagementCapability> GetStatusAsync(
         CancellationToken cancellationToken) => gateway.GetStatusAsync(cancellationToken);
 
-    public async Task<SourceManagementOperation> AddAsync(
+    public Task<SourceManagementOperation> AddAsync(
         SourceAddRequest request,
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         Validate(request);
+        return MutateAsync(
+            token => gateway.AddAsync(request, token),
+            cancellationToken);
+    }
+
+    public Task<SourceManagementOperation> RemoveAsync(
+        string sourceId,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        ValidateSourceId(sourceId);
+        return MutateAsync(
+            token => gateway.RemoveAsync(sourceId, token),
+            cancellationToken);
+    }
+
+    private async Task<SourceManagementOperation> MutateAsync(
+        Func<CancellationToken, Task<SourceManagementOperation>> mutate,
+        CancellationToken cancellationToken)
+    {
         if (!await _mutation.WaitAsync(0, cancellationToken).ConfigureAwait(false))
         {
             throw new SourceManagementBusyException();
@@ -63,7 +83,7 @@ public sealed class SourceManagementCoordinator(
             SourceManagementOperation operation;
             try
             {
-                operation = await gateway.AddAsync(request, _lifetime.Token).ConfigureAwait(false);
+                operation = await mutate(_lifetime.Token).ConfigureAwait(false);
             }
             catch (SourceManagementMutationOutcomeUnknownException)
             {
@@ -426,6 +446,21 @@ public sealed class SourceManagementCoordinator(
             request.HostPath.Contains('\\') ||
             request.HostPath.Any(char.IsControl) ||
             !Enum.IsDefined(request.Access))
+        {
+            throw new SourceManagementValidationException();
+        }
+    }
+
+    private static void ValidateSourceId(string sourceId)
+    {
+        if (string.IsNullOrEmpty(sourceId) ||
+            sourceId.Length > 64 ||
+            (!char.IsAsciiLetterLower(sourceId[0]) && !char.IsAsciiDigit(sourceId[0])) ||
+            sourceId.Any(character =>
+                !char.IsAsciiLetterLower(character) &&
+                !char.IsAsciiDigit(character) &&
+                character != '-' &&
+                character != '_'))
         {
             throw new SourceManagementValidationException();
         }

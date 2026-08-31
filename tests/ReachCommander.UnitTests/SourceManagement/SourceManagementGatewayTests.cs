@@ -13,7 +13,7 @@ public sealed class SourceManagementGatewayTests
         Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     [Fact]
-    public async Task Add_sends_only_the_strict_v5_contract_and_parses_acceptance()
+    public async Task Add_sends_only_the_strict_v6_contract_and_parses_acceptance()
     {
         var transport = new StubTransport(OperationResponse("addSource", "accepted"));
         var gateway = new UnixSourceManagementGateway(
@@ -28,12 +28,32 @@ public sealed class SourceManagementGatewayTests
         Assert.Equal(
             ["access", "action", "displayName", "hostPath", "protocolVersion", "requestId"],
             request.RootElement.EnumerateObject().Select(property => property.Name).Order().ToArray());
-        Assert.Equal(5, request.RootElement.GetProperty("protocolVersion").GetInt32());
+        Assert.Equal(6, request.RootElement.GetProperty("protocolVersion").GetInt32());
         Assert.Equal("addSource", request.RootElement.GetProperty("action").GetString());
         Assert.Equal("readOnly", request.RootElement.GetProperty("access").GetString());
         Assert.Equal(OperationId, operation.OperationId);
         Assert.Equal(SourceManagementPhase.Accepted, operation.Phase);
         Assert.Equal([UnixSourceManagementGateway.MaximumMessageBytes], transport.MaximumResponseBytes);
+    }
+
+    [Fact]
+    public async Task Remove_sends_only_the_source_id_and_parses_acceptance()
+    {
+        var transport = new StubTransport(OperationResponse("removeSource", "accepted"));
+        var gateway = new UnixSourceManagementGateway(
+            transport,
+            new FixedRequestIdGenerator(RequestId));
+
+        var operation = await gateway.RemoveAsync("archive", default);
+
+        using var request = JsonDocument.Parse(transport.Requests.Single());
+        Assert.Equal(
+            ["action", "protocolVersion", "requestId", "sourceId"],
+            request.RootElement.EnumerateObject().Select(property => property.Name).Order().ToArray());
+        Assert.Equal(6, request.RootElement.GetProperty("protocolVersion").GetInt32());
+        Assert.Equal("removeSource", request.RootElement.GetProperty("action").GetString());
+        Assert.Equal("archive", request.RootElement.GetProperty("sourceId").GetString());
+        Assert.Equal(SourceManagementPhase.Accepted, operation.Phase);
     }
 
     [Theory]
@@ -201,7 +221,7 @@ public sealed class SourceManagementGatewayTests
     public async Task Add_protocol_version_mismatch_is_an_ambiguous_outcome()
     {
         var response = OperationResponse("addSource", "accepted")
-            .Replace("\"protocolVersion\":5", "\"protocolVersion\":3", StringComparison.Ordinal);
+            .Replace("\"protocolVersion\":6", "\"protocolVersion\":3", StringComparison.Ordinal);
 
         await Assert.ThrowsAsync<SourceManagementMutationOutcomeUnknownException>(() =>
             Gateway(response).AddAsync(
@@ -276,7 +296,7 @@ public sealed class SourceManagementGatewayTests
         };
         return JsonSerializer.Serialize(new
         {
-            protocolVersion = 5,
+            protocolVersion = 6,
             requestId = RequestId,
             action = "status",
             payload = new { supported, reasonCode, detail },
@@ -297,11 +317,11 @@ public sealed class SourceManagementGatewayTests
         var detail = phase switch
         {
             "accepted" => "Source change accepted.",
-            "completed" => "The source has been added.",
+            "completed" => "The source change was completed.",
             _ => "The source-management operation could not be completed.",
         };
         return "{" +
-            $"\"protocolVersion\":5,\"requestId\":\"{RequestId:D}\",\"action\":\"{action}\"," +
+            $"\"protocolVersion\":6,\"requestId\":\"{RequestId:D}\",\"action\":\"{action}\"," +
             $"\"payload\":{{\"operationId\":\"{OperationId:D}\",{sourceIdentity}," +
             $"\"phase\":\"{phase}\",\"reasonCode\":\"{reason}\",\"detail\":\"{detail}\"," +
             "\"createdAt\":\"2026-08-31T10:00:00Z\",\"updatedAt\":\"2026-08-31T10:00:01Z\"}}";
@@ -313,7 +333,7 @@ public sealed class SourceManagementGatewayTests
         string code,
         string detail) => JsonSerializer.Serialize(new
         {
-            protocolVersion = 5,
+            protocolVersion = 6,
             requestId = RequestId,
             action = "error",
             payload = new

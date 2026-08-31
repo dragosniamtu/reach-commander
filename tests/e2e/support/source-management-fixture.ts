@@ -54,6 +54,7 @@ export interface SourceOperationUpdate {
 
 export interface InstallerManagedSourceFixture {
   readonly addRequests: readonly SourceAddRequestFixture[];
+  readonly removeRequests: readonly string[];
   readonly operationReads: number;
   publish(operation: SourceOperationUpdate): void;
   disconnectNextOperationRead(): void;
@@ -105,6 +106,8 @@ export async function routeInstallerManagedSourceManagement(
   let disconnectNext = false;
   let operationReads = 0;
   const addRequests: SourceAddRequestFixture[] = [];
+  const removeRequests: string[] = [];
+  let mutation: "add" | "remove" = "add";
 
   await page.route("**/api/source-management/**", async (route: Route) => {
     const request = route.request();
@@ -124,9 +127,23 @@ export async function routeInstallerManagedSourceManagement(
     }
 
     if (pathname === "/api/source-management/sources" && request.method() === "POST") {
+      mutation = "add";
       addRequests.push(request.postDataJSON() as SourceAddRequestFixture);
       const accepted = current;
       current = accepted;
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        headers: { Location: `/api/source-management/operations/${accepted.operationId}` },
+        json: accepted,
+      });
+      return;
+    }
+
+    if (pathname.startsWith("/api/source-management/sources/") && request.method() === "DELETE") {
+      mutation = "remove";
+      removeRequests.push(decodeURIComponent(pathname.split("/").at(-1) ?? ""));
+      const accepted = current;
       await route.fulfill({
         status: 202,
         contentType: "application/json",
@@ -156,7 +173,9 @@ export async function routeInstallerManagedSourceManagement(
 
   await page.route("**/api/sources", async (route: Route) => {
     const generated = current.phase === "completed" && current.sourceId
-      ? [
+      ? mutation === "remove"
+        ? baseSources.filter((source) => source.id !== current.sourceId)
+        : [
           ...baseSources,
           source(
             current.sourceId,
@@ -165,13 +184,14 @@ export async function routeInstallerManagedSourceManagement(
             false,
             false,
           ),
-        ]
+          ]
       : baseSources;
     await route.fulfill({ status: 200, contentType: "application/json", json: generated });
   });
 
   return {
     addRequests,
+    removeRequests,
     get operationReads() { return operationReads; },
     publish(operation) {
       current = sourceOperation(operation);
@@ -198,7 +218,7 @@ function canonicalOperationStatus(
     case "healthChecking":
       return { reasonCode: "in_progress", detail: "ReachCommander is being checked." };
     case "completed":
-      return { reasonCode: "completed", detail: "The source has been added." };
+      return { reasonCode: "completed", detail: "The source change was completed." };
     case "rolledBack":
       return { reasonCode: "rolled_back", detail: "The source change was rolled back." };
     case "failed": {

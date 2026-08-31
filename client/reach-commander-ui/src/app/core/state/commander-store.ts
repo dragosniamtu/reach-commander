@@ -570,6 +570,13 @@ export class CommanderStore {
     }
 
     this.sourceState.set(sources);
+    const repairedSides = (['left', 'right'] as const).filter((side) =>
+      this.repairPanelSources(side, sources),
+    );
+    await Promise.all(repairedSides.map((side) => this.loadPanel(side)));
+    if (sessionGeneration !== this.sessionGeneration) {
+      return this.sourceState();
+    }
     this.persist();
     return sources;
   }
@@ -615,6 +622,24 @@ export class CommanderStore {
     ) ?? sources[0]!;
     const tab = this.newTab(source, filesystemRoot(source.id));
     return { ...emptyPanel(), tabs: [tab], activeTabId: tab.id };
+  }
+
+  private repairPanelSources(side: PanelSide, sources: readonly SourceDto[]): boolean {
+    const current = this.panel(side)();
+    const sourceIds = new Set(sources.map((source) => source.id));
+    if (current.tabs.every((tab) => sourceIds.has(locationSourceId(tab.location)))) {
+      return false;
+    }
+
+    const persisted: PersistedPanelState = {
+      activeTabId: current.activeTabId,
+      tabs: current.tabs.map(({ id, location }) => ({ id, location })),
+      sortColumn: current.sortColumn,
+      sortDirection: current.sortDirection,
+      filter: current.filter,
+    };
+    this.updatePanel(side, this.restorePanel(side, persisted, sources));
+    return true;
   }
 
   private newTab(source: SourceDto, location: PanelLocation, id?: string): DirectoryTab {

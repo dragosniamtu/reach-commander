@@ -51,6 +51,21 @@ public sealed class SourceManagementApiTests
         Assert.Equal(1, factory.SourceManagement.AddCount);
     }
 
+    [Fact]
+    public async Task Remove_returns_accepted_operation_and_never_accepts_a_host_path()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        using var client = factory.CreateCookieClient();
+
+        using var response = await client.DeleteAsync("/api/source-management/sources/archive");
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal("accepted", payload.GetProperty("phase").GetString());
+        Assert.Equal(1, factory.SourceManagement.RemoveCount);
+        Assert.Equal("archive", factory.SourceManagement.RemovedSourceId);
+    }
+
     [Theory]
     [InlineData("", "/srv/archive", "readOnly")]
     [InlineData("Archive", "relative/archive", "readOnly")]

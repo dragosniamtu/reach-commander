@@ -22,7 +22,10 @@
   <app-source-selector
     [sources]="sources()"
     [selectedSourceId]="activeTab()?.location?.sourceId ?? ''"
+    [removalEnabled]="sourceRemovalEnabled()"
+    [removalPending]="sourceRemovalPending()"
     (sourceSelected)="store.selectSource(side(), $event)"
+    (sourceRemovalRequested)="sourceRemovalRequested.emit($event)"
   />
   <app-directory-tabs
     [tabs]="panel().tabs"

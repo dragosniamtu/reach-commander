@@ -34,6 +34,21 @@ public sealed class SourceManagementController(ISourceManagementService service)
             operation);
     }
 
+    [HttpDelete("sources/{sourceId}")]
+    [EnableRateLimiting(AuthenticationConfiguration.SourceManagementPolicy)]
+    [ProducesResponseType<SourceManagementOperationDto>(StatusCodes.Status202Accepted)]
+    public async Task<ActionResult<SourceManagementOperationDto>> Remove(
+        string sourceId,
+        CancellationToken cancellationToken)
+    {
+        var operation = SourceManagementOperationDto.FromModel(
+            await service.RemoveAsync(sourceId, cancellationToken));
+        return AcceptedAtAction(
+            nameof(GetOperation),
+            new { operationId = operation.OperationId },
+            operation);
+    }
+
     [HttpGet("operations/{operationId:guid}")]
     [ProducesResponseType<SourceManagementOperationDto>(StatusCodes.Status200OK)]
     public async Task<ActionResult<SourceManagementOperationDto>> GetOperation(

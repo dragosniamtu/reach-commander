@@ -8,6 +8,10 @@ public interface ISourceManagementService
         SourceAddRequest request,
         CancellationToken cancellationToken);
 
+    Task<SourceManagementOperation> RemoveAsync(
+        string sourceId,
+        CancellationToken cancellationToken);
+
     Task<SourceManagementOperation> GetOperationAsync(
         Guid operationId,
         CancellationToken cancellationToken);

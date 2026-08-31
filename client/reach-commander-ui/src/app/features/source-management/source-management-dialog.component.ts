@@ -34,9 +34,12 @@ export class SourceManagementDialogComponent implements AfterViewInit {
   readonly displayNameError = computed(() => validateSourceDisplayName(this.displayName()));
   readonly hostPathError = computed(() => validateUbuntuHostPath(this.hostPath()));
   readonly canSubmit = computed(() =>
-    !this.store.pending() && this.store.operation() === null &&
-    this.displayNameError() === null && this.hostPathError() === null &&
-    (this.access() === 'readOnly' || this.readWriteConfirmed()),
+    !this.store.pending() && this.store.operation() === null && (
+      this.store.mode() === 'remove'
+        ? this.store.removalSource() !== null
+        : this.displayNameError() === null && this.hostPathError() === null &&
+          (this.access() === 'readOnly' || this.readWriteConfirmed())
+    ),
   );
   readonly canClose = computed(() => !this.store.pending());
 
@@ -104,11 +107,15 @@ export class SourceManagementDialogComponent implements AfterViewInit {
     if (!this.canSubmit()) {
       return;
     }
-    await this.store.submit({
-      displayName: this.displayName().trim(),
-      hostPath: this.hostPath(),
-      access: this.access(),
-    });
+    if (this.store.mode() === 'remove') {
+      await this.store.submitRemoval();
+    } else {
+      await this.store.submit({
+        displayName: this.displayName().trim(),
+        hostPath: this.hostPath(),
+        access: this.access(),
+      });
+    }
   }
 
   close(): void {
@@ -127,9 +134,11 @@ export class SourceManagementDialogComponent implements AfterViewInit {
       case 'applying': return 'Saving source configuration';
       case 'restarting': return 'Restarting ReachCommander';
       case 'healthChecking': return 'Checking server health';
-      case 'completed': return 'Source added';
+      case 'completed': return this.store.mode() === 'remove' ? 'Source removed' : 'Source added';
       case 'rolledBack': return 'Previous configuration restored';
-      case 'failed': return 'Source could not be added';
+      case 'failed': return this.store.mode() === 'remove'
+        ? 'Source mapping could not be removed'
+        : 'Source could not be added';
     }
   }
 

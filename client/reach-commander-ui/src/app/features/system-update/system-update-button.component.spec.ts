@@ -25,6 +25,36 @@ describe('SystemUpdateButtonComponent', () => {
     expect(fixture.nativeElement.querySelector('.availability-dot')).not.toBeNull();
   });
 
+  it('uses the current-state control to request an immediate update check', () => {
+    const check = vi.fn();
+    const open = vi.fn();
+    fixture.componentInstance.check.subscribe(check);
+    fixture.componentInstance.open.subscribe(open);
+    fixture.componentRef.setInput('status', status({ phase: 'current' }));
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe(
+      'Check for updates. ReachCommander is up to date',
+    );
+
+    button.click();
+
+    expect(check).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('disables update checking while a request is pending', () => {
+    fixture.componentRef.setInput('status', status({ phase: 'current' }));
+    fixture.componentRef.setInput('pending', true);
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-label')).toBe('Checking for updates');
+  });
+
   it('shows the backend current version beside the update action', () => {
     fixture.componentRef.setInput('status', status({ currentVersion: 'v1.0.2' }));
     fixture.detectChanges();
@@ -82,7 +112,7 @@ describe('SystemUpdateButtonComponent', () => {
 
   it.each([
     ['checking', 'Checking for updates'],
-    ['current', 'ReachCommander is up to date'],
+    ['current', 'Check for updates. ReachCommander is up to date'],
     ['blocked', 'Update waiting for operations to finish'],
     ['applying', 'Updating ReachCommander'],
     ['completed', 'ReachCommander update completed'],

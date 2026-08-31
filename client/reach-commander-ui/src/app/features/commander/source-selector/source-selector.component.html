@@ -1,37 +1,48 @@
 <div class="source-strip" role="group" aria-label="Filesystem sources">
   @for (source of sources(); track source.id) {
-    <button
-      type="button"
-      class="source-button"
-      [class.selected]="source.id === selectedSourceId()"
-      [class.unavailable]="!source.isAvailable"
-      [attr.data-testid]="'source-' + source.id"
-      [attr.aria-pressed]="source.id === selectedSourceId()"
-      [attr.aria-label]="description(source)"
-      [title]="description(source)"
-      [disabled]="!source.isAvailable"
-      (click)="sourceSelected.emit(source.id)"
-    >
-      <span class="source-led" aria-hidden="true"></span>
-      <span>{{ source.name }}</span>
-      @if (!source.isAvailable) {
-        <span class="warning" aria-hidden="true">!</span>
-      }
-      @if (source.isReadOnly) {
-        <span class="access-policy read-only" data-access="read-only" aria-hidden="true">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" focusable="false" aria-hidden="true">
-            <path d="M5 7V5a3 3 0 0 1 6 0v2M4 7.5h8v6H4z" vector-effect="non-scaling-stroke" />
-          </svg>
-          <b>RO</b>
-        </span>
-      } @else {
-        <span class="access-policy writable" data-access="writable" aria-hidden="true">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" focusable="false" aria-hidden="true">
-            <path d="M10.5 7V5a2.5 2.5 0 0 0-4.8-1M4 7.5h8v6H4z" vector-effect="non-scaling-stroke" />
-          </svg>
-          <b>RW</b>
-        </span>
-      }
-    </button>
+    <span class="source-control" [class.selected]="source.id === selectedSourceId()">
+      <button
+        type="button"
+        class="source-button"
+        [class.selected]="source.id === selectedSourceId()"
+        [class.unavailable]="!source.isAvailable"
+        [attr.data-testid]="'source-' + source.id"
+        [attr.aria-pressed]="source.id === selectedSourceId()"
+        [attr.aria-label]="description(source)"
+        [title]="description(source)"
+        [disabled]="!source.isAvailable"
+        (click)="sourceSelected.emit(source.id)"
+      >
+        <span class="source-led" aria-hidden="true"></span>
+        <span>{{ source.name }}</span>
+        @if (!source.isAvailable) {
+          <span class="warning" aria-hidden="true">!</span>
+        }
+        @if (source.isReadOnly) {
+          <span class="access-policy read-only" data-access="read-only" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" focusable="false" aria-hidden="true">
+              <path d="M5 7V5a3 3 0 0 1 6 0v2M4 7.5h8v6H4z" vector-effect="non-scaling-stroke" />
+            </svg>
+            <b>RO</b>
+          </span>
+        } @else {
+          <span class="access-policy writable" data-access="writable" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" focusable="false" aria-hidden="true">
+              <path d="M10.5 7V5a2.5 2.5 0 0 0-4.8-1M4 7.5h8v6H4z" vector-effect="non-scaling-stroke" />
+            </svg>
+            <b>RW</b>
+          </span>
+        }
+      </button>
+      <button
+        type="button"
+        class="source-remove"
+        [attr.data-testid]="'remove-source-' + source.id"
+        [attr.aria-label]="'Remove ' + source.name + ' source mapping'"
+        [title]="removeTitle(source)"
+        [disabled]="!removalEnabled() || removalPending() || sources().length <= 1"
+        (click)="requestRemoval(source, $event)"
+      >×</button>
+    </span>
   }
 </div>

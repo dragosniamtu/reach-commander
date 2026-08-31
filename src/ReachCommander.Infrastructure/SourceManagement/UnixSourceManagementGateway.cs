@@ -12,7 +12,7 @@ internal sealed class UnixSourceManagementGateway(
     ISourceManagementRequestIdGenerator requestIds) : ISourceManagementGateway
 {
     public const int MaximumMessageBytes = 4096;
-    private const int ProtocolVersion = 5;
+    private const int ProtocolVersion = 6;
 
     private static readonly HashSet<string> ResponseFields =
         ["protocolVersion", "requestId", "action", "payload"];
@@ -32,7 +32,7 @@ internal sealed class UnixSourceManagementGateway(
     private static readonly HashSet<string> ErrorFields =
         ["requestAction", "operationId", "code", "detail"];
     private static readonly Regex SourceIdPattern = new(
-        "^[a-z][a-z0-9-]{0,62}$",
+        "^[a-z0-9][a-z0-9_-]{0,63}$",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     private static readonly Regex UtcTimestampPattern = new(
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$",
@@ -58,7 +58,7 @@ internal sealed class UnixSourceManagementGateway(
             ["applying"] = ("in_progress", "The source configuration is being applied."),
             ["restarting"] = ("in_progress", "ReachCommander is restarting."),
             ["healthChecking"] = ("in_progress", "ReachCommander is being checked."),
-            ["completed"] = ("completed", "The source has been added."),
+            ["completed"] = ("completed", "The source change was completed."),
             ["rolledBack"] = ("rolled_back", "The source change was rolled back."),
         };
 
@@ -128,6 +128,37 @@ internal sealed class UnixSourceManagementGateway(
                         SourceAccess.ReadWrite => "readWrite",
                         _ => throw new SourceManagementValidationException(),
                     },
+                }),
+                ParseOperation,
+                mutation: true,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (SourceManagementProtocolVersionException)
+        {
+            throw new SourceManagementMutationOutcomeUnknownException();
+        }
+    }
+
+    public async Task<SourceManagementOperation> RemoveAsync(
+        string sourceId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(sourceId) || !SourceIdPattern.IsMatch(sourceId))
+        {
+            throw new SourceManagementValidationException();
+        }
+
+        try
+        {
+            return await SendAsync(
+                "removeSource",
+                operationId: null,
+                (requestId, _) => JsonSerializer.Serialize(new
+                {
+                    protocolVersion = ProtocolVersion,
+                    requestId,
+                    action = "removeSource",
+                    sourceId,
                 }),
                 ParseOperation,
                 mutation: true,
@@ -318,7 +349,7 @@ internal sealed class UnixSourceManagementGateway(
         var phaseName = RequiredString(payload, "phase", 30);
         var reasonCode = RequiredString(payload, "reasonCode", 40);
         var detail = RequiredString(payload, "detail", 240);
-        var sourceId = OptionalString(payload, "sourceId", 63);
+        var sourceId = OptionalString(payload, "sourceId", 64);
         var displayName = OptionalString(payload, "displayName", 80);
         if ((sourceId is null) != (displayName is null) ||
             (sourceId is not null && !SourceIdPattern.IsMatch(sourceId)))

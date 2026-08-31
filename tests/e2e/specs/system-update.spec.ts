@@ -132,17 +132,20 @@ function tracedStatus(
   });
 }
 
-test("system update enables only a discovered update and recovers after restart", async ({
+test("system update checks on demand, enables a discovered update, and recovers after restart", async ({
   page,
 }) => {
   const routes = await routeSystemUpdates(page, systemUpdateFixture());
   await page.goto("/");
   const trigger = page.getByTestId("system-update-trigger");
-  await expect(trigger).toBeDisabled();
+  await expect(trigger).toBeEnabled();
+  await expect(trigger).toHaveAccessibleName(
+    "Check for updates. ReachCommander is up to date",
+  );
 
   routes.publish(available());
-  await page.reload();
-  await expect(trigger).toBeEnabled();
+  await trigger.click();
+  await expect(trigger).toHaveAccessibleName("Update available: v1.4.0");
   await trigger.click();
   routes.disconnectApplyThen(
     systemUpdateFixture({

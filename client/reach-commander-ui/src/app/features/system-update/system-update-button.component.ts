@@ -22,12 +22,37 @@ interface CurrentVersionPresentation {
 })
 export class SystemUpdateButtonComponent {
   readonly status = input<SystemUpdateStatusDto | null>(null);
+  readonly pending = input(false);
+  readonly check = output<void>();
   readonly open = output<void>();
 
   @ViewChild('trigger', { read: ElementRef })
   private trigger?: ElementRef<HTMLButtonElement>;
 
-  readonly accessibleSummary = computed(() => updateLabel(this.status()));
+  readonly canCheck = computed(() => {
+    const status = this.status();
+    return !this.pending() &&
+      status?.supported === true &&
+      status.reasonCode !== 'version_pinned' &&
+      (status.phase === 'current' || status.phase === 'unavailable');
+  });
+  readonly canActivate = computed(() =>
+    !this.pending() && (this.status()?.canApply === true || this.canCheck()));
+  readonly accessibleSummary = computed(() => {
+    const status = this.status();
+    if (this.pending()) {
+      return 'Checking for updates';
+    }
+
+    const summary = updateLabel(status);
+    if (!this.canCheck()) {
+      return summary;
+    }
+
+    return status?.phase === 'unavailable'
+      ? `Retry update check. ${summary}`
+      : `Check for updates. ${summary}`;
+  });
   readonly currentVersion = computed<CurrentVersionPresentation>(() => {
     const status = this.status();
     if (!status) {
@@ -69,8 +94,14 @@ export class SystemUpdateButtonComponent {
   }
 
   requestOpen(): void {
+    if (!this.canActivate()) {
+      return;
+    }
+
     if (this.status()?.canApply) {
       this.open.emit();
+    } else {
+      this.check.emit();
     }
   }
 }

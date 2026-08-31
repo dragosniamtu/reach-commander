@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import {
   SourceAddRequestDto,
+  SourceDto,
   SourceManagementOperationDto,
 } from '../../core/api/api.models';
 import { SourceManagementStore } from '../../core/state/source-management.store';
@@ -104,6 +105,22 @@ describe('SourceManagementDialogComponent', () => {
     fixture.componentInstance.setReadWriteConfirmed(true);
     await fixture.componentInstance.submit();
     expect(store.submit).toHaveBeenCalledWith(expect.objectContaining({ access: 'readWrite' }));
+  });
+
+  it('confirms mapping-only removal and preserves host files in the message', async () => {
+    store.mode.set('remove');
+    store.removalSource.set(source('archive', 'Archive'));
+    fixture.detectChanges();
+
+    const dialog = fixture.nativeElement.querySelector('dialog') as HTMLDialogElement;
+    expect(dialog.textContent).toContain('Remove source mapping?');
+    expect(dialog.textContent).toContain('Remove Archive from ReachCommander?');
+    expect(dialog.textContent).toContain('every file inside it will remain untouched');
+
+    await fixture.componentInstance.submit();
+
+    expect(store.submitRemoval).toHaveBeenCalledOnce();
+    expect(store.submit).not.toHaveBeenCalled();
   });
 
   it('disables every duplicate submit path and Escape while an operation is active', async () => {
@@ -248,6 +265,8 @@ describe('SourceManagementDialogComponent', () => {
 });
 
 class FakeSourceManagementStore {
+  readonly mode = signal<'add' | 'remove'>('add');
+  readonly removalSource = signal<SourceDto | null>(null);
   readonly pending = signal(false);
   readonly reconnecting = signal(false);
   readonly operation = signal<SourceManagementOperationDto | null>(null);
@@ -255,7 +274,22 @@ class FakeSourceManagementStore {
   readonly catalogRefreshed = signal(false);
   readonly terminal = signal(false);
   readonly submit = vi.fn((_request: SourceAddRequestDto) => Promise.resolve());
+  readonly submitRemoval = vi.fn(() => Promise.resolve());
   readonly close = vi.fn();
+}
+
+function source(id: string, name: string): SourceDto {
+  return {
+    id,
+    name,
+    isAvailable: true,
+    isReadOnly: false,
+    totalBytes: 100,
+    usedBytes: 25,
+    freeBytes: 75,
+    defaultLeft: false,
+    defaultRight: false,
+  };
 }
 
 function operation(

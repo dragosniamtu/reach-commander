@@ -1,9 +1,9 @@
 <span
   class="update-control"
   [class.available]="status()?.canApply"
-  [class.busy]="status()?.phase === 'checking' || status()?.phase === 'applying'"
+  [class.busy]="pending() || status()?.phase === 'checking' || status()?.phase === 'applying'"
   [attr.data-phase]="status()?.phase ?? 'checking'"
-  [attr.tabindex]="status()?.canApply ? null : 0"
+  [attr.tabindex]="canActivate() ? null : 0"
   [attr.title]="tooltip()"
   [attr.aria-label]="status()?.canApply ? null : accessibleSummary()"
 >
@@ -11,7 +11,7 @@
     #trigger
     type="button"
     data-testid="system-update-trigger"
-    [disabled]="!status()?.canApply"
+    [disabled]="!canActivate()"
     [attr.aria-label]="accessibleSummary()"
     (click)="requestOpen()"
   >

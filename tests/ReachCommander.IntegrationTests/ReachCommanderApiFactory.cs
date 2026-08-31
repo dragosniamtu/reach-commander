@@ -537,11 +537,16 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
         private static readonly DateTimeOffset Now =
             DateTimeOffset.Parse("2026-08-31T10:00:00Z");
         private int _addCount;
+        private int _removeCount;
         private ISystemMutationDrain? _drain;
 
         public ISystemMutationGate? MutationGate { get; set; }
 
         public int AddCount => Volatile.Read(ref _addCount);
+
+        public int RemoveCount => Volatile.Read(ref _removeCount);
+
+        public string? RemovedSourceId { get; private set; }
 
         public bool DrainOnAdd { get; set; }
 
@@ -594,6 +599,21 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
             return Accepted(Guid.NewGuid(), request.DisplayName.Trim());
         }
 
+        public Task<SourceManagementOperation> RemoveAsync(
+            string sourceId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Capability.Supported)
+            {
+                throw new SourceManagementUnavailableException();
+            }
+
+            RemovedSourceId = sourceId;
+            Interlocked.Increment(ref _removeCount);
+            return Task.FromResult(Accepted(Guid.NewGuid(), sourceId));
+        }
+
         public Task<SourceManagementOperation> GetOperationAsync(
             Guid operationId,
             CancellationToken cancellationToken)
@@ -605,7 +625,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 "Archive",
                 SourceManagementPhase.Completed,
                 "completed",
-                "The source has been added.",
+                "The source change was completed.",
                 Now,
                 Now.AddSeconds(1)));
         }

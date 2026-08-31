@@ -1,9 +1,14 @@
 :host { display: block; min-width: 0; }
 .source-strip { display: flex; gap: 4px; overflow-x: auto; padding: 6px 8px; background: var(--surface-2); border-bottom: 1px solid var(--line); scrollbar-width: thin; }
-.source-button { height: 28px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-2); background: var(--surface-3); font: 600 12px/1 var(--font-ui); cursor: pointer; }
+.source-control { height: 28px; flex: 0 0 auto; display: inline-flex; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface-3); }
+.source-control.selected { border-color: var(--accent); background: var(--accent-dim); box-shadow: inset 0 -2px 0 var(--accent); }
+.source-button { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 7px 0 9px; border: 0; color: var(--text-2); background: transparent; font: 600 12px/1 var(--font-ui); cursor: pointer; }
 .source-button:hover:not(:disabled) { color: var(--text-1); border-color: var(--accent-soft); background: var(--surface-4); }
-.source-button.selected { color: var(--accent-text); border-color: var(--accent); background: var(--accent-dim); box-shadow: inset 0 -2px 0 var(--accent); }
+.source-button.selected { color: var(--accent-text); }
 .source-button:disabled { cursor: not-allowed; opacity: .62; }
+.source-remove { width: 24px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--line); color: var(--text-4); background: transparent; font: 700 15px/1 var(--font-ui); cursor: pointer; }
+.source-remove:hover:not(:disabled) { color: var(--danger, #ff6b6b); background: color-mix(in srgb, var(--danger, #ff6b6b) 12%, transparent); }
+.source-remove:disabled { cursor: not-allowed; opacity: .42; }
 .source-led { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 15%, transparent); }
 .unavailable .source-led { background: var(--warning); }
 .warning { color: var(--warning); font-weight: 800; }

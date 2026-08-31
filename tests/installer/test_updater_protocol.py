@@ -169,8 +169,8 @@ class SourceManagementProtocolTests(unittest.TestCase):
             **fields,
         }
 
-    def test_source_management_is_protocol_v5_not_an_updater_protocol(self) -> None:
-        self.assertEqual(5, SOURCE_MANAGEMENT_PROTOCOL_VERSION)
+    def test_source_management_is_protocol_v6_not_an_updater_protocol(self) -> None:
+        self.assertEqual(6, SOURCE_MANAGEMENT_PROTOCOL_VERSION)
         source_request = self.request(
             "addSource",
             displayName="Archive",
@@ -186,6 +186,20 @@ class SourceManagementProtocolTests(unittest.TestCase):
         self.assertEqual("readOnly", parsed.access)
         with self.assertRaises(ProtocolError):
             UpdaterRequest.parse(json.dumps(source_request).encode())
+
+    def test_source_management_remove_request_contains_only_a_bounded_source_id(self) -> None:
+        parsed = SourceManagementRequest.parse(
+            json.dumps(self.request("removeSource", sourceId="archive")).encode()
+        )
+
+        self.assertEqual("removeSource", parsed.action)
+        self.assertEqual("archive", parsed.source_id)
+        self.assertIsNone(parsed.display_name)
+        for source_id in ("", "Archive", "../archive", "a" * 65):
+            with self.subTest(source_id=source_id), self.assertRaises(ProtocolError):
+                SourceManagementRequest.parse(
+                    json.dumps(self.request("removeSource", sourceId=source_id)).encode()
+                )
 
     def test_source_management_requests_use_an_exact_action_schema(self) -> None:
         status = SourceManagementRequest.parse(json.dumps(self.request()).encode())
@@ -203,6 +217,8 @@ class SourceManagementProtocolTests(unittest.TestCase):
             self.request("addSource", displayName="Archive", hostPath="/srv/archive", access="readOnly", command="id"),
             self.request("status", hostPath="/srv/archive"),
             self.request("getOperation", operationId=operation_id, access="readOnly"),
+            self.request("removeSource"),
+            self.request("removeSource", sourceId="archive", hostPath="/srv/archive"),
             self.request("deleteSource"),
         )
         for payload in invalid:
@@ -213,7 +229,7 @@ class SourceManagementProtocolTests(unittest.TestCase):
     def test_source_management_rejects_duplicate_fields_and_noncanonical_uuids(self) -> None:
         request_id = str(uuid.uuid4())
         duplicate = (
-            '{"protocolVersion":5,"requestId":"'
+            '{"protocolVersion":6,"requestId":"'
             + request_id
             + '","action":"status","action":"status"}'
         ).encode()
@@ -228,7 +244,7 @@ class SourceManagementProtocolTests(unittest.TestCase):
                     )
 
     def test_source_management_rejects_incompatible_versions_and_oversized_payloads(self) -> None:
-        for version in (0, 4, 6, True):
+        for version in (0, 4, 5, 7, True):
             with self.subTest(version=version):
                 payload = self.request()
                 payload["protocolVersion"] = version
@@ -270,7 +286,7 @@ class SourceManagementProtocolTests(unittest.TestCase):
         status = SourceManagementResponse.from_capability(request_id, capability)
         self.assertEqual(
             {
-                "protocolVersion": 5,
+                "protocolVersion": 6,
                 "requestId": request_id,
                 "action": "status",
                 "payload": {
@@ -304,7 +320,7 @@ class SourceManagementProtocolTests(unittest.TestCase):
             SourceManagementResponse.parse(
                 json.dumps(
                     {
-                        "protocolVersion": 5,
+                        "protocolVersion": 6,
                         "requestId": request_id.upper(),
                         "action": "status",
                         "payload": {"supported": True, "reasonCode": "supported", "detail": "ok"},
@@ -316,7 +332,7 @@ class SourceManagementProtocolTests(unittest.TestCase):
             SourceManagementResponse.parse(
                 json.dumps(
                     {
-                        "protocolVersion": 5,
+                        "protocolVersion": 6,
                         "requestId": request_id,
                         "action": "status",
                         "payload": {"supported": True, "reasonCode": "supported", "detail": "ok", "hostPath": "/secret"},
@@ -416,7 +432,7 @@ class SourceManagementProtocolTests(unittest.TestCase):
         request_id = str(uuid.uuid4())
         operation_id = str(uuid.uuid4())
         error_wire = {
-            "protocolVersion": 5,
+            "protocolVersion": 6,
             "requestId": request_id,
             "action": "error",
             "payload": {
@@ -556,19 +572,19 @@ class SourceManagementProtocolTests(unittest.TestCase):
         operation_id = str(uuid.uuid4())
         nested_duplicates = (
             (
-                '{"protocolVersion":5,"requestId":"'
+                '{"protocolVersion":6,"requestId":"'
                 + request_id
                 + '","action":"status","payload":{"supported":true,"reasonCode":"supported","detail":"Source management is available.","detail":"Source management is available."}}'
             ).encode(),
             (
-                '{"protocolVersion":5,"requestId":"'
+                '{"protocolVersion":6,"requestId":"'
                 + request_id
                 + '","action":"getOperation","payload":{"operationId":"'
                 + operation_id
                 + '","sourceId":"archive","displayName":"Archive","phase":"accepted","reasonCode":"accepted","detail":"Source change accepted.","createdAt":"2026-08-31T10:00:00Z","updatedAt":"2026-08-31T10:00:00Z","phase":"accepted"}}'
             ).encode(),
             (
-                '{"protocolVersion":5,"requestId":"'
+                '{"protocolVersion":6,"requestId":"'
                 + request_id
                 + '","action":"error","payload":{"requestAction":"status","operationId":null,"code":"unsupported","detail":"Source management is unavailable on this installation.","code":"unsupported"}}'
             ).encode(),

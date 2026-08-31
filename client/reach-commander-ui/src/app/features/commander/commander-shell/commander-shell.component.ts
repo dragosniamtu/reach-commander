@@ -21,6 +21,7 @@ import {
   PanelSide,
 } from '../../../core/state/commander.models';
 import { CommanderPanelComponent } from '../commander-panel/commander-panel.component';
+import { SourceRemovalRequest } from '../source-selector/source-selector.component';
 import { CommandBarComponent } from '../command-bar/command-bar.component';
 import { SystemMetricsWidgetComponent } from '../../system-metrics/system-metrics-widget.component';
 import { SystemMetricsDetailsComponent } from '../../system-metrics/system-metrics-details.component';
@@ -408,6 +409,16 @@ export class CommanderShellComponent implements OnInit {
     this.sourceManagement.open();
   }
 
+  openSourceRemoval(request: SourceRemovalRequest): void {
+    if (!this.sourceManagement.canOpen() || this.store.sources().length <= 1) {
+      return;
+    }
+    this.sourceManagementOpener.set(request.opener);
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.sourceManagement.openRemoval(request.source);
+  }
+
   closeSourceManagement(): void {
     this.sourceManagement.close();
     const opener = this.sourceManagementOpener();
@@ -426,6 +437,10 @@ export class CommanderShellComponent implements OnInit {
     }
 
     this.systemUpdateDialogStatus.set(Object.freeze({ ...status }));
+  }
+
+  checkSystemUpdate(): void {
+    void this.systemUpdate.check();
   }
 
   closeSystemUpdate(): void {

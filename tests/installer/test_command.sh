@@ -290,7 +290,7 @@ assert_equal "2" "$last_status" "malformed source request status"
 [[ "$last_output" != *'/srv/private'* ]] || fail "source failure exposed a requested path"
 pass "source add accepts only bounded structured stdin under the shared lock"
 
-source_request='{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}'
+source_request='{"protocolVersion":6,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}'
 for required_source_file in \
   "$INSTALL_ROOT/bin/render_config.py" \
   "$INSTALL_ROOT/lib/updater_protocol.py" \
@@ -625,7 +625,7 @@ pass "source add interruption cleans capture and preserves uninstall validity"
 
 export FAKE_FLOCK_EXIT=1
 : >"$FAKE_DOCKER_LOG"
-run_command_with_input '{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}' source add
+run_command_with_input '{"protocolVersion":6,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"Archive","hostPath":"/srv/private","access":"readOnly"}' source add
 assert_equal "1" "$last_status" "contended source add status"
 [[ ! -s "$FAKE_DOCKER_LOG" ]] || fail "contended source add invoked Docker"
 export FAKE_FLOCK_EXIT=0
@@ -644,7 +644,7 @@ case "$(uname -s)" in
     run_test_as_root install -d -o "$RUNTIME_UID" -g "$RUNTIME_GID" -m 0750 -- "$NEW_SOURCE_PATH"
     : >"$FAKE_DOCKER_LOG"
     run_command_with_input \
-      '{"protocolVersion":5,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"New Source","hostPath":"'"$NEW_SOURCE_PATH"'","access":"readOnly"}' \
+      '{"protocolVersion":6,"requestId":"12345678-1234-4234-8234-123456789abc","action":"addSource","displayName":"New Source","hostPath":"'"$NEW_SOURCE_PATH"'","access":"readOnly"}' \
       source add
     assert_equal "0" "$last_status" "successful source add status"
     [[ "$last_output" == *'"sourceId":"new-source"'* ]] || fail "source add result ID missing"

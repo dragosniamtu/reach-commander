@@ -1201,6 +1201,7 @@ class SourceManagementRuntime:
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
         self._active_display_name: str | None = None
+        self._active_source_id: str | None = None
         self._startup_state_valid = self._reconcile_interrupted_operation()
 
     def _reconcile_interrupted_operation(self) -> bool:
@@ -1317,8 +1318,9 @@ class SourceManagementRuntime:
                 return self._error(request, "source_management_failed")
             try:
                 self._active_display_name = request.display_name
+                self._active_source_id = request.source_id
                 self._worker = threading.Thread(
-                    target=self._add_worker,
+                    target=self._mutation_worker,
                     args=(request, operation, gate_owner),
                     name="reachcommander-source-management",
                     daemon=True,
@@ -1326,6 +1328,7 @@ class SourceManagementRuntime:
                 self._worker.start()
             except Exception:
                 self._active_display_name = None
+                self._active_source_id = None
                 try:
                     failed = self._finished_operation(
                         operation,
@@ -1382,14 +1385,23 @@ class SourceManagementRuntime:
 
     @staticmethod
     def _command_input(request: SourceManagementRequest) -> bytes:
-        value = {
+        value: dict[str, object] = {
             "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
             "requestId": request.request_id,
-            "action": "addSource",
-            "displayName": request.display_name,
-            "hostPath": request.host_path,
-            "access": request.access,
+            "action": request.action,
         }
+        if request.action == "addSource":
+            value.update(
+                {
+                    "displayName": request.display_name,
+                    "hostPath": request.host_path,
+                    "access": request.access,
+                }
+            )
+        elif request.action == "removeSource":
+            value["sourceId"] = request.source_id
+        else:
+            raise ValueError("the source-management action is invalid")
         encoded = (json.dumps(value, separators=(",", ":")) + "\n").encode("utf-8")
         if len(encoded) > MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES:
             raise ValueError("the source-management request is too large")
@@ -1398,7 +1410,7 @@ class SourceManagementRuntime:
     @staticmethod
     def _parse_success(
         output: bytes,
-        expected_display_name: str,
+        request: SourceManagementRequest,
     ) -> tuple[str, str]:
         if len(output) > MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES:
             raise ValueError("the source-management result is too large")
@@ -1421,7 +1433,9 @@ class SourceManagementRuntime:
             updated_at="2026-01-01T00:00:00Z",
         )
         assert probe.source_id is not None and probe.display_name is not None
-        if probe.display_name != expected_display_name:
+        if request.action == "addSource" and probe.display_name != request.display_name:
+            raise ValueError("the source-management result does not match the request")
+        if request.action == "removeSource" and probe.source_id != request.source_id:
             raise ValueError("the source-management result does not match the request")
         return probe.source_id, probe.display_name
 
@@ -1429,7 +1443,9 @@ class SourceManagementRuntime:
         self,
         operation: SourceManagementOperation,
     ) -> SourceManagementOperation | None:
-        if self._helper_status_reader is None or self._active_display_name is None:
+        if self._helper_status_reader is None or (
+            self._active_display_name is None and self._active_source_id is None
+        ):
             return None
         try:
             progress = self._helper_status_reader.read_optional()
@@ -1437,7 +1453,14 @@ class SourceManagementRuntime:
             return None
         if (
             progress is None
-            or progress.display_name != self._active_display_name
+            or (
+                self._active_display_name is not None
+                and progress.display_name != self._active_display_name
+            )
+            or (
+                self._active_source_id is not None
+                and progress.source_id != self._active_source_id
+            )
             or _parse_timestamp(progress.updated_at) is None
             or _parse_timestamp(operation.created_at) is None
             or _parse_timestamp(progress.updated_at)
@@ -1475,7 +1498,7 @@ class SourceManagementRuntime:
             updated_at=progress.updated_at,
         )
 
-    def _add_worker(
+    def _mutation_worker(
         self,
         request: SourceManagementRequest,
         operation: SourceManagementOperation,
@@ -1496,7 +1519,7 @@ class SourceManagementRuntime:
             if result.returncode == 0:
                 source_id, display_name = self._parse_success(
                     result.output,
-                    request.display_name or "",
+                    request,
                 )
                 phase = "completed"
                 reason_code = "completed"
@@ -1527,6 +1550,7 @@ class SourceManagementRuntime:
                 )
             finally:
                 self._active_display_name = None
+                self._active_source_id = None
                 self._gate.release(gate_owner)
 
 

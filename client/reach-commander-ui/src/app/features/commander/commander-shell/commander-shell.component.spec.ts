@@ -158,6 +158,7 @@ describe('CommanderShellComponent system metrics integration', () => {
   };
   const systemUpdate = {
     status: signal<SystemUpdateStatusDto | null>(null),
+    pending: signal(false),
     reconnecting: signal(false),
     error: signal(null),
     start: vi.fn(() => Promise.resolve()),
@@ -178,6 +179,8 @@ describe('CommanderShellComponent system metrics integration', () => {
     canRetryCapability: signal(false),
     disabledReason: signal<string | null>(null),
     dialogOpen: signal(false),
+    mode: signal<'add' | 'remove'>('add'),
+    removalSource: signal(null),
     pending: signal(false),
     reconnecting: signal(false),
     operation: signal<SourceManagementOperationDto | null>(null),
@@ -186,8 +189,13 @@ describe('CommanderShellComponent system metrics integration', () => {
     terminal: signal(false),
     start: vi.fn(() => Promise.resolve()),
     open: vi.fn(() => sourceManagement.dialogOpen.set(true)),
+    openRemoval: vi.fn(() => {
+      sourceManagement.mode.set('remove');
+      sourceManagement.dialogOpen.set(true);
+    }),
     close: vi.fn(() => sourceManagement.dialogOpen.set(false)),
     submit: vi.fn(() => Promise.resolve()),
+    submitRemoval: vi.fn(() => Promise.resolve()),
     reset: vi.fn(),
   };
 
@@ -216,6 +224,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     pwa.installing.set(false);
     pwa.error.set(null);
     systemUpdate.status.set(null);
+    systemUpdate.pending.set(false);
     systemUpdate.reconnecting.set(false);
     systemUpdate.overlayVisible.set(false);
     sourceManagement.dialogOpen.set(false);
@@ -297,6 +306,19 @@ describe('CommanderShellComponent system metrics integration', () => {
       'Update available: v1.4.0',
     );
     expect(systemUpdate.start).toHaveBeenCalledOnce();
+  });
+
+  it('delegates a current-version toolbar activation to an immediate update check', () => {
+    systemUpdate.status.set(systemUpdateStatus({ phase: 'current' }));
+    fixture.detectChanges();
+    const trigger = fixture.nativeElement.querySelector(
+      '[data-testid="system-update-trigger"]',
+    ) as HTMLButtonElement;
+
+    expect(trigger.disabled).toBe(false);
+    trigger.click();
+
+    expect(systemUpdate.check).toHaveBeenCalledOnce();
   });
 
   it('opens immutable confirmation and delegates one confirmed Apply', () => {

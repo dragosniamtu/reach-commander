@@ -606,6 +606,50 @@ def append_source(
     return DeploymentRequest.from_mapping(mapping)
 
 
+def remove_source(
+    request: DeploymentRequest,
+    *,
+    source_id: str,
+) -> DeploymentRequest:
+    """Return a revalidated request without one mapping, preserving at least one source."""
+    if not isinstance(request, DeploymentRequest):
+        raise ValueError("request: invalid deployment request")
+    if type(source_id) is not str or SOURCE_ID_PATTERN.fullmatch(source_id) is None:
+        raise ValueError("sources.id: invalid value")
+    if not any(source.id == source_id for source in request.sources):
+        raise ValueError("sources.id: source is not configured")
+    if len(request.sources) == 1:
+        raise ValueError("sources: cannot remove the last source")
+
+    removed = next(source for source in request.sources if source.id == source_id)
+    remaining = [source for source in request.sources if source.id != source_id]
+    replacement_id = remaining[0].id
+    sources = [
+        {
+            **source.to_request_mapping(),
+            "defaultLeft": source.default_left or (
+                removed.default_left and source.id == replacement_id
+            ),
+            "defaultRight": source.default_right or (
+                removed.default_right and source.id == replacement_id
+            ),
+        }
+        for source in remaining
+    ]
+    return DeploymentRequest.from_mapping(
+        {
+            "accessMode": request.access_mode,
+            "bindAddress": request.bind_address,
+            "port": request.port,
+            "allowInsecureHttp": request.allow_insecure_http,
+            "uid": request.uid,
+            "gid": request.gid,
+            "image": request.image,
+            "sources": sources,
+        }
+    )
+
+
 def source_paths(path: pathlib.Path | str) -> tuple[str, ...]:
     mapping = _load_json(pathlib.Path(path), "source mounts")
     if type(mapping) is not dict or set(mapping) != {"sources"}:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Durable, installer-owned transaction for adding one Ubuntu host source."""
+"""Durable, installer-owned transactions for Ubuntu host source mappings."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ else:
 
 MAX_SOURCES = 32
 MAX_CANONICAL_SOURCE_CHARS = 1_024
-_SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_SOURCE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _PROTECTED_ROOTS = ("/", "/proc", "/sys", "/dev", "/run", "/var/run")
 _BROAD_ROOTS = frozenset({"/home", "/srv", "/mnt"})
 _PRODUCTION_OWNED = (
@@ -429,6 +429,9 @@ class SourceTransaction:
         self._transaction_id = None
         self._validate_installer_state()
         installed = self._load_installed_request()
+        if request.action == "removeSource":
+            return self._remove_source(request, installed)
+
         require_source_capacity(len(installed.sources))
         installer_owned = self._installer_owned_paths()
         source_identities = self._capture_installed_source_identities(installed)
@@ -475,13 +478,38 @@ class SourceTransaction:
         )
         return {"sourceId": source_id, "displayName": request.display_name or ""}
 
+    def _remove_source(self, request: SourceManagementRequest, installed) -> dict[str, str]:
+        target = next(
+            (source for source in installed.sources if source.id == request.source_id),
+            None,
+        )
+        if target is None or len(installed.sources) <= 1:
+            raise SourceManagementFailure("validation_failed")
+
+        remaining = tuple(
+            source for source in installed.sources if source.id != request.source_id
+        )
+        source_identities = validate_installed_source_paths(
+            (source.host_path for source in remaining),
+            installer_owned=self._installer_owned_paths(),
+            canonicalizer=self._canonicalizer,
+            directory_exists=self._directory_exists,
+            status_reader=self._status,
+        )
+        try:
+            updated = renderer.remove_source(installed, source_id=target.id)
+        except ValueError:
+            raise SourceManagementFailure("validation_failed") from None
+        self._apply(updated, target.id, target.name, source_identities)
+        return {"sourceId": target.id, "displayName": target.name}
+
     @staticmethod
     def _parse_request(raw_request: bytes) -> SourceManagementRequest:
         try:
             request = SourceManagementRequest.parse(raw_request)
         except ProtocolError:
             raise SourceManagementFailure("invalid_request") from None
-        if request.action != "addSource":
+        if request.action not in {"addSource", "removeSource"}:
             raise SourceManagementFailure("invalid_request")
         return request
 

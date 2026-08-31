@@ -10,6 +10,7 @@ import {
 import {
   CommanderApiPort,
   SourceAddRequestDto,
+  SourceDto,
   SourceManagementCapabilityDto,
   SourceManagementOperationDto,
 } from '../api/api.models';
@@ -82,6 +83,8 @@ export interface SourceManagementStoreState {
   readonly capability: SourceManagementCapabilityDto | null;
   readonly capabilityPending: boolean;
   readonly dialogOpen: boolean;
+  readonly mode: 'add' | 'remove';
+  readonly removalSource: SourceDto | null;
   readonly operation: SourceManagementOperationDto | null;
   readonly pending: boolean;
   readonly reconnecting: boolean;
@@ -107,6 +110,8 @@ export class SourceManagementStore {
   readonly capability = computed(() => this.state().capability);
   readonly capabilityPending = computed(() => this.state().capabilityPending);
   readonly dialogOpen = computed(() => this.state().dialogOpen);
+  readonly mode = computed(() => this.state().mode);
+  readonly removalSource = computed(() => this.state().removalSource);
   readonly operation = computed(() => this.state().operation);
   readonly pending = computed(() => this.state().pending);
   readonly reconnecting = computed(() => this.state().reconnecting);
@@ -206,6 +211,25 @@ export class SourceManagementStore {
     this.mutableState.update((state) => ({
       ...state,
       dialogOpen: true,
+      mode: 'add',
+      removalSource: null,
+      operation: null,
+      pending: false,
+      reconnecting: false,
+      catalogRefreshed: false,
+      error: null,
+    }));
+  }
+
+  openRemoval(source: SourceDto): void {
+    if (!this.canOpen()) {
+      return;
+    }
+    this.mutableState.update((state) => ({
+      ...state,
+      dialogOpen: true,
+      mode: 'remove',
+      removalSource: Object.freeze({ ...source }),
       operation: null,
       pending: false,
       reconnecting: false,
@@ -222,6 +246,8 @@ export class SourceManagementStore {
     this.mutableState.update((state) => ({
       ...state,
       dialogOpen: false,
+      mode: 'add',
+      removalSource: null,
       operation: null,
       pending: false,
       reconnecting: false,
@@ -231,6 +257,20 @@ export class SourceManagementStore {
   }
 
   async submit(request: SourceAddRequestDto): Promise<void> {
+    await this.submitMutation(() => this.api.addSource(request));
+  }
+
+  async submitRemoval(): Promise<void> {
+    const source = this.removalSource();
+    if (!source || this.mode() !== 'remove') {
+      return;
+    }
+    await this.submitMutation(() => this.api.removeSource(source.id));
+  }
+
+  private async submitMutation(
+    submit: () => Promise<SourceManagementOperationDto>,
+  ): Promise<void> {
     if (!this.dialogOpen() || this.submissionInFlight || this.pending() || this.disposed) {
       return;
     }
@@ -250,7 +290,7 @@ export class SourceManagementStore {
       requestToken: token,
     }));
     try {
-      const operation = await this.api.addSource(request);
+      const operation = await submit();
       if (this.isCurrent(generation, token)) {
         await this.capture(operation, generation);
       }
@@ -260,7 +300,12 @@ export class SourceManagementStore {
           ...state,
           pending: false,
           reconnecting: false,
-          error: safeError(error, 'The source could not be added.'),
+          error: safeError(
+            error,
+            this.mode() === 'remove'
+              ? 'The source mapping could not be removed.'
+              : 'The source could not be added.',
+          ),
         }));
       }
     } finally {
@@ -381,7 +426,9 @@ export class SourceManagementStore {
       if (!this.isCurrentGeneration(generation)) {
         return;
       }
-      if (sources.some((source) => source.id === operation.sourceId)) {
+      const sourcePresent = sources.some((source) => source.id === operation.sourceId);
+      if ((this.mode() === 'add' && sourcePresent) ||
+          (this.mode() === 'remove' && !sourcePresent)) {
         this.catalogRefreshAttempts = 0;
         this.mutableState.update((state) => ({
           ...state,
@@ -401,7 +448,9 @@ export class SourceManagementStore {
     if (this.catalogRefreshAttempts >= maximumCatalogRefreshAttempts) {
       this.finishCatalogRefreshWithError(
         'source_management_catalog_refresh_timeout',
-        'The host completed the source change, but the new source did not appear in time. Refresh the page; if it is still missing, run reachcommander doctor on the Ubuntu host.',
+        this.mode() === 'remove'
+          ? 'The host completed the source change, but the removed mapping is still visible. Refresh the page; if it remains, run reachcommander doctor on the Ubuntu host.'
+          : 'The host completed the source change, but the new source did not appear in time. Refresh the page; if it is still missing, run reachcommander doctor on the Ubuntu host.',
       );
       return;
     }
@@ -522,6 +571,8 @@ function emptyState(requestToken = 0): SourceManagementStoreState {
     capability: null,
     capabilityPending: false,
     dialogOpen: false,
+    mode: 'add',
+    removalSource: null,
     operation: null,
     pending: false,
     reconnecting: false,

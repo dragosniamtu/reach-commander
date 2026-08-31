@@ -40,6 +40,24 @@ public sealed class SourceManagementCoordinatorTests
     }
 
     [Fact]
+    public async Task Remove_uses_the_same_restart_safety_gate_and_validates_the_source_id()
+    {
+        var gateway = new StubGateway();
+        var gate = new TrackingMutationGate();
+        var coordinator = Coordinator(gateway, gate: gate);
+
+        var operation = await coordinator.RemoveAsync("media_archive-2", default);
+
+        Assert.Equal(gateway.Operation, operation);
+        Assert.Equal(1, gateway.RemoveCount);
+        Assert.Equal(1, gate.BeginDrainCount);
+
+        await Assert.ThrowsAsync<SourceManagementValidationException>(() =>
+            coordinator.RemoveAsync("../media", default));
+        Assert.Equal(1, gateway.RemoveCount);
+    }
+
+    [Fact]
     public async Task Source_post_owns_drain_and_rechecks_operations_after_drain()
     {
         var gateway = new StubGateway();
@@ -144,7 +162,7 @@ public sealed class SourceManagementCoordinatorTests
         {
             Phase = SourceManagementPhase.Completed,
             ReasonCode = "completed",
-            Detail = "The source has been added.",
+            Detail = "The source change was completed.",
             SourceId = "archive",
             DisplayName = "Archive",
         };
@@ -279,7 +297,7 @@ public sealed class SourceManagementCoordinatorTests
         "Archive",
         SourceManagementPhase.Completed,
         "completed",
-        "The source has been added.",
+        "The source change was completed.",
         DateTimeOffset.Parse("2026-08-31T10:00:00Z"),
         DateTimeOffset.Parse("2026-08-31T10:00:01Z"));
 
@@ -326,6 +344,8 @@ public sealed class SourceManagementCoordinatorTests
 
         public int AddCount { get; private set; }
 
+        public int RemoveCount { get; private set; }
+
         public int GetOperationCount { get; private set; }
 
         public SourceManagementOperation? ObservedOperation { get; set; }
@@ -371,6 +391,14 @@ public sealed class SourceManagementCoordinatorTests
             }
 
             return AddOperations is { Count: > 0 } ? AddOperations.Dequeue() : Operation;
+        }
+
+        public Task<SourceManagementOperation> RemoveAsync(
+            string sourceId,
+            CancellationToken cancellationToken)
+        {
+            RemoveCount++;
+            return Task.FromResult(Operation);
         }
 
         public Task<SourceManagementOperation> GetOperationAsync(

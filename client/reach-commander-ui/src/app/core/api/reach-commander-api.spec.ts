@@ -154,6 +154,13 @@ describe('ReachCommanderApi', () => {
     addRequest.flush(operation);
     await expect(addResult).resolves.toEqual(operation);
 
+    const removeResult = api.removeSource('archive');
+    const removeRequest = http.expectOne('/api/source-management/sources/archive');
+    expect(removeRequest.request.method).toBe('DELETE');
+    expect(removeRequest.request.body).toBeNull();
+    removeRequest.flush(operation);
+    await expect(removeResult).resolves.toEqual(operation);
+
     const operationResult = api.getSourceManagementOperation(operation.operationId);
     const operationRequest = http.expectOne(
       `/api/source-management/operations/${operation.operationId}`,

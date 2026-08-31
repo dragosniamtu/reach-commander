@@ -12,10 +12,12 @@
       <div>
         <span class="eyebrow">Installer-managed Ubuntu source</span>
         <h2 id="source-management-title">
-          {{ store.operation() ? 'Configuring source' : 'Add host source' }}
+          {{ store.operation()
+            ? 'Configuring source'
+            : store.mode() === 'remove' ? 'Remove source mapping?' : 'Add host source' }}
         </h2>
       </div>
-      <button type="button" aria-label="Close Add source" [disabled]="!canClose()" (click)="close()">×</button>
+      <button type="button" aria-label="Close source management" [disabled]="!canClose()" (click)="close()">×</button>
     </header>
 
     @if (store.operation(); as operation) {
@@ -58,14 +60,40 @@
         }
         @if (operation.phase === 'completed' && store.catalogRefreshed()) {
           <p class="success-message" role="status">
-            {{ operation.displayName }} is now available in both panes.
+            @if (store.mode() === 'remove') {
+              {{ operation.displayName }} was removed from ReachCommander. The host folder and all
+              files inside it were preserved.
+            } @else {
+              {{ operation.displayName }} is now available in both panes.
+            }
           </p>
         }
         @if (operation.phase === 'rolledBack') {
           <p class="warning" role="alert">
-            The previous source configuration was restored; no new mapping is active.
+            The previous source configuration was restored; no source mapping was changed.
           </p>
         }
+        @if (store.error(); as publicError) {
+          <p class="error" role="alert">{{ publicError.detail }}</p>
+        }
+      </div>
+    } @else if (store.mode() === 'remove' && store.removalSource(); as source) {
+      <div class="dialog-body removal-confirmation" data-testid="source-removal-confirmation">
+        <p>
+          Remove <strong>{{ source.name }}</strong> from ReachCommander?
+        </p>
+        <dl>
+          <div><dt>Source ID</dt><dd>{{ source.id }}</dd></div>
+          <div><dt>Access</dt><dd>{{ source.isReadOnly ? 'Read only' : 'Read/write' }}</dd></div>
+        </dl>
+        <p class="preservation-note">
+          Only the ReachCommander mapping will be removed. The host folder and every file inside
+          it will remain untouched.
+        </p>
+        <p>
+          ReachCommander will restart briefly and any open tabs using this source will switch to
+          a remaining source.
+        </p>
         @if (store.error(); as publicError) {
           <p class="error" role="alert">{{ publicError.detail }}</p>
         }
@@ -167,12 +195,15 @@
         <button type="button" [disabled]="store.pending()" (click)="close()">Cancel</button>
         <button
           type="button"
-          class="primary"
-          data-testid="add-source-submit"
+          [class.primary]="store.mode() === 'add'"
+          [class.danger]="store.mode() === 'remove'"
+          [attr.data-testid]="store.mode() === 'remove' ? 'remove-source-submit' : 'add-source-submit'"
           [disabled]="!canSubmit()"
           (click)="submit()"
         >
-          {{ store.pending() ? 'Starting…' : 'Add source' }}
+          {{ store.pending()
+            ? 'Starting…'
+            : store.mode() === 'remove' ? 'Remove source' : 'Add source' }}
         </button>
       } @else if (canClose()) {
         <button type="button" class="primary" (click)="close()">

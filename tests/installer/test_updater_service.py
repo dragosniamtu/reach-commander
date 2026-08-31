@@ -236,6 +236,8 @@ def source_request(
                 "access": "readOnly",
             }
         )
+    if action == "removeSource":
+        value["sourceId"] = "archive"
     if action == "getOperation":
         value["operationId"] = operation_id or str(uuid.uuid4())
     return SourceManagementRequest.parse(json.dumps(value).encode())
@@ -352,7 +354,7 @@ class SourceManagementRuntimeTests(unittest.TestCase):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(
-                    "SOURCE_MANAGEMENT_PROTOCOL_VERSION = 5\n",
+                    f"SOURCE_MANAGEMENT_PROTOCOL_VERSION = {SOURCE_MANAGEMENT_PROTOCOL_VERSION}\n",
                     encoding="utf-8",
                 )
                 path.chmod(0o755 if relative.startswith("bin/") else 0o644)
@@ -416,6 +418,32 @@ class SourceManagementRuntimeTests(unittest.TestCase):
             self.assertEqual("archive", recovered["payload"]["sourceId"])
             self.assertEqual(helper_contents, helper_journal.read_bytes())
             self.assertTrue((root / "state" / "source-runtime-operation.json").is_file())
+
+    def test_remove_uses_only_the_source_id_and_correlates_the_helper_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = RecordingSourceRunner()
+            runtime = self.runtime(root, runner=runner)
+
+            accepted = runtime.handle(source_request("removeSource"))
+            runtime.wait_for_worker()
+            submitted = json.loads(runner.calls[0]["stdin"])
+            completed = runtime.handle(
+                source_request(
+                    "getOperation",
+                    operation_id=str(accepted["payload"]["operationId"]),
+                )
+            )
+
+            self.assertEqual(
+                {"protocolVersion", "requestId", "action", "sourceId"},
+                set(submitted),
+            )
+            self.assertEqual("removeSource", submitted["action"])
+            self.assertEqual("archive", submitted["sourceId"])
+            self.assertNotIn("hostPath", submitted)
+            self.assertEqual("completed", completed["payload"]["phase"])
+            self.assertEqual("archive", completed["payload"]["sourceId"])
 
     def test_one_source_operation_is_serialized_and_update_source_gate_works_both_ways(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1515,12 +1543,12 @@ class UpdaterSocketServerTests(unittest.TestCase):
         self.assertEqual(1, response["protocolVersion"])
         self.assertEqual("current", response["phase"])
 
-    def test_routes_only_strict_bounded_v5_messages_to_source_management(self) -> None:
+    def test_routes_only_strict_bounded_v6_messages_to_source_management(self) -> None:
         request_id = str(uuid.uuid4())
         status = self.exchange(
             json.dumps(
                 {
-                    "protocolVersion": 5,
+                    "protocolVersion": 6,
                     "requestId": request_id,
                     "action": "status",
                 }
@@ -1529,7 +1557,7 @@ class UpdaterSocketServerTests(unittest.TestCase):
         )
         duplicate = self.exchange(
             (
-                '{"protocolVersion":5,"requestId":"'
+                '{"protocolVersion":6,"requestId":"'
                 + request_id
                 + '","action":"status","action":"status"}\n'
             ).encode()
@@ -1537,7 +1565,7 @@ class UpdaterSocketServerTests(unittest.TestCase):
         oversized = self.exchange(
             json.dumps(
                 {
-                    "protocolVersion": 5,
+                    "protocolVersion": 6,
                     "requestId": str(uuid.uuid4()),
                     "action": "addSource",
                     "displayName": "Archive",
@@ -1550,7 +1578,7 @@ class UpdaterSocketServerTests(unittest.TestCase):
         browser_command = self.exchange(
             json.dumps(
                 {
-                    "protocolVersion": 5,
+                    "protocolVersion": 6,
                     "requestId": str(uuid.uuid4()),
                     "action": "addSource",
                     "displayName": "Archive",
@@ -1562,7 +1590,7 @@ class UpdaterSocketServerTests(unittest.TestCase):
             + b"\n"
         )
 
-        self.assertEqual(5, status["protocolVersion"])
+        self.assertEqual(6, status["protocolVersion"])
         self.assertEqual("supported", status["payload"]["reasonCode"])
         self.assertEqual("invalid_request", duplicate["payload"]["code"])
         self.assertEqual("request_too_large", oversized["payload"]["code"])
@@ -1618,7 +1646,7 @@ class ServiceProcessContractTests(unittest.TestCase):
     def test_source_protocol_routing_fails_closed_on_duplicate_version_fields(self) -> None:
         request_id = str(uuid.uuid4())
         duplicate = (
-            '{"protocolVersion":5,"protocolVersion":4,"requestId":"'
+            '{"protocolVersion":6,"protocolVersion":4,"requestId":"'
             + request_id
             + '","action":"status"}'
         ).encode()

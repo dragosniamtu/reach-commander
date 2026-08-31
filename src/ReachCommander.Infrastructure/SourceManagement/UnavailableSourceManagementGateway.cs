@@ -25,6 +25,11 @@ internal sealed class UnavailableSourceManagementGateway(bool unsupportedPlatfor
         CancellationToken cancellationToken) =>
         throw new SourceManagementUnavailableException();
 
+    public Task<SourceManagementOperation> RemoveAsync(
+        string sourceId,
+        CancellationToken cancellationToken) =>
+        throw new SourceManagementUnavailableException();
+
     public Task<SourceManagementOperation> GetOperationAsync(
         Guid operationId,
         CancellationToken cancellationToken) =>

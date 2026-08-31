@@ -15,7 +15,7 @@ test("unsupported deployments explain why Add source is disabled", async ({ page
     detail: "private /srv detail",
   } as never);
   expect(runtimeOverride.reasonCode).toBe("completed");
-  expect(runtimeOverride.detail).toBe("The source has been added.");
+  expect(runtimeOverride.detail).toBe("The source change was completed.");
 
   await routeUnsupportedSourceManagement(page);
   await page.goto("/");
@@ -105,6 +105,30 @@ test("requires explicit read-write confirmation and sends only the narrow reques
   ).toBeVisible();
 });
 
+test("removes only a confirmed source mapping and refreshes both selectors", async ({ page }) => {
+  const host = await routeInstallerManagedSourceManagement(page);
+  await page.goto("/");
+
+  await page.getByTestId("remove-source-media").first().click();
+  const dialog = page.getByRole("dialog", { name: "Remove source mapping?" });
+  await expect(dialog).toContainText("Remove Media from ReachCommander?");
+  await expect(dialog).toContainText("every file inside it will remain untouched");
+  await dialog.getByTestId("remove-source-submit").click();
+
+  expect(host.removeRequests).toEqual(["media"]);
+  host.publish({
+    sourceId: "media",
+    displayName: "Media",
+    phase: "completed",
+  });
+
+  await expect(page.getByText(/host folder and all files inside it were preserved/i)).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(page.getByTestId("source-media")).toHaveCount(0);
+  await expect(page.getByTestId("source-downloads")).toHaveCount(2);
+});
+
 test("blocks duplicate source submissions while the operation is active", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
@@ -137,7 +161,7 @@ test("reports rollback without activating the requested mapping", async ({ page 
     timeout: 5_000,
   });
   await expect(page.getByTestId("source-management-dialog")).toContainText(
-    "no new mapping is active",
+    "no source mapping was changed",
   );
   await expect(page.getByTestId("source-unsafe-candidate")).toHaveCount(0);
 });

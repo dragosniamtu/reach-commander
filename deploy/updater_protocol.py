@@ -24,7 +24,7 @@ PROTOCOL_VERSION = 3
 DIAGNOSTIC_PROTOCOL_VERSION = 4
 # Source management deliberately uses a separate protocol so an older updater
 # helper cannot mistake a browser-controlled source request for an update action.
-SOURCE_MANAGEMENT_PROTOCOL_VERSION = 5
+SOURCE_MANAGEMENT_PROTOCOL_VERSION = 6
 SUPPORTED_PROTOCOL_VERSIONS = frozenset(
     {
         LEGACY_PROTOCOL_VERSION,
@@ -58,6 +58,7 @@ _SOURCE_REQUEST_FIELDS = frozenset({"protocolVersion", "requestId", "action"})
 _SOURCE_ADD_FIELDS = _SOURCE_REQUEST_FIELDS | frozenset(
     {"displayName", "hostPath", "access"}
 )
+_SOURCE_REMOVE_FIELDS = _SOURCE_REQUEST_FIELDS | frozenset({"sourceId"})
 _SOURCE_OPERATION_FIELDS = _SOURCE_REQUEST_FIELDS | frozenset({"operationId"})
 _SOURCE_RESPONSE_FIELDS = frozenset(
     {"protocolVersion", "requestId", "action", "payload"}
@@ -77,9 +78,15 @@ _SOURCE_OPERATION_RESPONSE_FIELDS = frozenset(
 )
 _SOURCE_STATUS_ACTION = "status"
 _SOURCE_ADD_ACTION = "addSource"
+_SOURCE_REMOVE_ACTION = "removeSource"
 _SOURCE_OPERATION_ACTION = "getOperation"
 _SOURCE_ACTIONS = frozenset(
-    {_SOURCE_STATUS_ACTION, _SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION}
+    {
+        _SOURCE_STATUS_ACTION,
+        _SOURCE_ADD_ACTION,
+        _SOURCE_REMOVE_ACTION,
+        _SOURCE_OPERATION_ACTION,
+    }
 )
 _SOURCE_ACCESS_VALUES = frozenset({"readOnly", "readWrite"})
 _SOURCE_OPERATION_PHASES = frozenset(
@@ -133,7 +140,7 @@ _PUBLIC_SOURCE_OPERATION_DETAILS = {
     "applying": "The source configuration is being applied.",
     "restarting": "ReachCommander is restarting.",
     "healthChecking": "ReachCommander is being checked.",
-    "completed": "The source has been added.",
+    "completed": "The source change was completed.",
     "rolledBack": "The source change was rolled back.",
     "failed": "The source-management operation could not be completed.",
 }
@@ -145,7 +152,7 @@ _PUBLIC_SOURCE_FAILED_OPERATION_DETAILS = {
     ),
     "source_management_failed": "The source-management operation could not be completed.",
 }
-_SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_SOURCE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _SOURCE_CAPABILITY_REASON_CODES = frozenset(_PUBLIC_SOURCE_CAPABILITY_DETAILS)
 _SOURCE_OPERATION_REASON_CODES = {
     "accepted": frozenset({"accepted"}),
@@ -334,6 +341,7 @@ class SourceManagementRequest:
     display_name: str | None = None
     host_path: str | None = None
     access: str | None = None
+    source_id: str | None = None
     operation_id: str | None = None
 
     @classmethod
@@ -365,6 +373,19 @@ class SourceManagementRequest:
                 request_id,
                 action,
                 operation_id=operation_id,
+            )
+
+        if action == _SOURCE_REMOVE_ACTION:
+            if set(value) != _SOURCE_REMOVE_FIELDS:
+                raise ProtocolError("invalid_request", "The source-management request contains unexpected fields.")
+            source_id = value.get("sourceId")
+            if not isinstance(source_id, str) or not _SOURCE_ID.fullmatch(source_id):
+                raise ProtocolError("invalid_request", "The source identifier is invalid.")
+            return cls(
+                SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+                request_id,
+                action,
+                source_id=source_id,
             )
 
         if set(value) != _SOURCE_ADD_FIELDS:
@@ -512,7 +533,11 @@ class SourceManagementResponse:
         ):
             return
         if (
-            self.action in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION}
+            self.action in {
+                _SOURCE_ADD_ACTION,
+                _SOURCE_REMOVE_ACTION,
+                _SOURCE_OPERATION_ACTION,
+            }
             and isinstance(self.operation, SourceManagementOperation)
             and self.capability is None
         ):
@@ -590,7 +615,11 @@ class SourceManagementResponse:
                 expected_operation_id=expected_operation_id,
             )
             return response
-        if action not in {_SOURCE_ADD_ACTION, _SOURCE_OPERATION_ACTION} or set(payload) != _SOURCE_OPERATION_RESPONSE_FIELDS:
+        if action not in {
+            _SOURCE_ADD_ACTION,
+            _SOURCE_REMOVE_ACTION,
+            _SOURCE_OPERATION_ACTION,
+        } or set(payload) != _SOURCE_OPERATION_RESPONSE_FIELDS:
             raise ProtocolError("invalid_request", "The source-management response payload is invalid.")
         response = cls.from_operation(
             request_id,

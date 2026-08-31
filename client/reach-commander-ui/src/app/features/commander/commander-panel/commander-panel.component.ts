@@ -5,6 +5,7 @@ import {
   ViewChild,
   computed,
   input,
+  output,
 } from '@angular/core';
 import { SourceDto } from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
@@ -19,7 +20,10 @@ import {
   buildVisibleRows,
   fileTableRowExplanation,
 } from '../../../core/state/file-table.viewmodel';
-import { SourceSelectorComponent } from '../source-selector/source-selector.component';
+import {
+  SourceRemovalRequest,
+  SourceSelectorComponent,
+} from '../source-selector/source-selector.component';
 import { DirectoryTabsComponent } from '../directory-tabs/directory-tabs.component';
 import { PathBarComponent } from '../path-bar/path-bar.component';
 import { FileTableComponent, PointerSelection } from '../file-table/file-table.component';
@@ -36,6 +40,9 @@ export class CommanderPanelComponent {
   readonly panel = input.required<PanelState>();
   readonly sources = input.required<readonly SourceDto[]>();
   readonly active = input.required<boolean>();
+  readonly sourceRemovalEnabled = input(false);
+  readonly sourceRemovalPending = input(false);
+  readonly sourceRemovalRequested = output<SourceRemovalRequest>();
   readonly activeTab = computed(() =>
     this.panel().tabs.find((tab) => tab.id === this.panel().activeTabId),
   );

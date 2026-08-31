@@ -95,6 +95,14 @@ export class ReachCommanderApi extends CommanderApiPort {
     );
   }
 
+  removeSource(sourceId: string): Promise<SourceManagementOperationDto> {
+    return firstValueFrom(
+      this.http.delete<SourceManagementOperationDto>(
+        `/api/source-management/sources/${encodeURIComponent(sourceId)}`,
+      ),
+    );
+  }
+
   getSourceManagementOperation(operationId: string): Promise<SourceManagementOperationDto> {
     return firstValueFrom(
       this.http.get<SourceManagementOperationDto>(

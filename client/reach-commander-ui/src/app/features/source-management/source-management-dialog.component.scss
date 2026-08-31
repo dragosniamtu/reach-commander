@@ -9,6 +9,13 @@ h3 { color: var(--text-1); font: 700 18px/1.25 var(--font-ui); }
 .eyebrow, label, legend { color: var(--text-4); font: 700 8px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
 .dialog-body { display: grid; gap: 12px; padding: 16px; overflow: auto; }
 .intro { padding: 10px; border: 1px solid var(--line); color: var(--text-3); background: var(--surface-1); font-size: 10px; line-height: 1.55; }
+.removal-confirmation { font-size: 12px; line-height: 1.55; }
+.removal-confirmation strong { color: var(--text-1); }
+.removal-confirmation dl { display: grid; gap: 6px; margin: 0; padding: 10px; border: 1px solid var(--line); background: var(--surface-1); }
+.removal-confirmation dl div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; }
+.removal-confirmation dt { color: var(--text-4); font: 700 9px/1.4 var(--font-ui); text-transform: uppercase; }
+.removal-confirmation dd { margin: 0; color: var(--text-2); font: 11px/1.4 var(--font-mono); }
+.preservation-note { padding: 11px; border: 1px solid var(--success); color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--surface-1)); }
 label:not(.access-option, .write-warning) { display: grid; gap: 7px; }
 input[type='text'] { min-height: 37px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-1); background: var(--surface-1); font: 11px/1 var(--font-mono); text-transform: none; }
 fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; padding: 10px; border: 1px solid var(--line); }
@@ -38,6 +45,7 @@ legend { padding: 0 5px; }
 button { min-height: 31px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-2); background: var(--surface-2); font: 600 10px/1 var(--font-ui); cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .46; }
 button.primary { border-color: var(--accent); color: #061216; background: var(--accent); }
+button.danger { border-color: var(--danger); color: var(--danger-text); background: var(--danger-dim); }
 footer { justify-content: flex-end; min-height: 50px; padding: 8px 12px; border-top: 1px solid var(--line-strong); background: var(--surface-3); }
 .restart-note { margin-right: auto; color: var(--text-4); font-size: 9px; }
 @keyframes source-spin { to { transform: rotate(360deg); } }

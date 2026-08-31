@@ -33,6 +33,10 @@ export abstract class CommanderApiTestBase extends CommanderApiPort {
     return unsupported();
   }
 
+  override removeSource(_sourceId: string): Promise<SourceManagementOperationDto> {
+    return unsupported();
+  }
+
   override getSourceManagementOperation(
     _operationId: string,
   ): Promise<SourceManagementOperationDto> {

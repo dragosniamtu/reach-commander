@@ -244,9 +244,11 @@ sudo reachcommander restart
 
 Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, the exact application-data allowlist and its host ownership/modes, authentication JSON, image state, port, and container health without changing the deployment. Read/write/traverse access is checked as the configured numeric runtime identity inside the running container at the fixed `/data` mount, which is where the application actually accesses the bind-mounted data. The root-owned `/opt/reachcommander` directory remains protected and does not need to be traversable by the container identity. The allowlist covers account state, Data Protection keys, and ReachCommander's durable file-operation plans and status records. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
 
-### Add a source from the UI
+### Manage sources from the UI
 
 The current Ubuntu installer-managed deployment enables **Add source** in the authenticated top toolbar. This is for one existing absolute Ubuntu host folder at a time. Enter a specific child directory such as `/srv/family-media`; the UI workflow rejects `/`, protected system or installer paths, and broad roots such as `/home`, `/srv`, and `/mnt`. It never accepts a container path, Compose fragment, image reference, environment value, or command.
+
+Each source chip also includes an × action. Its confirmation removes only the installer-managed mapping and bind-mount declaration; it never deletes, moves, changes, or recursively inspects the host folder contents. ReachCommander refuses to remove the final source. If the removed source was a left or right default, the first remaining configured source becomes that default, and live tabs that referenced the removed source are repaired after the restart.
 
 Before opening the UI, create or choose the folder and verify its permissions as the exact runtime UID/GID saved in `/opt/reachcommander/.env`. Every ancestor, up to and including `/`, must be a directory owned by root and not group- or world-writable. The source folder itself is the leaf: it may be owned by the runtime UID/GID and may be writable. This prevents an unprivileged account from replacing a persisted path between validation and container activation.
 
@@ -288,7 +290,7 @@ import json
 import uuid
 
 print(json.dumps({
-    "protocolVersion": 5,
+    "protocolVersion": 6,
     "requestId": str(uuid.uuid4()),
     "action": "addSource",
     "displayName": "Family media",

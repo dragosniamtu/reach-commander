@@ -84,6 +84,24 @@ describe('CommanderStore', () => {
     expect(store.rightPanel().tabs[0]?.location).toEqual(rightLocation);
   });
 
+  it('repairs live pane tabs when a source mapping is removed', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true }),
+      source('media', { defaultRight: true }),
+    ]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    api.configuredSources = [
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ];
+
+    await store.reloadSourceCatalog();
+
+    expect(store.leftPanel().tabs[0]?.location.sourceId).toBe('downloads');
+    expect(store.rightPanel().tabs[0]?.location.sourceId).toBe('downloads');
+    expect(store.rightPanel().errorCode).toBeNull();
+  });
+
   it('resets the workspace and ignores responses from the previous authenticated session', async () => {
     const listing = deferred<readonly FileEntryDto[]>();
     const api = new FakeCommanderApi([

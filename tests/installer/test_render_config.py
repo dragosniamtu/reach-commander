@@ -527,6 +527,31 @@ class RendererTestCase(unittest.TestCase):
             self.assertFalse(updated.sources[1].default_right)
             self.assertFalse(updated.sources[1].read_only)
 
+            removed = renderer.remove_source(updated, source_id="media")
+
+            self.assertEqual(("archive",), tuple(item.id for item in removed.sources))
+            self.assertTrue(removed.sources[0].default_left)
+            self.assertTrue(removed.sources[0].default_right)
+            self.assertFalse(removed.sources[0].read_only)
+
+    def test_remove_source_rejects_unknown_or_final_mapping(self) -> None:
+        renderer = self.require_renderer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            renderer.render_deployment(
+                renderer.load_request(FIXTURE_PATH), TEMPLATE_PATH, root
+            )
+            installed = renderer.load_installed_request(
+                root / ".env",
+                root / "config" / "sources.json",
+                root / "state" / "source-mounts.json",
+            )
+
+            with self.assertRaisesRegex(ValueError, "last source"):
+                renderer.remove_source(installed, source_id="media")
+            with self.assertRaisesRegex(ValueError, "not configured"):
+                renderer.remove_source(installed, source_id="missing")
+
     def test_load_installed_request_rejects_catalog_mount_mismatch(self) -> None:
         renderer = self.require_renderer()
         with tempfile.TemporaryDirectory() as directory:

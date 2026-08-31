@@ -591,6 +591,8 @@ export abstract class CommanderApiPort {
 
   abstract addSource(request: SourceAddRequestDto): Promise<SourceManagementOperationDto>;
 
+  abstract removeSource(sourceId: string): Promise<SourceManagementOperationDto>;
+
   abstract getSourceManagementOperation(
     operationId: string,
   ): Promise<SourceManagementOperationDto>;

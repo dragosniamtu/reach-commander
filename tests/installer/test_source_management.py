@@ -48,6 +48,17 @@ def add_request(
     ).encode()
 
 
+def remove_request(source_id: str = "archive") -> bytes:
+    return json.dumps(
+        {
+            "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+            "requestId": str(uuid.uuid4()),
+            "action": "removeSource",
+            "sourceId": source_id,
+        }
+    ).encode()
+
+
 class FakeCommands:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
@@ -417,6 +428,43 @@ class SourceTransactionTests(unittest.TestCase):
             self.assertEqual(0o755, stat.S_IMODE((self.root / "config").stat().st_mode))
             self.assertEqual(0o700, stat.S_IMODE((self.root / "state").stat().st_mode))
             self.assertEqual(0o700, stat.S_IMODE(self.root.stat().st_mode))
+
+    def test_remove_unmaps_source_preserves_remaining_defaults_and_never_deletes_host_data(self) -> None:
+        manager = self.fixture.manager()
+        manager.add(add_request())
+        sentinel = self.root / "host-data-sentinel.txt"
+        sentinel.write_text("preserve me", encoding="utf-8")
+
+        result = self.fixture.manager().add(remove_request("media"))
+
+        self.assertEqual({"sourceId": "media", "displayName": "Media"}, result)
+        self.assertEqual(["archive"], [item["id"] for item in self.read_catalog()["sources"]])
+        self.assertTrue(self.read_catalog()["sources"][0]["defaultLeft"])
+        self.assertTrue(self.read_catalog()["sources"][0]["defaultRight"])
+        self.assertEqual("preserve me", sentinel.read_text(encoding="utf-8"))
+
+    def test_remove_rejects_the_final_source_without_changing_active_files(self) -> None:
+        before = self.fingerprint()
+
+        with self.assertRaises(self.source_management.SourceManagementFailure) as raised:
+            self.fixture.manager().add(remove_request("media"))
+
+        self.assertEqual("validation_failed", raised.exception.code)
+        self.assertEqual(before, self.fingerprint())
+
+    def test_remove_publish_failure_restores_the_mapping_and_can_be_retried(self) -> None:
+        self.fixture.manager().add(add_request())
+        before = self.fingerprint()
+        writer = InjectedAtomicWriter(self.root, fail_publish_index=2)
+
+        with self.assertRaises(self.source_management.SourceManagementFailure) as raised:
+            self.fixture.manager(atomic_writer=writer).add(remove_request("archive"))
+
+        self.assertEqual("rolled_back", raised.exception.code)
+        self.assertEqual(before, self.fingerprint())
+        result = self.fixture.manager().add(remove_request("archive"))
+        self.assertEqual("archive", result["sourceId"])
+        self.assertEqual(["media"], [item["id"] for item in self.read_catalog()["sources"]])
 
     def test_compose_validation_failure_leaves_active_files_unchanged_and_sanitizes_error(self) -> None:
         commands = FakeCommands()

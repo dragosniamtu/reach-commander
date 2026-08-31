@@ -57,6 +57,8 @@
       <app-account-menu />
       <app-system-update-button
         [status]="systemUpdate.status()"
+        [pending]="systemUpdate.pending()"
+        (check)="checkSystemUpdate()"
         (open)="openSystemUpdate()"
       />
       <app-system-metrics-widget
@@ -160,6 +162,9 @@
       [panel]="store.leftPanel()"
       [sources]="store.sources()"
       [active]="store.activePanel() === 'left'"
+      [sourceRemovalEnabled]="sourceManagement.capability()?.supported === true"
+      [sourceRemovalPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
+      (sourceRemovalRequested)="openSourceRemoval($event)"
     />
     <div class="divider" aria-hidden="true"><span></span></div>
     <app-commander-panel
@@ -168,6 +173,9 @@
       [panel]="store.rightPanel()"
       [sources]="store.sources()"
       [active]="store.activePanel() === 'right'"
+      [sourceRemovalEnabled]="sourceManagement.capability()?.supported === true"
+      [sourceRemovalPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
+      (sourceRemovalRequested)="openSourceRemoval($event)"
     />
   </section>
 

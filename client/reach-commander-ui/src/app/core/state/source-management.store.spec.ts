@@ -149,6 +149,30 @@ describe('SourceManagementStore', () => {
     expect(scheduler.pendingCount).toBe(0);
   });
 
+  it('removes a confirmed mapping and waits until it disappears from the shared catalog', async () => {
+    const removed = source('archive');
+    commander.reloadSourceCatalog.mockResolvedValue([source('downloads')]);
+    api.removeResult = operation({ displayName: null, phase: 'accepted' });
+    api.operationResults.push(
+      () => Promise.resolve(operation({
+        sourceId: 'archive',
+        displayName: 'Archive',
+        phase: 'completed',
+      })),
+    );
+    await store.start();
+    store.openRemoval(removed);
+
+    await store.submitRemoval();
+    await scheduler.runNext();
+
+    expect(api.removeRequests).toEqual(['archive']);
+    expect(store.removalSource()).toEqual(removed);
+    expect(store.operation()?.phase).toBe('completed');
+    expect(store.catalogRefreshed()).toBe(true);
+    expect(store.pending()).toBe(false);
+  });
+
   it('keeps the blocking dialog active until a completed operation reloads the catalog', async () => {
     const refresh = deferred<readonly SourceDto[]>();
     commander.reloadSourceCatalog.mockImplementationOnce(() => refresh.promise);
@@ -437,8 +461,10 @@ class FakeSourceManagementApi {
     supported: true, reasonCode: 'supported', detail: 'Source management is available.',
   };
   addResult: SourceManagementOperationDto = operation();
+  removeResult: SourceManagementOperationDto = operation();
   addPromise: Promise<SourceManagementOperationDto> | null = null;
   readonly addRequests: SourceAddRequestDto[] = [];
+  readonly removeRequests: string[] = [];
   readonly operationResults: Array<() => Promise<SourceManagementOperationDto>> = [];
   readonly statusResults: Array<() => Promise<SourceManagementCapabilityDto>> = [];
   statusCount = 0;
@@ -451,6 +477,11 @@ class FakeSourceManagementApi {
   addSource(request: SourceAddRequestDto): Promise<SourceManagementOperationDto> {
     this.addRequests.push(request);
     return this.addPromise ?? Promise.resolve(this.addResult);
+  }
+
+  removeSource(sourceId: string): Promise<SourceManagementOperationDto> {
+    this.removeRequests.push(sourceId);
+    return Promise.resolve(this.removeResult);
   }
 
   getSourceManagementOperation(): Promise<SourceManagementOperationDto> {

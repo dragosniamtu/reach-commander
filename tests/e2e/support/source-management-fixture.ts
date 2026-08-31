@@ -40,10 +40,22 @@ export interface SourceOperationFixture {
   readonly updatedAt: string;
 }
 
+export interface SourceOperationUpdate {
+  readonly sourceId?: string | null;
+  readonly displayName?: string;
+  readonly phase?: SourceOperationPhase;
+  readonly failedReason?:
+    | "validation_failed"
+    | "untrusted_source_ancestry"
+    | "source_management_failed";
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}
+
 export interface InstallerManagedSourceFixture {
   readonly addRequests: readonly SourceAddRequestFixture[];
   readonly operationReads: number;
-  publish(operation: SourceOperationFixture): void;
+  publish(operation: SourceOperationUpdate): void;
   disconnectNextOperationRead(): void;
 }
 
@@ -57,33 +69,33 @@ export const baseSources: readonly SourceFixture[] = [
   source("archive", "Archive", true, false, false),
 ];
 
-export function sourceOperation(
-  overrides: Partial<SourceOperationFixture> = {},
-): SourceOperationFixture {
+function sourceOperation(overrides: SourceOperationUpdate = {}): SourceOperationFixture {
+  const { failedReason, ...operationOverrides } = overrides;
+  const phase = operationOverrides.phase ?? "accepted";
+  const status = canonicalOperationStatus(phase, failedReason);
   return {
     operationId,
     sourceId: null,
     displayName: "Family media",
-    phase: "accepted",
-    reasonCode: "accepted",
-    detail: "The source-management operation was accepted.",
+    phase,
+    reasonCode: status.reasonCode,
+    detail: status.detail,
     createdAt: timestamp,
     updatedAt: timestamp,
-    ...overrides,
+    ...operationOverrides,
   };
 }
 
 export async function routeUnsupportedSourceManagement(
   page: Page,
-  detail = "Source management requires an Ubuntu installer-managed deployment.",
 ): Promise<void> {
   await page.route("**/api/source-management/status", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     json: {
       supported: false,
-      reasonCode: "unsupported_installation",
-      detail,
+      reasonCode: "unsupported_deployment",
+      detail: "Source management is unavailable on this installation.",
     },
   }));
 }
@@ -164,12 +176,43 @@ export async function routeInstallerManagedSourceManagement(
     addRequests,
     get operationReads() { return operationReads; },
     publish(operation) {
-      current = operation;
+      current = sourceOperation(operation);
     },
     disconnectNextOperationRead() {
       disconnectNext = true;
     },
   };
+}
+
+function canonicalOperationStatus(
+  phase: SourceOperationPhase,
+  failedReason: SourceOperationUpdate["failedReason"],
+): Pick<SourceOperationFixture, "reasonCode" | "detail"> {
+  switch (phase) {
+    case "accepted":
+      return { reasonCode: "accepted", detail: "Source change accepted." };
+    case "validating":
+      return { reasonCode: "in_progress", detail: "The source change is being validated." };
+    case "applying":
+      return { reasonCode: "in_progress", detail: "The source configuration is being applied." };
+    case "restarting":
+      return { reasonCode: "in_progress", detail: "ReachCommander is restarting." };
+    case "healthChecking":
+      return { reasonCode: "in_progress", detail: "ReachCommander is being checked." };
+    case "completed":
+      return { reasonCode: "completed", detail: "The source has been added." };
+    case "rolledBack":
+      return { reasonCode: "rolled_back", detail: "The source change was rolled back." };
+    case "failed": {
+      const reasonCode = failedReason ?? "source_management_failed";
+      return {
+        reasonCode,
+        detail: reasonCode === "untrusted_source_ancestry"
+          ? "The source folder's parent directories must be root-owned and not group- or world-writable."
+          : "The source-management operation could not be completed.",
+      };
+    }
+  }
 }
 
 function source(

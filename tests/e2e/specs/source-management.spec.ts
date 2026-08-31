@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 import {
   routeInstallerManagedSourceManagement,
   routeUnsupportedSourceManagement,
-  sourceOperation,
 } from "../support/source-management-fixture";
 
 test.use({ serviceWorkers: "block" });
@@ -15,7 +14,7 @@ test("unsupported deployments explain why Add source is disabled", async ({ page
   await expect(page.getByTestId("toolbar-add-source")).toBeDisabled();
   await expect(wrapper).toHaveAttribute(
     "title",
-    "Source management requires an Ubuntu installer-managed deployment.",
+    "Source management is unavailable on this installation.",
   );
 });
 
@@ -39,21 +38,17 @@ test("adds a read-only host source, reconnects, and refreshes both source select
 
   host.disconnectNextOperationRead();
   await expect(page.getByText(/Reconnecting to ReachCommander/)).toBeVisible({ timeout: 5_000 });
-  host.publish(sourceOperation({
+  host.publish({
     phase: "restarting",
-    reasonCode: "source_restarting",
-    detail: "ReachCommander is restarting with the staged source configuration.",
-  }));
+  });
   await expect(page.getByRole("heading", { name: "Restarting ReachCommander" })).toBeVisible({
     timeout: 5_000,
   });
 
-  host.publish(sourceOperation({
+  host.publish({
     sourceId: "family-media",
     phase: "completed",
-    reasonCode: "source_added",
-    detail: "The host source was added successfully.",
-  }));
+  });
   await expect(page.getByText("Family media is now available in both panes.")).toBeVisible({
     timeout: 5_000,
   });
@@ -89,13 +84,11 @@ test("requires explicit read-write confirmation and sends only the narrow reques
     "hostPath",
   ]);
 
-  host.publish(sourceOperation({
+  host.publish({
     displayName: "Editing workspace",
     sourceId: "editing-workspace",
     phase: "completed",
-    reasonCode: "source_added",
-    detail: "The host source was added successfully.",
-  }));
+  });
   await expect(page.getByTestId("source-editing-workspace")).toHaveCount(2, { timeout: 5_000 });
   await expect(
     page.getByTestId("source-editing-workspace").first().locator('[data-access="writable"]'),
@@ -126,12 +119,10 @@ test("reports rollback without activating the requested mapping", async ({ page 
   await dialog.getByLabel("Absolute Ubuntu host folder").fill("/srv/media/candidate");
   await dialog.getByTestId("add-source-submit").click();
 
-  host.publish(sourceOperation({
+  host.publish({
     displayName: "Unsafe candidate",
     phase: "rolledBack",
-    reasonCode: "health_check_failed",
-    detail: "The previous source configuration was restored.",
-  }));
+  });
   await expect(page.getByRole("heading", { name: "Previous configuration restored" })).toBeVisible({
     timeout: 5_000,
   });
@@ -150,12 +141,10 @@ test("shows bounded failed-operation diagnostics without leaking host paths", as
   await dialog.getByLabel("Absolute Ubuntu host folder").fill("/mnt/archive/cold");
   await dialog.getByTestId("add-source-submit").click();
 
-  host.publish(sourceOperation({
+  host.publish({
     displayName: "Cold storage",
     phase: "failed",
-    reasonCode: "source_management_failed",
-    detail: "The source-management operation could not be completed.",
-  }));
+  });
   await expect(page.getByRole("heading", { name: "Source could not be added" })).toBeVisible({
     timeout: 5_000,
   });

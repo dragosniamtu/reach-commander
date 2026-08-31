@@ -14,6 +14,7 @@ Implementation and local verification are complete on `master`. Nothing is pushe
 - Added rollback coverage proving that the previous configuration message is visible and no requested mapping appears.
 - Added bounded failed-operation guidance coverage proving `sudo reachcommander doctor` and support-diagnostics guidance without `/opt`, `/srv`, Docker, Compose, or digest leakage.
 - Replaced the invalid timeout fixture with the production-valid v5 `source_management_failed` terminal reason. Real failed operations now add fixed `sudo reachcommander doctor` and support-diagnostics guidance in the dialog; reconnect-timeout behavior remains independently covered by store tests.
+- Hardened the Playwright host fixture so capability and operation reason/detail pairs are derived from the exact production v5 contract. Scenario code can no longer inject arbitrary accepted, restart, completion, rollback, or failed wire values that the real Python/.NET parsers would reject.
 - Added the exact sanitized `untrusted_source_ancestry` reason from the root-owned helper's exit status `7` through the management CLI, v5 protocol, host runtime, strict .NET gateway, API problem mapping, and UI. Its only public detail is: `The source folder's parent directories must be root-owned and not group- or world-writable.` No path, UID, GID, mode, or command output is echoed.
 - Kept the ancestry security invariant intact: every ancestor is root-owned and not group- or world-writable, while the source leaf may be runtime-owned and writable.
 - Added package coverage proving the published Compose templates mount only `/run/reachcommander-updater` and never `/var/run/docker.sock`.
@@ -34,6 +35,7 @@ Implementation and local verification are complete on `master`. Nothing is pushe
 - The package socket-boundary assertion passed immediately, recording an existing deployment invariant as a publication regression gate rather than claiming a behavior fix.
 - Final-review tests then failed because unsafe source ancestry still collapsed to generic validation, v5 and .NET rejected the dedicated reason, the API lacked a mapped problem response, the dialog lacked static host diagnostic guidance, and the operator docs did not explain the trusted-parent prerequisite.
 - The first focused failed-operation E2E check used the previously built Angular bundle and therefore lacked the new static guidance. After the production build, only that failed scenario was rerun and passed; the unchanged focused scenarios were not rerun at that checkpoint. The later full browser matrix passed from a fresh build.
+- Final review found that several older Playwright phase fixtures still bypassed the strict wire contract with noncanonical reason/detail pairs. The fixture now derives those fields from a typed phase mapping, unsupported capability uses the exact production pair, and the complete focused source-management browser suite passed again.
 
 ### GREEN
 

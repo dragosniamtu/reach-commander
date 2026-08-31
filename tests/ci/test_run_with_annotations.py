@@ -42,14 +42,14 @@ class RunWithAnnotationsTests(unittest.TestCase):
             output.getvalue(),
         )
 
-    def test_long_failure_annotation_keeps_the_diagnostic_tail(self) -> None:
+    def test_long_failure_annotation_keeps_the_diagnostic_head_and_tail(self) -> None:
         output = StringIO()
 
         exit_code = run_command(
             [
                 sys.executable,
                 "-c",
-                "import sys; print('A' * 4000 + 'TRACEBACK END'); sys.exit(1)",
+                "import sys; print('FIRST FAILURE' + 'A' * 4000 + 'TRACEBACK END'); sys.exit(1)",
             ],
             "Long failure",
             output,
@@ -57,8 +57,9 @@ class RunWithAnnotationsTests(unittest.TestCase):
 
         annotation = output.getvalue().splitlines()[-1]
         self.assertEqual(1, exit_code)
+        self.assertIn("FIRST FAILURE", annotation)
         self.assertIn("TRACEBACK END", annotation)
-        self.assertIn("::...", annotation)
+        self.assertIn("%0A...%0A", annotation)
 
 
 if __name__ == "__main__":

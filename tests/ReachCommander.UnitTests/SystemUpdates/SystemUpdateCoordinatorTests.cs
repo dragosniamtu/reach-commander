@@ -520,6 +520,17 @@ public sealed class SystemUpdateCoordinatorTests
     }
 
     [Fact]
+    public async Task Stop_after_dispose_is_idempotent_for_host_shutdown_races()
+    {
+        var coordinator = CreateCoordinator(new FakeUpdaterGateway(CurrentSnapshot));
+
+        coordinator.Dispose();
+        var exception = await Record.ExceptionAsync(() => coordinator.StopAsync(default));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public async Task Transient_discovery_failure_does_not_replace_applying_status()
     {
         var applying = CurrentSnapshot with

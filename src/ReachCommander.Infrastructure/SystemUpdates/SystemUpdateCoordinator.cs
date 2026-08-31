@@ -197,7 +197,20 @@ internal sealed class SystemUpdateCoordinator(
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        _monitorLifetime.Cancel();
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _monitorLifetime.Cancel();
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
 
         Task? monitor;

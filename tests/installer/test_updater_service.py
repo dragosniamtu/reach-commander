@@ -372,6 +372,8 @@ class SourceManagementRuntimeTests(unittest.TestCase):
             root = Path(directory)
             helper_journal = root / "state" / "source-operation.json"
             helper_journal.parent.mkdir(parents=True)
+            if os.name != "nt":
+                helper_journal.parent.chmod(0o700)
             helper_contents = b'{"helper":"recovery state"}\n'
             helper_journal.write_bytes(helper_contents)
             runner = RecordingSourceRunner()
@@ -654,6 +656,8 @@ class SourceManagementRuntimeTests(unittest.TestCase):
             root = Path(directory)
             helper_journal = root / "state" / "source-operation.json"
             helper_journal.parent.mkdir(parents=True)
+            if os.name != "nt":
+                helper_journal.parent.chmod(0o700)
             helper_value = {
                 "schemaVersion": 1,
                 "transactionId": str(uuid.uuid4()),

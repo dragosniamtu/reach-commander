@@ -34,6 +34,7 @@ RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadWritePaths=/opt/reachcommander /opt/.reachcommander.lock /run/reachcommander-updater
+ReadOnlyPaths=/opt/reachcommander/bin /opt/reachcommander/lib /opt/reachcommander/data
 
 [Install]
 WantedBy=multi-user.target

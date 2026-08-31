@@ -968,6 +968,7 @@ UNINSTALL_FILES=(
   'state/current-version'
   'state/previous-version'
   'state/source-operation.json'
+  'state/source-runtime-operation.json'
   'state/command.lock'
   'bin/render_config.py'
   'bin/source_management.py'
@@ -1027,6 +1028,7 @@ validate_uninstall_tree() {
       state/current-version|\
       state/previous-version|\
       state/source-operation.json|\
+      state/source-runtime-operation.json|\
       state/failed-image|\
       state/system-update.json|\
       state/command.lock|\

@@ -523,6 +523,10 @@ pass "reconfiguration preserves edge and exact-version channels"
 
 printf '{"schemaVersion":1,"phase":"current"}\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json"
 journal_before="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json")"
+printf '%s\n' '{"schemaVersion":1,"operation":{"createdAt":"2026-08-31T00:00:00Z","detail":"The source has been added.","displayName":"Archive","operationId":"12345678-1234-4234-8234-123456789abc","phase":"completed","reasonCode":"completed","sourceId":"archive","updatedAt":"2026-08-31T00:00:01Z"}}' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-runtime-operation.json"
+chmod 0600 -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-runtime-operation.json"
+source_runtime_before="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-runtime-operation.json")"
 PYTHONDONTWRITEBYTECODE=1 python3 - \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/update-traces" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib" <<'PY'
@@ -545,10 +549,14 @@ run_installer "$reconfigure_success_input" "$TEST_ROOT/reconfigure-journal-prese
 assert_equal "0" "$last_status" "journal preservation reconfiguration status"
 assert_equal "$journal_before" "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/system-update.json")" "updater journal preservation"
 assert_equal \
+  "$source_runtime_before" \
+  "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-runtime-operation.json")" \
+  "source runtime journal preservation"
+assert_equal \
   "$trace_before" \
   "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/update-traces/"*.jsonl)" \
   "updater trace preservation"
-pass "reconfiguration preserves the host updater journal and traces"
+pass "reconfiguration preserves host updater and source runtime journals and traces"
 
 deployment_before="$(active_deployment_fingerprint)"
 command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"

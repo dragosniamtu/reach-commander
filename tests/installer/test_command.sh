@@ -1278,6 +1278,9 @@ rm -rf -- "$REACHCOMMANDER_TEST_BACKUP_ROOT"
 export FAKE_DOCKER_COMPOSE_EXIT=0
 pass "Compose-down failure preserves deployment after external backup"
 
+printf '%s\n' '{"schemaVersion":1,"operation":{"createdAt":"2026-08-31T00:00:00Z","detail":"The source has been added.","displayName":"Archive","operationId":"12345678-1234-4234-8234-123456789abc","phase":"completed","reasonCode":"completed","sourceId":"archive","updatedAt":"2026-08-31T00:00:01Z"}}' \
+  >"$INSTALL_ROOT/state/source-runtime-operation.json"
+chmod 0600 -- "$INSTALL_ROOT/state/source-runtime-operation.json"
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'backup\nuninstall ReachCommander' uninstall
 if ((last_status != 0)); then
@@ -1293,6 +1296,8 @@ backup_destination="$(find "$REACHCOMMANDER_TEST_BACKUP_ROOT" -mindepth 1 -maxde
 [[ "$(basename -- "$backup_destination")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || fail "backup timestamp is not UTC"
 [[ -f "$backup_destination/deployment/config/sources.json" ]] || fail "backup source configuration missing"
 [[ -f "$backup_destination/deployment/state/source-mounts.json" ]] || fail "backup source metadata missing"
+[[ -f "$backup_destination/deployment/state/source-runtime-operation.json" ]] ||
+  fail "backup source runtime operation missing"
 [[ -f "$backup_destination/deployment/state/update-traces/12345678-1234-4234-8234-123456789abc.jsonl" ]] ||
   fail "backup update trace missing"
 [[ -f "$backup_destination/reachcommander-command" ]] || fail "backup management command missing"

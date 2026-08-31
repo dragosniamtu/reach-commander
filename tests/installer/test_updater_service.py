@@ -20,7 +20,10 @@ import deploy.updater_service as updater_service
 from deploy.updater_protocol import (
     DIAGNOSTIC_PROTOCOL_VERSION,
     MAX_MESSAGE_BYTES,
+    SOURCE_MANAGEMENT_PROTOCOL_VERSION,
     TRUSTED_IMAGE_REPOSITORY,
+    SourceManagementCapability,
+    SourceManagementRequest,
     ResolvedImage,
     UpdateSnapshot,
     UpdaterRequest,
@@ -214,6 +217,509 @@ class SequenceRunner:
         return self.results.pop(0)
 
 
+def source_request(
+    action: str,
+    *,
+    request_id: str | None = None,
+    operation_id: str | None = None,
+) -> SourceManagementRequest:
+    value: dict[str, object] = {
+        "protocolVersion": SOURCE_MANAGEMENT_PROTOCOL_VERSION,
+        "requestId": request_id or str(uuid.uuid4()),
+        "action": action,
+    }
+    if action == "addSource":
+        value.update(
+            {
+                "displayName": "Archive",
+                "hostPath": "/srv/reachcommander/archive",
+                "access": "readOnly",
+            }
+        )
+    if action == "getOperation":
+        value["operationId"] = operation_id or str(uuid.uuid4())
+    return SourceManagementRequest.parse(json.dumps(value).encode())
+
+
+class StaticSourceDiscovery:
+    def __init__(self, capability: SourceManagementCapability) -> None:
+        self.capability = capability
+
+    def check(self) -> SourceManagementCapability:
+        return self.capability
+
+
+class RecordingSourceRunner:
+    def __init__(
+        self,
+        *,
+        returncode: int = 0,
+        output: bytes = b'{"sourceId":"archive","displayName":"Archive"}\n',
+    ) -> None:
+        self.result = (returncode, output)
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.block = False
+        self.calls: list[dict[str, object]] = []
+
+    def run(self, argv, *, stdin, env, timeout, shell):  # type: ignore[no-untyped-def]
+        self.calls.append(
+            {
+                "argv": tuple(argv),
+                "stdin": bytes(stdin),
+                "env": dict(env),
+                "timeout": timeout,
+                "shell": shell,
+            }
+        )
+        self.started.set()
+        if self.block:
+            self.release.wait(timeout=2)
+        return updater_service.SourceCommandResult(*self.result)
+
+
+class TimeoutSourceRunner(RecordingSourceRunner):
+    def run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        super().run(*args, **kwargs)
+        raise updater_service.SourceCommandTimedOut(
+            "/srv/private must never appear in a public response"
+        )
+
+
+class SourceManagementRuntimeTests(unittest.TestCase):
+    def supported_discovery(self) -> StaticSourceDiscovery:
+        return StaticSourceDiscovery(
+            SourceManagementCapability(
+                True,
+                "supported",
+                "Source management is available.",
+            )
+        )
+
+    def runtime(
+        self,
+        root: Path,
+        *,
+        runner: object | None = None,
+        gate: object | None = None,
+    ):
+        return updater_service.SourceManagementRuntime(
+            self.supported_discovery(),
+            updater_service.AtomicSourceOperationStore(
+                root / "state" / "source-runtime-operation.json"
+            ),
+            runner=runner or RecordingSourceRunner(),
+            gate=gate,
+            clock=lambda: NOW,
+        )
+
+    def test_support_discovery_distinguishes_platform_deployment_and_old_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            command = root / "usr" / "local" / "bin" / "reachcommander"
+
+            unsupported_platform = updater_service.SourceManagementDiscovery(
+                root,
+                command_path=command,
+                platform="win32",
+            ).check()
+            unsupported_deployment = updater_service.SourceManagementDiscovery(
+                root,
+                command_path=command,
+                platform="linux",
+            ).check()
+
+            for relative in (
+                ".env",
+                "compose.yaml",
+                "config/sources.json",
+                "state/source-mounts.json",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}\n", encoding="utf-8")
+            command.parent.mkdir(parents=True, exist_ok=True)
+            command.write_text("#!/bin/sh\n", encoding="utf-8")
+            command.chmod(0o755)
+
+            old_helper = updater_service.SourceManagementDiscovery(
+                root,
+                command_path=command,
+                platform="linux",
+            ).check()
+
+            for relative in ("bin/source_management.py", "lib/updater_protocol.py"):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "SOURCE_MANAGEMENT_PROTOCOL_VERSION = 5\n",
+                    encoding="utf-8",
+                )
+                path.chmod(0o755 if relative.startswith("bin/") else 0o644)
+            supported = updater_service.SourceManagementDiscovery(
+                root,
+                command_path=command,
+                platform="linux",
+            ).check()
+
+        self.assertEqual("unsupported_platform", unsupported_platform.reason_code)
+        self.assertEqual("unsupported_deployment", unsupported_deployment.reason_code)
+        self.assertEqual("installer_upgrade_required", old_helper.reason_code)
+        self.assertEqual("supported", supported.reason_code)
+
+    def test_add_is_accepted_quickly_uses_only_fixed_command_and_persists_for_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper_journal = root / "state" / "source-operation.json"
+            helper_journal.parent.mkdir(parents=True)
+            helper_contents = b'{"helper":"recovery state"}\n'
+            helper_journal.write_bytes(helper_contents)
+            runner = RecordingSourceRunner()
+            runner.block = True
+            runtime = self.runtime(root, runner=runner)
+            request_value = source_request("addSource")
+
+            accepted = runtime.handle(request_value)
+            self.assertEqual("accepted", accepted["payload"]["phase"])
+            self.assertTrue(runner.started.wait(timeout=1))
+            call = runner.calls[0]
+            self.assertEqual(updater_service.FIXED_SOURCE_COMMAND, call["argv"])
+            self.assertEqual(updater_service.SANITIZED_ENVIRONMENT, call["env"])
+            self.assertEqual(updater_service.SOURCE_COMMAND_TIMEOUT_SECONDS, call["timeout"])
+            self.assertFalse(call["shell"])
+            submitted = json.loads(call["stdin"])
+            self.assertEqual(
+                {
+                    "protocolVersion",
+                    "requestId",
+                    "action",
+                    "displayName",
+                    "hostPath",
+                    "access",
+                },
+                set(submitted),
+            )
+            self.assertNotIn("command", submitted)
+            self.assertNotIn("image", submitted)
+            self.assertNotIn("environment", submitted)
+
+            operation_id = str(accepted["payload"]["operationId"])
+            runner.release.set()
+            runtime.wait_for_worker()
+            recovered = self.runtime(root).handle(
+                source_request("getOperation", operation_id=operation_id)
+            )
+
+            self.assertEqual("completed", recovered["payload"]["phase"])
+            self.assertEqual("archive", recovered["payload"]["sourceId"])
+            self.assertEqual(helper_contents, helper_journal.read_bytes())
+            self.assertTrue((root / "state" / "source-runtime-operation.json").is_file())
+
+    def test_one_source_operation_is_serialized_and_update_source_gate_works_both_ways(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = updater_service.DeploymentMutationGate()
+            source_runner = RecordingSourceRunner()
+            source_runner.block = True
+            source_runtime = self.runtime(root, runner=source_runner, gate=gate)
+            updater_runner = RecordingRunner()
+            update_runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                AtomicUpdateJournal(root / "state" / "system-update.json"),
+                runner=updater_runner,
+                clock=lambda: NOW,
+                mutation_gate=gate,
+            )
+
+            source_runtime.handle(source_request("addSource"))
+            self.assertTrue(source_runner.started.wait(timeout=1))
+            duplicate = source_runtime.handle(source_request("addSource"))
+            blocked_update = update_runtime.handle(request("applyConfiguredChannel"))
+
+            self.assertEqual("busy", duplicate["payload"]["code"])
+            self.assertEqual("available", blocked_update["phase"])
+            self.assertEqual([], updater_runner.argv)
+            source_runner.release.set()
+            source_runtime.wait_for_worker()
+
+            blocking_update = BlockingRunner()
+            update_runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                AtomicUpdateJournal(root / "state" / "system-update.json"),
+                runner=blocking_update,
+                clock=lambda: NOW,
+                mutation_gate=gate,
+            )
+            update_runtime.handle(request("applyConfiguredChannel"))
+            self.assertTrue(blocking_update.started.wait(timeout=1))
+            blocked_source = source_runtime.handle(source_request("addSource"))
+            self.assertEqual("busy", blocked_source["payload"]["code"])
+            blocking_update.release.set()
+            update_runtime.wait_for_worker()
+
+    def test_timeout_exit_codes_invalid_output_and_private_diagnostics_are_bounded(self) -> None:
+        cases = (
+            (TimeoutSourceRunner(), "failed", "source_management_failed"),
+            (RecordingSourceRunner(returncode=3), "failed", "validation_failed"),
+            (RecordingSourceRunner(returncode=5), "rolledBack", "rolled_back"),
+            (
+                RecordingSourceRunner(output=b'{"sourceId":"bad","displayName":"Archive","hostPath":"/srv/private"}'),
+                "failed",
+                "source_management_failed",
+            ),
+        )
+        for runner, phase, reason in cases:
+            with self.subTest(phase=phase, reason=reason), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                runtime = self.runtime(root, runner=runner)
+                accepted = runtime.handle(source_request("addSource"))
+                runtime.wait_for_worker()
+                response = runtime.handle(
+                    source_request(
+                        "getOperation",
+                        operation_id=str(accepted["payload"]["operationId"]),
+                    )
+                )
+                encoded = json.dumps(response)
+
+                self.assertEqual(phase, response["payload"]["phase"])
+                self.assertEqual(reason, response["payload"]["reasonCode"])
+                self.assertNotIn("/srv/private", encoded)
+                self.assertLessEqual(len(encoded.encode()), 4_096)
+
+    def test_success_output_must_correlate_to_the_requested_display_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = self.runtime(
+                root,
+                runner=RecordingSourceRunner(
+                    output=b'{"sourceId":"archive","displayName":"Different"}\n'
+                ),
+            )
+            accepted = runtime.handle(source_request("addSource"))
+            runtime.wait_for_worker()
+
+            result = runtime.handle(
+                source_request(
+                    "getOperation",
+                    operation_id=str(accepted["payload"]["operationId"]),
+                )
+            )
+
+        self.assertEqual("failed", result["payload"]["phase"])
+        self.assertEqual("source_management_failed", result["payload"]["reasonCode"])
+
+    def test_service_restart_converts_a_nonterminal_runtime_record_to_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = updater_service.AtomicSourceOperationStore(
+                root / "state" / "source-runtime-operation.json"
+            )
+            operation_id = str(uuid.uuid4())
+            store.write(
+                updater_service.SourceManagementOperation(
+                    operation_id=operation_id,
+                    source_id=None,
+                    display_name=None,
+                    phase="accepted",
+                    reason_code="accepted",
+                    detail="ignored",
+                    created_at="2026-08-25T11:59:59Z",
+                    updated_at="2026-08-25T11:59:59Z",
+                )
+            )
+            restarted = self.runtime(root)
+
+            response = restarted.handle(
+                source_request("getOperation", operation_id=operation_id)
+            )
+            persisted = store.read_optional()
+
+        self.assertEqual("failed", response["payload"]["phase"])
+        self.assertEqual("source_management_failed", response["payload"]["reasonCode"])
+        self.assertIsNotNone(persisted)
+        self.assertEqual("failed", persisted.phase)
+
+    def test_service_restart_reconciles_nonterminal_state_before_any_new_add(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = updater_service.AtomicSourceOperationStore(
+                root / "state" / "source-runtime-operation.json"
+            )
+            operation_id = str(uuid.uuid4())
+            store.write(
+                updater_service.SourceManagementOperation(
+                    operation_id=operation_id,
+                    source_id=None,
+                    display_name=None,
+                    phase="accepted",
+                    reason_code="accepted",
+                    detail="ignored",
+                    created_at="2026-08-25T11:59:59Z",
+                    updated_at="2026-08-25T11:59:59Z",
+                )
+            )
+
+            self.runtime(root)
+            reconciled = store.read_optional()
+
+        self.assertIsNotNone(reconciled)
+        self.assertEqual(operation_id, reconciled.operation_id)
+        self.assertEqual("failed", reconciled.phase)
+        self.assertEqual("source_management_failed", reconciled.reason_code)
+
+    def test_worker_start_failure_is_terminal_and_releases_the_mutation_gate(self) -> None:
+        class StartFailingThread:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self) -> None:
+                raise RuntimeError("private thread failure")
+
+            def is_alive(self) -> bool:
+                return False
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = updater_service.DeploymentMutationGate()
+            runtime = self.runtime(root, gate=gate)
+            with mock.patch(
+                "deploy.updater_service.threading.Thread",
+                StartFailingThread,
+            ):
+                response = runtime.handle(source_request("addSource"))
+            persisted = updater_service.AtomicSourceOperationStore(
+                root / "state" / "source-runtime-operation.json"
+            ).read_optional()
+
+            self.assertEqual("source_management_failed", response["payload"]["code"])
+            self.assertIsNotNone(persisted)
+            self.assertEqual("failed", persisted.phase)
+            self.assertTrue(gate.try_acquire("probe"))
+            gate.release("probe")
+
+    def test_reads_helper_progress_without_rewriting_its_recovery_journal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper_journal = root / "state" / "source-operation.json"
+            helper_journal.parent.mkdir(parents=True)
+            helper_value = {
+                "schemaVersion": 1,
+                "transactionId": str(uuid.uuid4()),
+                "sourceId": "archive",
+                "displayName": "Archive",
+                "phase": "staging",
+                "reasonCode": "in_progress",
+                "updatedAt": "2026-08-25T12:00:00Z",
+            }
+            helper_contents = (json.dumps(helper_value) + "\n").encode()
+            helper_journal.write_bytes(helper_contents)
+            if os.name != "nt":
+                helper_journal.chmod(0o600)
+            runner = RecordingSourceRunner()
+            runner.block = True
+            runtime = updater_service.SourceManagementRuntime(
+                self.supported_discovery(),
+                updater_service.AtomicSourceOperationStore(
+                    root / "state" / "source-runtime-operation.json"
+                ),
+                runner=runner,
+                helper_status_reader=updater_service.SourceTransactionStatusReader(
+                    helper_journal
+                ),
+                clock=lambda: NOW,
+            )
+
+            accepted = runtime.handle(source_request("addSource"))
+            self.assertTrue(runner.started.wait(timeout=1))
+            progress = runtime.handle(
+                source_request(
+                    "getOperation",
+                    operation_id=str(accepted["payload"]["operationId"]),
+                )
+            )
+            runner.release.set()
+            runtime.wait_for_worker()
+
+            self.assertEqual("applying", progress["payload"]["phase"])
+            self.assertEqual("archive", progress["payload"]["sourceId"])
+            self.assertEqual(helper_contents, helper_journal.read_bytes())
+
+
+class AtomicSourceOperationStoreTests(unittest.TestCase):
+    @staticmethod
+    def operation() -> object:
+        return updater_service.SourceManagementOperation(
+            operation_id=str(uuid.uuid4()),
+            source_id="archive",
+            display_name="Archive",
+            phase="completed",
+            reason_code="completed",
+            detail="ignored",
+            created_at="2026-08-25T12:00:00Z",
+            updated_at="2026-08-25T12:00:01Z",
+        )
+
+    def test_store_is_exact_bounded_atomic_private_and_leaves_no_temporary_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "state" / "source-runtime-operation.json"
+            store = updater_service.AtomicSourceOperationStore(path)
+
+            store.write(self.operation())
+            recovered = store.read_optional()
+
+            self.assertIsNotNone(recovered)
+            self.assertEqual([path.name], [item.name for item in path.parent.iterdir()])
+            self.assertLessEqual(len(path.read_bytes()), 4_096)
+            if os.name != "nt":
+                self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+                self.assertEqual(0o700, stat.S_IMODE(path.parent.stat().st_mode))
+
+    def test_store_rejects_duplicates_unknown_fields_nonregular_and_oversize(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "state" / "source-runtime-operation.json"
+            path.parent.mkdir(mode=0o700)
+            store = updater_service.AtomicSourceOperationStore(path)
+            operation = self.operation()
+            store.write(operation)
+            valid = path.read_text(encoding="utf-8")
+            invalid_values = (
+                valid.replace('"schemaVersion":1', '"schemaVersion":1,"schemaVersion":1'),
+                valid.replace('"schemaVersion":1', '"schemaVersion":1,"hostPath":"/srv/private"'),
+                "x" * 4_097,
+            )
+            for invalid in invalid_values:
+                with self.subTest(invalid=invalid[:32]):
+                    path.write_text(invalid, encoding="utf-8")
+                    with self.assertRaises(updater_service.JournalError):
+                        store.read_optional()
+            path.unlink()
+            path.mkdir()
+            with self.assertRaises(updater_service.JournalError):
+                store.read_optional()
+
+    def test_store_rejects_symlink_and_unsafe_mode(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX protected-file modes and symlinks are required")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "state" / "source-runtime-operation.json"
+            path.parent.mkdir(mode=0o700)
+            outside = root / "outside"
+            outside.write_text("{}", encoding="utf-8")
+            path.symlink_to(outside)
+            store = updater_service.AtomicSourceOperationStore(path)
+            with self.assertRaises(updater_service.JournalError):
+                store.read_optional()
+            path.unlink()
+            store.write(self.operation())
+            path.chmod(0o644)
+            with self.assertRaises(updater_service.JournalError):
+                store.read_optional()
+
+
 class UpdaterRuntimeTests(unittest.TestCase):
     def runtime(
         self,
@@ -250,6 +756,28 @@ class UpdaterRuntimeTests(unittest.TestCase):
             self.assertEqual([300], runner.timeouts)
             self.assertEqual([False], runner.shell_values)
             self.assertNotIn("stable", runner.argv[0])
+
+    def test_update_releases_shared_gate_when_journal_begin_fails(self) -> None:
+        class BeginFailingJournal(AtomicUpdateJournal):
+            def begin(self, snapshot, now):  # type: ignore[no-untyped-def]
+                raise JournalError("private journal failure")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = updater_service.DeploymentMutationGate()
+            runtime = UpdaterRuntime(
+                StaticDiscovery(snapshot()),
+                BeginFailingJournal(root / "system-update.json"),
+                runner=RecordingRunner(),
+                clock=lambda: NOW,
+                mutation_gate=gate,
+            )
+
+            with self.assertRaises(JournalError):
+                runtime.handle(request("applyConfiguredChannel"))
+
+            self.assertTrue(gate.try_acquire("probe"))
+            gate.release("probe")
 
     def test_protocol_responses_preserve_v1_v2_shapes_and_v3_adds_trace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -851,11 +1379,27 @@ class UpdaterSocketServerTests(unittest.TestCase):
             runner=RecordingRunner(),
             clock=lambda: NOW,
         )
+        self.source_runner = RecordingSourceRunner()
+        self.source_runtime = updater_service.SourceManagementRuntime(
+            StaticSourceDiscovery(
+                SourceManagementCapability(
+                    True,
+                    "supported",
+                    "Source management is available.",
+                )
+            ),
+            updater_service.AtomicSourceOperationStore(
+                self.root / "state" / "source-runtime-operation.json"
+            ),
+            runner=self.source_runner,
+            clock=lambda: NOW,
+        )
         self.server = UpdaterSocketServer(
             self.runtime,
             self.root / "run" / "updater.sock",
             runtime_gid=os.getgid() if hasattr(os, "getgid") else None,
             request_timeout=0.1,
+            source_runtime=self.source_runtime,
         )
         self.server.start()
 
@@ -891,6 +1435,60 @@ class UpdaterSocketServerTests(unittest.TestCase):
 
         self.assertEqual(1, response["protocolVersion"])
         self.assertEqual("current", response["phase"])
+
+    def test_routes_only_strict_bounded_v5_messages_to_source_management(self) -> None:
+        request_id = str(uuid.uuid4())
+        status = self.exchange(
+            json.dumps(
+                {
+                    "protocolVersion": 5,
+                    "requestId": request_id,
+                    "action": "status",
+                }
+            ).encode()
+            + b"\n"
+        )
+        duplicate = self.exchange(
+            (
+                '{"protocolVersion":5,"requestId":"'
+                + request_id
+                + '","action":"status","action":"status"}\n'
+            ).encode()
+        )
+        oversized = self.exchange(
+            json.dumps(
+                {
+                    "protocolVersion": 5,
+                    "requestId": str(uuid.uuid4()),
+                    "action": "addSource",
+                    "displayName": "Archive",
+                    "hostPath": "/srv/" + "x" * 4_100,
+                    "access": "readOnly",
+                }
+            ).encode()
+            + b"\n"
+        )
+        browser_command = self.exchange(
+            json.dumps(
+                {
+                    "protocolVersion": 5,
+                    "requestId": str(uuid.uuid4()),
+                    "action": "addSource",
+                    "displayName": "Archive",
+                    "hostPath": "/srv/archive",
+                    "access": "readOnly",
+                    "command": "id",
+                }
+            ).encode()
+            + b"\n"
+        )
+
+        self.assertEqual(5, status["protocolVersion"])
+        self.assertEqual("supported", status["payload"]["reasonCode"])
+        self.assertEqual("invalid_request", duplicate["payload"]["code"])
+        self.assertEqual("request_too_large", oversized["payload"]["code"])
+        self.assertEqual("invalid_request", browser_command["payload"]["code"])
+        self.assertEqual([], self.source_runner.calls)
 
     def test_rejects_multiple_oversized_and_timed_out_messages(self) -> None:
         raw = json.dumps(
@@ -938,6 +1536,67 @@ def _process_is_running(process_id: int) -> bool:
 
 
 class ServiceProcessContractTests(unittest.TestCase):
+    def test_source_protocol_routing_fails_closed_on_duplicate_version_fields(self) -> None:
+        request_id = str(uuid.uuid4())
+        duplicate = (
+            '{"protocolVersion":5,"protocolVersion":4,"requestId":"'
+            + request_id
+            + '","action":"status"}'
+        ).encode()
+
+        self.assertTrue(updater_service._source_protocol_requested(duplicate))
+        with self.assertRaisesRegex(updater_service.ProtocolError, "duplicate"):
+            SourceManagementRequest.parse(duplicate)
+
+    def test_source_runner_accepts_only_fixed_bounded_stdin_without_a_shell(self) -> None:
+        import sys
+
+        script = (
+            "import sys;"
+            "data=sys.stdin.buffer.read();"
+            "sys.stdout.buffer.write(b'{\"sourceId\":\"archive\",\"displayName\":\"Archive\"}\\n')"
+        )
+        command = (sys.executable, "-c", script)
+        runner = updater_service.SourceManagementCommandRunner()
+        with mock.patch("deploy.updater_service.FIXED_SOURCE_COMMAND", command):
+            result = runner.run(
+                command,
+                stdin=b'{"bounded":true}\n',
+                env=SANITIZED_ENVIRONMENT,
+                timeout=5,
+                shell=False,
+            )
+            with self.assertRaisesRegex(ValueError, "fixed"):
+                runner.run(
+                    ("/bin/sh", "-c", "id"),
+                    stdin=b"{}\n",
+                    env=SANITIZED_ENVIRONMENT,
+                    timeout=5,
+                    shell=False,
+                )
+            with self.assertRaisesRegex(ValueError, "input"):
+                runner.run(
+                    command,
+                    stdin=b"x" * 4_097,
+                    env=SANITIZED_ENVIRONMENT,
+                    timeout=5,
+                    shell=False,
+                )
+            with self.assertRaisesRegex(ValueError, "fixed"):
+                runner.run(
+                    command,
+                    stdin=b"{}\n",
+                    env=SANITIZED_ENVIRONMENT,
+                    timeout=5,
+                    shell=True,
+                )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(
+            b'{"sourceId":"archive","displayName":"Archive"}\n',
+            result.output,
+        )
+
     @unittest.skipIf(os.name == "nt", "Linux process groups are required")
     def test_timeout_kills_descendant_and_never_waits_forever_for_output_pipe(self) -> None:
         import sys
@@ -1309,6 +1968,15 @@ class ServiceProcessContractTests(unittest.TestCase):
         self.assertIn("ProtectSystem=strict", unit)
         self.assertIn("NoNewPrivileges=yes", unit)
         self.assertIn("Restart=on-failure", unit)
+        self.assertIn(
+            "ReadWritePaths=/opt/reachcommander /opt/.reachcommander.lock /run/reachcommander-updater",
+            unit,
+        )
+        self.assertIn(
+            "ReadOnlyPaths=/opt/reachcommander/bin /opt/reachcommander/lib /opt/reachcommander/data",
+            unit,
+        )
+        self.assertNotIn("/var/run/docker.sock", unit)
         self.assertNotIn("/bin/sh", unit)
         self.assertNotIn("$", unit)
 

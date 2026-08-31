@@ -646,6 +646,7 @@ case "$(uname -s)" in
     [[ "$last_output" == *'"sourceId":"new-source"'* ]] || fail "source add result ID missing"
     [[ "$last_output" != *"$NEW_SOURCE_PATH"* ]] || fail "source add result exposed its host path"
     grep -q '"id": "new-source"' "$INSTALL_ROOT/config/sources.json" || fail "new source catalog entry missing"
+    rm -f -- "$INSTALL_ROOT/state/source-operation.json"
     pass "source add publishes one validated source without exposing its host path"
     ;;
 esac

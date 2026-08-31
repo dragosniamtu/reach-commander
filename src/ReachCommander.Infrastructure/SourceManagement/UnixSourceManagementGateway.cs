@@ -133,7 +133,7 @@ internal sealed class UnixSourceManagementGateway(
         }
         catch (SourceManagementProtocolVersionException)
         {
-            throw new SourceManagementProtocolIncompatibleException();
+            throw new SourceManagementMutationOutcomeUnknownException();
         }
     }
 

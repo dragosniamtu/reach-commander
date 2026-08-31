@@ -153,6 +153,18 @@ public sealed class SourceManagementGatewayTests
     }
 
     [Fact]
+    public async Task Add_protocol_version_mismatch_is_an_ambiguous_outcome()
+    {
+        var response = OperationResponse("addSource", "accepted")
+            .Replace("\"protocolVersion\":5", "\"protocolVersion\":3", StringComparison.Ordinal);
+
+        await Assert.ThrowsAsync<SourceManagementMutationOutcomeUnknownException>(() =>
+            Gateway(response).AddAsync(
+                new SourceAddRequest("Archive", "/srv/archive", SourceAccess.ReadOnly),
+                default));
+    }
+
+    [Fact]
     public async Task Oversized_response_is_rejected_without_exposing_content()
     {
         var privateContent = "/opt/private/" + new string('x', 5000);

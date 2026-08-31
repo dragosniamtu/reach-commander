@@ -112,6 +112,15 @@ assert_equal "v1.2.3" "$(cat -- "$PACKAGE_ROOT/VERSION")" "packaged version"
 grep -Eq 'rc_require_commands .*setsid' "$PACKAGE_ROOT/install.sh" ||
   fail "packaged installer does not require process-session support"
 
+grep -Fq '/run/reachcommander-updater' "$PACKAGE_ROOT/compose.updater.yaml" ||
+  fail "packaged source/update helper socket mount is missing"
+if grep -Fq '/var/run/docker.sock' \
+  "$PACKAGE_ROOT/compose.release.yaml" \
+  "$PACKAGE_ROOT/compose.updater.yaml"; then
+  fail "packaged Compose templates must not mount the Docker socket"
+fi
+pass "package exposes only the restricted helper socket to the application"
+
 archive_permissions() {
   local archive_path="$1"
   tar -tvzf "$FIRST_OUTPUT/reachcommander-installer.tar.gz" |

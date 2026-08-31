@@ -297,3 +297,37 @@ test('operator docs explain bounded update traces and container-only restart beh
   }
   assert.match(content, /checksum-verified installer[\s\S]*upgrades[\s\S]*protocol-v3 helper/i);
 });
+
+test('operator docs define installer-managed Add source behavior and recovery', async () => {
+  const paths = [
+    'README.md',
+    'docs/INSTALL.md',
+    'docs/deployment/ubuntu.md',
+    'deploy/README.md',
+  ];
+  const content = (await Promise.all(paths.map(readRequired))).join('\n');
+  for (const required of [
+    'Add source',
+    'absolute Ubuntu host folder',
+    'specific child directory',
+    'runtime UID/GID',
+    'read-only by default',
+    'read/write confirmation',
+    'restarts only the ReachCommander application container',
+    'reconnects automatically',
+    'sudo reachcommander source add',
+    'sudo reachcommander doctor',
+    'support diagnostics',
+    'rerun the latest checksum-verified installer once',
+    'clean installations include',
+    '/run/reachcommander-updater',
+    '/var/run/docker.sock',
+  ]) {
+    assert.ok(
+      content.toLowerCase().includes(required.toLowerCase()),
+      `source-management docs are missing: ${required}`,
+    );
+  }
+  assert.match(content, /existing(?:,| older)? installations[\s\S]*image-only update[\s\S]*root-owned helper/i);
+  assert.match(content, /read\/write[\s\S]*(?:change|delete)[\s\S]*host folder/i);
+});

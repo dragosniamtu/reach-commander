@@ -49,7 +49,7 @@ test('installer verification runs inside acceptance before publication', async (
   for (const command of [
     'python3 -m unittest tests/installer/test_lan_address.py -v',
     'python3 -m unittest tests/installer/test_render_config.py -v',
-    'python3 -m unittest tests/installer/test_support_bundle.py tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py tests/installer/test_updater_trace.py -v',
+    'python3 -m unittest tests/installer/test_source_management.py tests/installer/test_support_bundle.py tests/installer/test_updater_protocol.py tests/installer/test_updater_service.py tests/installer/test_updater_trace.py -v',
     'systemd-analyze verify deploy/systemd/reachcommander-updater.service',
     'bash tests/installer/test_common.sh',
     'bash tests/installer/test_install.sh',
@@ -418,7 +418,7 @@ test('container smoke preserves and annotates runtime diagnostics before cleanup
   );
 });
 
-test('Ubuntu updater contracts and hardened socket boundary gate publication', async () => {
+test('Ubuntu source/updater contracts and hardened socket boundary gate publication', async () => {
   const content = await workflow();
   const acceptanceStart = content.indexOf('  acceptance:');
   const smokeStart = content.indexOf('  container-smoke:');
@@ -426,7 +426,10 @@ test('Ubuntu updater contracts and hardened socket boundary gate publication', a
   const acceptance = content.slice(acceptanceStart, smokeStart);
   const smoke = content.slice(smokeStart, publishStart);
 
-  assert.match(acceptance, /test_updater_protocol\.py tests\/installer\/test_updater_service\.py/);
+  assert.match(
+    acceptance,
+    /test_source_management\.py tests\/installer\/test_support_bundle\.py tests\/installer\/test_updater_protocol\.py tests\/installer\/test_updater_service\.py/,
+  );
   assert.match(acceptance, /systemd-analyze verify deploy\/systemd\/reachcommander-updater\.service/);
   assert.match(acceptance, /Browser acceptance failed/);
   assert.match(smoke, /\/run\/reachcommander-updater/);

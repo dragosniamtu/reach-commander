@@ -244,6 +244,53 @@ sudo reachcommander restart
 
 Run `sudo reachcommander doctor` after changing host mounts, permissions, the proxy bind address, or Docker. It validates the local deployment files, Compose model, source metadata, the exact application-data allowlist and its host ownership/modes, authentication JSON, image state, port, and container health without changing the deployment. Read/write/traverse access is checked as the configured numeric runtime identity inside the running container at the fixed `/data` mount, which is where the application actually accesses the bind-mounted data. The root-owned `/opt/reachcommander` directory remains protected and does not need to be traversable by the container identity. The allowlist covers account state, Data Protection keys, and ReachCommander's durable file-operation plans and status records. A missing account is a warning that first-run setup mode is active; malformed account state is a failure whose contents are never printed.
 
+### Add a source from the UI
+
+The current Ubuntu installer-managed deployment enables **Add source** in the authenticated top toolbar. This is for one existing absolute Ubuntu host folder at a time. Enter a specific child directory such as `/srv/media/family`; the UI workflow rejects `/`, protected system or installer paths, and broad roots such as `/home`, `/srv`, and `/mnt`. It never accepts a container path, Compose fragment, image reference, environment value, or command.
+
+Before opening the UI, create or choose the folder and verify its permissions as the exact runtime UID/GID saved in `/opt/reachcommander/.env`. Every parent directory needs traverse permission. Read-only is selected by default and needs read plus traverse access. Read/write also needs write access and an explicit read/write confirmation because ReachCommander can change or delete files in that host folder. For example, with UID/GID `1000:1000`:
+
+```bash
+namei -l /srv/media/family
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -r /srv/media/family
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -x /srv/media/family
+# Run this third check only for a requested read/write source.
+sudo setpriv --reuid 1000 --regid 1000 --clear-groups test -w /srv/media/family
+```
+
+Do not recursively `chown` or `chmod` an existing media tree. Grant only the intended directory the minimum ownership, group, or ACL access, then rerun the checks. The host repeats canonical-path, overlap, count, and runtime-identity validation authoritatively.
+
+After acceptance, the host writes a durable transaction, validates staged Compose state, and restarts only the ReachCommander application container; Docker Engine and unrelated containers keep running. Keep the blocking dialog open. The browser reconnects automatically, retrieves the durable operation result, and refreshes the catalog so the generated source ID appears in both pane selectors. While the operation is active, duplicate submissions and competing update/file-operation restarts are blocked. If activation or health verification fails, the helper restores the previous files and container configuration before reporting rollback.
+
+For an advanced CLI fallback, send the same bounded versioned request to the fixed management command. This is primarily useful when the UI is unavailable; replace the name and absolute path, retain the generated UUID, and choose only `readOnly` or `readWrite`:
+
+```bash
+python3 - <<'PY' | sudo reachcommander source add
+import json
+import uuid
+
+print(json.dumps({
+    "protocolVersion": 5,
+    "requestId": str(uuid.uuid4()),
+    "action": "addSource",
+    "displayName": "Family media",
+    "hostPath": "/srv/media/family",
+    "access": "readOnly",
+}, separators=(",", ":")))
+PY
+```
+
+The command returns only the generated source ID and display name; it does not echo the host path. Run `sudo reachcommander doctor` afterward. If the UI reports a timeout, rollback, or failure, do not edit `compose.yaml`, `config/sources.json`, `state/source-mounts.json`, `state/source-operation.json`, or the transaction backup. Use these root-only support diagnostics first:
+
+```bash
+sudo reachcommander doctor
+sudo reachcommander status
+sudo systemctl status reachcommander-updater.service
+sudo journalctl -u reachcommander-updater.service --since today
+```
+
+Existing, older installations whose helper predates source management must rerun the latest checksum-verified installer once. An image-only update changes the application container but cannot replace the root-owned helper, CLI, or systemd unit. Reinstallation preserves the administrator account, Data Protection keys, existing sources, durable operation records, update channel, port, and mounted data. Clean installations include the compatible source helper and restricted socket service from first startup.
+
 ### Updates, channels, and rollback
 
 `stable` follows the newest stable semantic release. `edge` follows successful builds from `master`. An exact `vX.Y.Z` selects only that release. There is deliberately no floating `latest` container tag.
@@ -312,3 +359,6 @@ Keep a verified backup until you have confirmed that you no longer need the acco
 - **PWA installation is not offered:** use the HTTPS hostname, not a plain HTTP LAN address, and keep the application and API on the same origin.
 - **The login screen requests first-run setup unexpectedly:** run `sudo reachcommander doctor`, confirm `/opt/reachcommander/data/auth/account.json` is present and valid, and restore the account plus `/opt/reachcommander/data/keys` together if they were lost. Do not create a replacement account until the missing state is understood.
 - **An update was interrupted:** do not edit the transaction marker or protected trace. Run `sudo reachcommander update-log`, `sudo journalctl -u reachcommander-updater.service --since today`, and `sudo reachcommander doctor`; use the retained update backup for recovery.
+- **Add source is disabled:** unsupported platforms remain read-only. On an older installer-managed Ubuntu host, rerun the latest checksum-verified installer once; an image-only update cannot upgrade the root-owned source helper.
+- **A source add is rejected:** enter an existing absolute Ubuntu host folder below a specific child directory, check every parent with `namei -l`, and test read/traverse/write access as the configured runtime UID/GID. Do not weaken a broad parent directory.
+- **A source add timed out or rolled back:** keep the protected operation/transaction files intact, then collect the `doctor`, `status`, systemd status, and updater journal support diagnostics shown above before retrying.

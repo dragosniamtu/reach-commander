@@ -32,7 +32,7 @@ ReachCommander demonstrates more than a file-browser UI:
 | Backend | ASP.NET Core 10, layered application/domain/infrastructure projects |
 | Storage boundary | Configured local roots, canonical path confinement, symlink rejection |
 | Deployment | Single-origin PWA publish, native Windows development plus Docker deployment on Ubuntu and macOS |
-| Quality | 738 cross-platform .NET tests, 406 Angular unit tests, 2 PWA contract tests, and 58 Chromium browser scenarios |
+| Quality | 815 cross-platform .NET tests, 461 Angular unit tests, 2 PWA contract tests, and 64 Chromium browser scenarios |
 
 ## What ReachCommander includes
 
@@ -157,7 +157,13 @@ Rules:
 - `RW` is not proof of filesystem access. The API process/container user must also have write permission, and a Docker bind mount must be writable.
 - Capacity is reported when the platform supports it; an unavailable capacity value does not make a source unavailable.
 
-To add a source, add its JSON record and an explicit bind mount to the same container path, then restart the service. Never mount `/` or `/var/run/docker.sock` for convenience. Narrow sources remain recommended. The macOS installer's advanced whole-home choice is the only documented broad-source exception and always masks its installer-owned application-support subtree.
+Manual and development deployments add a source by adding its JSON record and an explicit bind mount to the same container path, then restarting the service. Never mount `/` or `/var/run/docker.sock` for convenience. Narrow sources remain recommended. The macOS installer's advanced whole-home choice is the only documented broad-source exception and always masks its installer-owned application-support subtree.
+
+An Ubuntu deployment created by the current signed installer can instead use **Add source** in the authenticated top toolbar. Enter a display name and one existing absolute Ubuntu host folder. The UI accepts a specific child directory such as `/srv/media/family`, not broad roots such as `/`, `/home`, `/srv`, or `/mnt`. Sources are read-only by default. Read/write requires an explicit read/write confirmation because it lets ReachCommander change or delete files in that host folder.
+
+The host generates the source ID and `/sources/<id>` target, validates the folder as the configured runtime UID/GID, updates the protected source and Compose state transactionally, and restarts only the ReachCommander application container. The blocking dialog reconnects automatically and refreshes both pane selectors. Active file or deployment operations block the change. On failure, the prior configuration is restored and the UI shows bounded recovery guidance without exposing host paths or Docker output.
+
+Existing, older Ubuntu installations must rerun the latest checksum-verified installer once before **Add source** can work. An image-only update cannot replace the root-owned helper. Clean installations include the source helper, restricted `/run/reachcommander-updater` socket boundary, management command, and systemd service immediately; the application container still never mounts `/var/run/docker.sock`. See [Ubuntu: add a source from the UI](docs/deployment/ubuntu.md#add-a-source-from-the-ui) for permission checks, CLI fallback, and support diagnostics.
 
 ## Docker deployment
 
@@ -336,7 +342,7 @@ Existing Ubuntu installations must rerun a checksum-verified installer bundle to
 
 ## Active-panel toolbar and search
 
-The toolbar on the left side of the top bar always reflects the active panel, source, and logical directory; hardware monitoring remains on the right. Opening Multi-Rename or Add files captures that context, so switching panels cannot redirect an operation already under review.
+The toolbar on the left side of the top bar always reflects the active panel, source, and logical directory; hardware monitoring remains on the right. **Add source** configures one absolute Ubuntu host folder on a compatible installer-managed deployment. Opening Multi-Rename or Add files captures the active panel context, so switching panels cannot redirect an operation already under review.
 
 Search filters only the loaded current directory and preserves a separate value per panel:
 

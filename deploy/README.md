@@ -8,7 +8,8 @@ The published Ubuntu installer archive contains:
 
 - `install.sh`, the interactive root entry point;
 - `lan_address.py`, the local RFC1918 display-address helper;
-- `reachcommander`, the fixed-path lifecycle command;
+- `reachcommander`, the fixed-path lifecycle command, including the structured `sudo reachcommander source add` fallback;
+- `source_management.py`, the durable validated source transaction helper;
 - `render_config.py`, the structured deployment renderer;
 - `compose.release.yaml`, the hardened published-image template;
 - `compose.updater.yaml`, the read-only `/run/reachcommander-updater` socket mount;
@@ -32,7 +33,11 @@ sha256sum --check SHA256SUMS
 
 Only stable semantic versions are packaged. Prerelease images can be published but do not produce the stable installer asset.
 
-The Ubuntu installer-managed updater checks the fixed public repository/package at startup and every six hours. The application can request only target-free status, Check, and administrator-confirmed Apply actions over the Unix socket; exact version pins remain pinned. The application never mounts `/var/run/docker.sock`. Windows, macOS, and manual container deployments do not install this systemd helper.
+The Ubuntu installer-managed updater checks the fixed public repository/package at startup and every six hours. The application can request only target-free update actions and one bounded source-management action over the Unix socket; exact version pins remain pinned. The application never mounts `/var/run/docker.sock`. Windows, macOS, and manual container deployments do not install this systemd helper.
+
+Clean installations include the source helper, management command, restricted `/run/reachcommander-updater` socket runtime, and systemd unit. The authenticated **Add source** dialog accepts only a display name, one existing absolute Ubuntu host folder, and `readOnly` or `readWrite`. It requires a specific child directory, validates access as the configured runtime UID/GID, remains read-only by default, and requires read/write confirmation before ReachCommander can change or delete files in the host folder. The helper generates the source ID, validates and commits a durable Compose/config transaction, restarts only the ReachCommander application container, and the browser reconnects automatically before refreshing both selectors.
+
+Existing, older installations must rerun the latest checksum-verified installer once to add this capability; an image-only update cannot replace the root-owned helper. On rollback or timeout, preserve the protected transaction state and collect support diagnostics with `sudo reachcommander doctor`, `sudo reachcommander status`, and `sudo journalctl -u reachcommander-updater.service --since today`. The [Ubuntu guide](../docs/deployment/ubuntu.md#add-a-source-from-the-ui) contains prerequisite checks and the advanced `sudo reachcommander source add` CLI fallback.
 
 The protocol-v3 Ubuntu helper in the current installer bundle adds a bounded, sanitized event trace to the existing download, install, restart, health-check, and rollback stages. The UI shows that trace under **Technical details**, including elapsed time and last confirmed host activity. Protocol-v2 remains compatible without the event trace, and protocol-v1 shows **Applying trusted update** instead of inventing unconfirmed steps; generic progress is not evidence that the update is stalled. Raw host logs, Docker output, paths, commands, digests, exit codes, and deadlines are intentionally excluded from the browser contract.
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation and local verification are complete on `master`. The original slice is commit `83107b8`, lifecycle hardening is commit `8a3e421`, and the final timeout-hardening commit is created after this report update. Nothing is pushed. Independent final re-review by the parent workflow remains pending.
+Implementation and local verification are complete on `master`. The original slice is commit `83107b8`, lifecycle hardening is commit `8a3e421`, timeout hardening is commit `8f2eda8`, and the final deadline-value coverage commit is created after this report update. Nothing is pushed. Independent final confirmation by the parent workflow remains pending.
 
 ## Delivered behavior
 
@@ -56,6 +56,10 @@ The timeout review added never-settling deferred requests for every read-only pa
 
 GREEN uses a dedicated injected deadline timer, distinct from the poll scheduler and poll handle. Store-owned deadline wrappers attach resolve and reject handlers before awaiting, expire into the correct capability/reconnect/catalog branch, and cancel on the shared reset/destroy invalidation path. Tests exercise late resolution and rejection after expiry/cancellation and assert that a pending mutation POST owns no read-deadline handle.
 
+### Deadline-value coverage hardening
+
+The deterministic deadline timer now records every requested delay, and the never-settling capability, operation-status, and catalog tests each assert exactly `15_000` milliseconds. These assertions passed immediately before any production change, confirming the intended value was already wired correctly; this is recorded as coverage hardening rather than a new RED/fix cycle.
+
 ## Verification
 
 | Gate | Result |
@@ -63,6 +67,7 @@ GREEN uses a dedicated injected deadline timer, distinct from the poll scheduler
 | Initial focused Angular slice | 6 files, 131/131 tests passed |
 | Final focused store/dialog hardening | 2 files, 33/33 tests passed |
 | Final focused store/shell timeout slice | 2 files, 52/52 tests passed |
+| Deadline-value coverage | 1 file, 17/17 tests passed; all three reads assert 15,000 ms |
 | Final focused Task 5 slice after timeout hardening | 6 files, 152/152 tests passed |
 | `npm test -- --watch=false` | 57 files, 461/461 tests passed |
 | `npm run build` | passed; 357.41 kB initial, 94.81 kB estimated transfer |

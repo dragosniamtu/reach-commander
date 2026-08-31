@@ -99,6 +99,7 @@ describe('SourceManagementStore', () => {
     await flushMicrotasks();
     expect(store.capabilityPending()).toBe(true);
     expect(deadline.pendingCount).toBe(1);
+    expect(deadline.delays).toEqual([15_000]);
 
     deadline.expireNext();
     await startup;
@@ -254,6 +255,7 @@ describe('SourceManagementStore', () => {
     const timedAttempt = scheduler.runNext();
     await flushMicrotasks();
     expect(deadline.pendingCount).toBe(1);
+    expect(deadline.delays.at(-1)).toBe(15_000);
     deadline.expireNext();
     await timedAttempt;
 
@@ -283,6 +285,7 @@ describe('SourceManagementStore', () => {
     const submission = store.submit(sourceRequest());
     await flushMicrotasks();
     expect(deadline.pendingCount).toBe(1);
+    expect(deadline.delays.at(-1)).toBe(15_000);
     deadline.expireNext();
     await submission;
 
@@ -495,12 +498,14 @@ class ManualScheduler implements SourceManagementScheduler {
 
 class ManualDeadline implements SourceManagementDeadlineTimer {
   private requests: Array<{ callback: () => void }> = [];
+  readonly delays: number[] = [];
 
   get pendingCount(): number { return this.requests.length; }
 
-  schedule(callback: () => void, _delayMilliseconds: number): unknown {
+  schedule(callback: () => void, delayMilliseconds: number): unknown {
     const request = { callback };
     this.requests.push(request);
+    this.delays.push(delayMilliseconds);
     return request;
   }
 

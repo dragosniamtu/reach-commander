@@ -794,6 +794,9 @@ class SourceTransaction:
             destination = self.root / relative
             mode = 0o644 if relative == "config/sources.json" else 0o600
             self._atomic_write(destination, source.read_text(encoding="utf-8"), mode)
+            destination.parent.chmod(
+                0o755 if relative == "config/sources.json" else 0o700
+            )
             destination.chmod(mode)
 
     def _validate_backup(self) -> None:
@@ -845,6 +848,9 @@ class SourceTransaction:
             destination = self.root / relative
             mode = 0o644 if relative == "config/sources.json" else 0o600
             self._atomic_write(destination, source.read_text(encoding="utf-8"), mode)
+            destination.parent.chmod(
+                0o755 if relative == "config/sources.json" else 0o700
+            )
             destination.chmod(mode)
 
     def _remove_transaction_root(self) -> None:

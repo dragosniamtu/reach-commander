@@ -413,6 +413,10 @@ class SourceTransactionTests(unittest.TestCase):
         self.assertEqual(1, len(up_calls))
         self.assertEqual(("up", "-d", "reachcommander"), up_calls[0][-3:])
         self.assertNotIn("restart", up_calls[0])
+        if os.name != "nt":
+            self.assertEqual(0o755, stat.S_IMODE((self.root / "config").stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE((self.root / "state").stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(self.root.stat().st_mode))
 
     def test_compose_validation_failure_leaves_active_files_unchanged_and_sanitizes_error(self) -> None:
         commands = FakeCommands()

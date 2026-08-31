@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation and local verification are complete on `master`. Nothing is pushed. The first independent review found two restart-drain safety issues and one strict-framing issue; all three are fixed and covered by deterministic regressions. Final independent re-review follows the hardening commit.
+Implementation and local verification are complete on `master`. Nothing is pushed. Independent review found restart-drain ownership, ambiguous-response, and strict-framing issues; each is fixed, covered by deterministic regressions, and the final independent re-review is clean with no critical, important, or minor findings.
 
 ## Delivered behavior
 

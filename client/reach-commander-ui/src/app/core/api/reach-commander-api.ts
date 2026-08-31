@@ -33,7 +33,10 @@ import {
   RestorePreviewDto,
   RestorePreviewRequestDto,
   RestoreSubmissionDto,
+  SourceAddRequestDto,
   SourceDto,
+  SourceManagementCapabilityDto,
+  SourceManagementOperationDto,
   SystemMetricsDto,
   SystemUpdateStatusDto,
   SystemUpdateSupportBundleDownload,
@@ -78,6 +81,26 @@ export class ReachCommanderApi extends CommanderApiPort {
       blob: response.body ?? new Blob([], { type: 'application/zip' }),
       fileName: supportBundleFileName(response.headers.get('Content-Disposition')),
     };
+  }
+
+  getSourceManagementStatus(): Promise<SourceManagementCapabilityDto> {
+    return firstValueFrom(
+      this.http.get<SourceManagementCapabilityDto>('/api/source-management/status'),
+    );
+  }
+
+  addSource(request: SourceAddRequestDto): Promise<SourceManagementOperationDto> {
+    return firstValueFrom(
+      this.http.post<SourceManagementOperationDto>('/api/source-management/sources', request),
+    );
+  }
+
+  getSourceManagementOperation(operationId: string): Promise<SourceManagementOperationDto> {
+    return firstValueFrom(
+      this.http.get<SourceManagementOperationDto>(
+        `/api/source-management/operations/${encodeURIComponent(operationId)}`,
+      ),
+    );
   }
 
   getSources(): Promise<readonly SourceDto[]> {

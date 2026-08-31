@@ -17,6 +17,9 @@ import {
   FileOperationPreviewRequestDto,
   FileOperationStatusDto,
   RestorePreviewRequestDto,
+  SourceAddRequestDto,
+  SourceManagementCapabilityDto,
+  SourceManagementOperationDto,
   SystemMetricsDto,
   SystemUpdateStatusDto,
   UploadLimitsDto,
@@ -123,6 +126,41 @@ describe('ReachCommanderApi', () => {
     request.flush([]);
 
     await expect(result).resolves.toEqual([]);
+  });
+
+  it('uses the narrow source-management capability, add, and operation routes', async () => {
+    const capability: SourceManagementCapabilityDto = {
+      supported: true,
+      reasonCode: 'supported',
+      detail: 'Source management is available.',
+    };
+    const requestBody: SourceAddRequestDto = {
+      displayName: 'Family media',
+      hostPath: '/srv/media/family',
+      access: 'readOnly',
+    };
+    const operation = sourceOperation();
+
+    const capabilityResult = api.getSourceManagementStatus();
+    const capabilityRequest = http.expectOne('/api/source-management/status');
+    expect(capabilityRequest.request.method).toBe('GET');
+    capabilityRequest.flush(capability);
+    await expect(capabilityResult).resolves.toEqual(capability);
+
+    const addResult = api.addSource(requestBody);
+    const addRequest = http.expectOne('/api/source-management/sources');
+    expect(addRequest.request.method).toBe('POST');
+    expect(addRequest.request.body).toEqual(requestBody);
+    addRequest.flush(operation);
+    await expect(addResult).resolves.toEqual(operation);
+
+    const operationResult = api.getSourceManagementOperation(operation.operationId);
+    const operationRequest = http.expectOne(
+      `/api/source-management/operations/${operation.operationId}`,
+    );
+    expect(operationRequest.request.method).toBe('GET');
+    operationRequest.flush(operation);
+    await expect(operationResult).resolves.toEqual(operation);
   });
 
   it('requests the cached system snapshot from the read-only route', async () => {
@@ -684,6 +722,22 @@ function systemUpdateStatus(overrides: Partial<SystemUpdateStatusDto> = {}): Sys
     lastCheckedAt: '2026-08-25T10:00:00Z',
     updatedAt: '2026-08-25T10:00:00Z',
     trace: null,
+    ...overrides,
+  };
+}
+
+function sourceOperation(
+  overrides: Partial<SourceManagementOperationDto> = {},
+): SourceManagementOperationDto {
+  return {
+    operationId: '33333333-3333-4333-8333-333333333333',
+    sourceId: null,
+    displayName: 'Family media',
+    phase: 'accepted',
+    reasonCode: 'accepted',
+    detail: 'The source-management operation was accepted.',
+    createdAt: '2026-08-31T08:00:00Z',
+    updatedAt: '2026-08-31T08:00:00Z',
     ...overrides,
   };
 }

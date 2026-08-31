@@ -15,6 +15,9 @@ import {
   RestorePreviewDto,
   RestorePreviewRequestDto,
   RestoreSubmissionDto,
+  SourceAddRequestDto,
+  SourceManagementCapabilityDto,
+  SourceManagementOperationDto,
   SystemUpdateStatusDto,
   SystemUpdateSupportBundleDownload,
   TrashEntryDto,
@@ -22,6 +25,20 @@ import {
 } from '../core/api/api.models';
 
 export abstract class CommanderApiTestBase extends CommanderApiPort {
+  override getSourceManagementStatus(): Promise<SourceManagementCapabilityDto> {
+    return unsupported();
+  }
+
+  override addSource(_request: SourceAddRequestDto): Promise<SourceManagementOperationDto> {
+    return unsupported();
+  }
+
+  override getSourceManagementOperation(
+    _operationId: string,
+  ): Promise<SourceManagementOperationDto> {
+    return unsupported();
+  }
+
   override previewRename(_request: ExactRenamePreviewRequestDto): Promise<BatchRenamePreviewDto> {
     return unsupported();
   }

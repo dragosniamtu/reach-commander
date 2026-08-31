@@ -1,0 +1,165 @@
+<div class="source-backdrop">
+  <dialog
+    open
+    class="source-dialog theme-dialog-shell"
+    data-testid="source-management-dialog"
+    aria-modal="true"
+    aria-labelledby="source-management-title"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+  >
+    <header class="theme-dialog-titlebar">
+      <div>
+        <span class="eyebrow">Installer-managed Ubuntu source</span>
+        <h2 id="source-management-title">
+          {{ store.operation() ? 'Configuring source' : 'Add host source' }}
+        </h2>
+      </div>
+      <button type="button" aria-label="Close Add source" [disabled]="!canClose()" (click)="close()">×</button>
+    </header>
+
+    @if (store.operation(); as operation) {
+      <div class="operation-body" aria-live="polite">
+        <div
+          class="operation-icon"
+          [class.busy]="store.pending()"
+          [class.success]="operation.phase === 'completed'"
+          [class.failure]="operation.phase === 'rolledBack' || operation.phase === 'failed'"
+          aria-hidden="true"
+        >
+          <i></i><i></i><i></i>
+        </div>
+        <span class="eyebrow">{{ operation.displayName }}</span>
+        <h3>{{ phaseLabel(operation.phase) }}</h3>
+        <p>{{ operation.detail }}</p>
+
+        @if (store.reconnecting()) {
+          <p class="reconnecting" role="status">
+            Reconnecting to ReachCommander after the managed restart…
+          </p>
+        }
+        @if (operation.phase === 'completed' && store.catalogRefreshed()) {
+          <p class="success-message" role="status">
+            {{ operation.displayName }} is now available in both panes.
+          </p>
+        }
+        @if (operation.phase === 'rolledBack') {
+          <p class="warning" role="alert">
+            The previous source configuration was restored; no new mapping is active.
+          </p>
+        }
+        @if (store.error(); as publicError) {
+          <p class="error" role="alert">{{ publicError.detail }}</p>
+        }
+      </div>
+    } @else {
+      <div class="dialog-body">
+        <p class="intro">
+          The folder must already exist on the Ubuntu host and be accessible to ReachCommander's
+          configured runtime UID and GID. The host generates the source ID and container path.
+        </p>
+
+        <label for="source-display-name">
+          Display name
+          <input
+            #displayNameInput
+            id="source-display-name"
+            type="text"
+            maxlength="80"
+            autocomplete="off"
+            autofocus
+            [value]="displayName()"
+            [disabled]="store.pending()"
+            (input)="displayNameChanged($event)"
+          />
+        </label>
+        @if (displayName().length > 0 && displayNameError(); as validation) {
+          <p class="validation" role="alert">{{ validation }}</p>
+        }
+
+        <label for="source-host-path">
+          Absolute Ubuntu host folder
+          <input
+            id="source-host-path"
+            type="text"
+            maxlength="1024"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="/srv/media/family"
+            [value]="hostPath()"
+            [disabled]="store.pending()"
+            (input)="hostPathChanged($event)"
+          />
+        </label>
+        @if (hostPath().length > 0 && hostPathError(); as validation) {
+          <p class="validation" role="alert">{{ validation }}</p>
+        }
+
+        <fieldset>
+          <legend>Access policy</legend>
+          <label class="access-option">
+            <input
+              type="radio"
+              name="source-access"
+              value="readOnly"
+              [checked]="access() === 'readOnly'"
+              [disabled]="store.pending()"
+              (change)="accessChanged($event)"
+            />
+            <span><strong>Read only</strong><small>Browse and copy from this folder.</small></span>
+          </label>
+          <label class="access-option">
+            <input
+              type="radio"
+              name="source-access"
+              value="readWrite"
+              [checked]="access() === 'readWrite'"
+              [disabled]="store.pending()"
+              (change)="accessChanged($event)"
+            />
+            <span><strong>Read/write</strong><small>Allow managed file changes.</small></span>
+          </label>
+        </fieldset>
+
+        @if (access() === 'readWrite') {
+          <label class="write-warning" data-testid="read-write-warning">
+            <input
+              type="checkbox"
+              [checked]="readWriteConfirmed()"
+              [disabled]="store.pending()"
+              (change)="readWriteConfirmationChanged($event)"
+            />
+            <span>
+              I understand ReachCommander can change or delete files in this host folder.
+            </span>
+          </label>
+        }
+
+        @if (store.error(); as publicError) {
+          <p class="error" role="alert">{{ publicError.detail }}</p>
+        }
+      </div>
+    }
+
+    <footer>
+      @if (!store.operation()) {
+        <button type="button" [disabled]="store.pending()" (click)="close()">Cancel</button>
+        <button
+          type="button"
+          class="primary"
+          data-testid="add-source-submit"
+          [disabled]="!canSubmit()"
+          (click)="submit()"
+        >
+          {{ store.pending() ? 'Starting…' : 'Add source' }}
+        </button>
+      } @else if (canClose()) {
+        <button type="button" class="primary" (click)="close()">
+          {{ store.operation()?.phase === 'completed' ? 'Done' : 'Close' }}
+        </button>
+      } @else {
+        <span class="restart-note">Keep this page open; ReachCommander will reconnect automatically.</span>
+      }
+    </footer>
+  </dialog>
+</div>

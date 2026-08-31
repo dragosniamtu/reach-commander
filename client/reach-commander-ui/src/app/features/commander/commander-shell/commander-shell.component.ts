@@ -57,6 +57,8 @@ import { SystemUpdateStore } from '../../../core/state/system-update.store';
 import { SystemUpdateButtonComponent } from '../../system-update/system-update-button.component';
 import { SystemUpdateDialogComponent } from '../../system-update/system-update-dialog.component';
 import { SystemUpdateOverlayComponent } from '../../system-update/system-update-overlay.component';
+import { SourceManagementStore } from '../../../core/state/source-management.store';
+import { SourceManagementDialogComponent } from '../../source-management/source-management-dialog.component';
 
 export interface CreateDirectoryDialogContext {
   readonly sourceId: string;
@@ -88,6 +90,7 @@ export interface CreateDirectoryDialogContext {
     SystemUpdateButtonComponent,
     SystemUpdateDialogComponent,
     SystemUpdateOverlayComponent,
+    SourceManagementDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -103,6 +106,7 @@ export class CommanderShellComponent implements OnInit {
   readonly fileOperations = inject(FileOperationStore);
   readonly trash = inject(TrashStore);
   readonly systemUpdate = inject(SystemUpdateStore);
+  readonly sourceManagement = inject(SourceManagementStore);
   readonly pwa = inject(PwaService);
   readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
@@ -116,6 +120,7 @@ export class CommanderShellComponent implements OnInit {
   readonly trashOpen = signal(false);
   readonly createDirectoryContext = signal<CreateDirectoryDialogContext | null>(null);
   readonly systemUpdateDialogStatus = signal<SystemUpdateStatusDto | null>(null);
+  readonly sourceManagementOpener = signal<HTMLElement | null>(null);
   readonly systemUpdateOverlayStatus = computed(() => {
     const status = this.systemUpdate.status();
     return this.systemUpdate.overlayVisible() && status &&
@@ -248,6 +253,7 @@ export class CommanderShellComponent implements OnInit {
       this.trashOpen.set(false);
       this.createDirectoryContext.set(null);
       this.systemUpdateDialogStatus.set(null);
+      this.sourceManagementOpener.set(null);
     });
     this.destroyRef.onDestroy(unregisterProtectedState);
     this.archiveExtraction.setCompletionHandler((source, destination) => {
@@ -264,6 +270,7 @@ export class CommanderShellComponent implements OnInit {
     this.keyboard.start();
     this.metricsStore.start();
     void this.systemUpdate.start();
+    void this.sourceManagement.start();
     void this.retryInitialization();
   }
 
@@ -289,6 +296,9 @@ export class CommanderShellComponent implements OnInit {
   }
 
   execute(command: CommanderCommand): void {
+    if (this.sourceManagement.dialogOpen()) {
+      return;
+    }
     if (this.hasBlockingFileModal()) {
       return;
     }
@@ -386,6 +396,23 @@ export class CommanderShellComponent implements OnInit {
 
   openMetrics(): void {
     this.metricsOpen.set(true);
+  }
+
+  openSourceManagement(opener: HTMLElement): void {
+    if (!this.sourceManagement.canOpen()) {
+      return;
+    }
+    this.sourceManagementOpener.set(opener);
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.sourceManagement.open();
+  }
+
+  closeSourceManagement(): void {
+    this.sourceManagement.close();
+    const opener = this.sourceManagementOpener();
+    this.sourceManagementOpener.set(null);
+    queueMicrotask(() => opener?.focus());
   }
 
   openSystemUpdate(): void {

@@ -558,6 +558,21 @@ export class CommanderStore {
     return this.initialization;
   }
 
+  async reloadSourceCatalog(): Promise<void> {
+    const sessionGeneration = this.sessionGeneration;
+    const sources = await this.api.getSources();
+    if (sessionGeneration !== this.sessionGeneration) {
+      return;
+    }
+
+    if (sources.length === 0) {
+      throw new Error('ReachCommander requires at least one configured source.');
+    }
+
+    this.sourceState.set(sources);
+    this.persist();
+  }
+
   reset(): void {
     this.sessionGeneration += 1;
     this.nextRequestToken += 1;

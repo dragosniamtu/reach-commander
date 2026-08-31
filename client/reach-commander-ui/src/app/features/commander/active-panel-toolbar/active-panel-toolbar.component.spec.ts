@@ -13,6 +13,9 @@ describe('ActivePanelToolbarComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(ActivePanelToolbarComponent);
     setInputs(context(), '');
+    fixture.componentRef.setInput('sourceManagementSupported', true);
+    fixture.componentRef.setInput('sourceManagementPending', false);
+    fixture.componentRef.setInput('sourceManagementDisabledReason', null);
   });
 
   it('shows the active context and accessible logical path', () => {
@@ -123,6 +126,28 @@ describe('ActivePanelToolbarComponent', () => {
     button('toolbar-trash').click();
 
     expect(requested).toHaveBeenCalledOnce();
+  });
+
+  it('offers one compact global Add source control with an unsupported tooltip', () => {
+    const requested = vi.fn();
+    fixture.componentInstance.sourceRequested.subscribe(requested);
+    fixture.detectChanges();
+
+    button('toolbar-add-source').click();
+    expect(requested).toHaveBeenCalledOnce();
+
+    fixture.componentRef.setInput('sourceManagementSupported', false);
+    fixture.componentRef.setInput(
+      'sourceManagementDisabledReason',
+      'Rerun the latest Ubuntu installer once to add host source management.',
+    );
+    fixture.detectChanges();
+    const addSource = button('toolbar-add-source');
+    const wrapper = addSource.closest('[role="group"]');
+    expect(addSource.disabled).toBe(true);
+    expect(wrapper?.getAttribute('tabindex')).toBe('0');
+    expect(wrapper?.getAttribute('title')).toContain('Rerun the latest Ubuntu installer once');
+    expect(wrapper?.textContent).toContain('Add source');
   });
 
   function setInputs(toolbarContext: ActivePanelToolbarContext, filter: string): void {

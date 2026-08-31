@@ -2,7 +2,11 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { CommanderKeyboardService } from '../../../core/keyboard/commander-keyboard.service';
-import { SourceDto, SystemUpdateStatusDto } from '../../../core/api/api.models';
+import {
+  SourceDto,
+  SourceManagementOperationDto,
+  SystemUpdateStatusDto,
+} from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
 import { PanelState } from '../../../core/state/commander.models';
 import { SystemMetricsStore } from '../../../core/state/system-metrics-store';
@@ -22,6 +26,7 @@ import { ProtectedStateResetService } from '../../../core/auth/protected-state-r
 import { FileOperationStore } from '../file-operations/file-operation.store';
 import { TrashStore } from '../trash/trash.store';
 import { SystemUpdateStore } from '../../../core/state/system-update.store';
+import { SourceManagementStore } from '../../../core/state/source-management.store';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -161,6 +166,28 @@ describe('CommanderShellComponent system metrics integration', () => {
     reset: vi.fn(),
     overlayVisible: signal(false),
   };
+  const sourceManagement = {
+    capability: signal({
+      supported: true,
+      reasonCode: 'supported',
+      detail: 'Source management is available.',
+    }),
+    capabilityPending: signal(false),
+    canOpen: signal(true),
+    disabledReason: signal<string | null>(null),
+    dialogOpen: signal(false),
+    pending: signal(false),
+    reconnecting: signal(false),
+    operation: signal<SourceManagementOperationDto | null>(null),
+    error: signal(null),
+    catalogRefreshed: signal(false),
+    terminal: signal(false),
+    start: vi.fn(() => Promise.resolve()),
+    open: vi.fn(() => sourceManagement.dialogOpen.set(true)),
+    close: vi.fn(() => sourceManagement.dialogOpen.set(false)),
+    submit: vi.fn(() => Promise.resolve()),
+    reset: vi.fn(),
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -189,6 +216,14 @@ describe('CommanderShellComponent system metrics integration', () => {
     systemUpdate.status.set(null);
     systemUpdate.reconnecting.set(false);
     systemUpdate.overlayVisible.set(false);
+    sourceManagement.dialogOpen.set(false);
+    sourceManagement.capability.set({
+      supported: true,
+      reasonCode: 'supported',
+      detail: 'Source management is available.',
+    });
+    sourceManagement.canOpen.set(true);
+    sourceManagement.disabledReason.set(null);
     await TestBed.configureTestingModule({
       imports: [CommanderShellComponent],
       providers: [
@@ -204,6 +239,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: PwaService, useValue: pwa },
         { provide: AuthenticationStore, useValue: authentication },
         { provide: SystemUpdateStore, useValue: systemUpdate },
+        { provide: SourceManagementStore, useValue: sourceManagement },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -302,6 +338,21 @@ describe('CommanderShellComponent system metrics integration', () => {
 
     expect(document.documentElement.dataset['theme']).toBe('windows95');
     expect(selector.value).toBe('windows95');
+  });
+
+  it('loads source-management capability and opens the blocking Add source dialog', () => {
+    expect(sourceManagement.start).toHaveBeenCalledOnce();
+    const trigger = fixture.nativeElement.querySelector(
+      '[data-testid="toolbar-add-source"]',
+    ) as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
+
+    trigger.click();
+    fixture.detectChanges();
+
+    expect(sourceManagement.open).toHaveBeenCalledOnce();
+    expect(fixture.nativeElement.querySelector('[data-testid="source-management-dialog"]'))
+      .not.toBeNull();
   });
 
   it('stops polling when the shell is destroyed', () => {

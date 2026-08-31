@@ -16,6 +16,41 @@ export interface SourceDto {
   readonly defaultRight: boolean;
 }
 
+export interface SourceManagementCapabilityDto {
+  readonly supported: boolean;
+  readonly reasonCode: string;
+  readonly detail: string;
+}
+
+export type SourceAccess = 'readOnly' | 'readWrite';
+
+export interface SourceAddRequestDto {
+  readonly displayName: string;
+  readonly hostPath: string;
+  readonly access: SourceAccess;
+}
+
+export type SourceManagementPhase =
+  | 'accepted'
+  | 'validating'
+  | 'applying'
+  | 'restarting'
+  | 'healthChecking'
+  | 'completed'
+  | 'rolledBack'
+  | 'failed';
+
+export interface SourceManagementOperationDto {
+  readonly operationId: string;
+  readonly sourceId: string | null;
+  readonly displayName: string | null;
+  readonly phase: SourceManagementPhase;
+  readonly reasonCode: string;
+  readonly detail: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface FileEntryDto {
   readonly name: string;
   readonly relativePath: string;
@@ -551,6 +586,14 @@ export abstract class CommanderApiPort {
   abstract applySystemUpdate(): Promise<SystemUpdateStatusDto>;
 
   abstract downloadSystemUpdateSupportBundle(): Promise<SystemUpdateSupportBundleDownload>;
+
+  abstract getSourceManagementStatus(): Promise<SourceManagementCapabilityDto>;
+
+  abstract addSource(request: SourceAddRequestDto): Promise<SourceManagementOperationDto>;
+
+  abstract getSourceManagementOperation(
+    operationId: string,
+  ): Promise<SourceManagementOperationDto>;
 
   abstract getSources(): Promise<readonly SourceDto[]>;
 

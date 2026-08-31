@@ -168,6 +168,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .delete-dialog,
   .trash-dialog,
   .directory-dialog,
+  .source-dialog,
   .task-indicator
 ) {
   border-radius: 0 !important;
@@ -197,6 +198,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .delete-backdrop,
   .trash-backdrop,
   .directory-backdrop,
+  .source-backdrop,
   .metrics-backdrop
 ) {
   background: rgb(0 0 64 / .92) !important;
@@ -328,6 +330,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .delete-dialog,
   .trash-dialog,
   .directory-dialog,
+  .source-dialog,
   .update-dialog,
   .system-update-overlay,
   .update-state,
@@ -363,6 +366,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .delete-dialog,
   .trash-dialog,
   .directory-dialog,
+  .source-dialog,
   .update-dialog,
   .system-update-overlay,
   .update-state,
@@ -481,6 +485,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .delete-backdrop,
   .trash-backdrop,
   .directory-backdrop,
+  .source-backdrop,
   .metrics-backdrop,
   .update-backdrop
 ) {

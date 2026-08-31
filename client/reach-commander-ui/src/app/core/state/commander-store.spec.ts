@@ -60,6 +60,29 @@ describe('CommanderStore', () => {
     expect(store.rightPanel().entries.map((item) => item.name)).toEqual(['right.txt']);
   });
 
+  it('reloads the source catalog without replacing either pane location', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true }),
+      source('media', { defaultRight: true }),
+    ]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+    const leftLocation = store.leftPanel().tabs[0]?.location;
+    const rightLocation = store.rightPanel().tabs[0]?.location;
+    api.configuredSources = [
+      ...api.configuredSources,
+      source('family-media', { name: 'Family media' }),
+    ];
+
+    await store.reloadSourceCatalog();
+
+    expect(store.sources().map(({ id }) => id)).toEqual([
+      'downloads', 'media', 'family-media',
+    ]);
+    expect(store.leftPanel().tabs[0]?.location).toEqual(leftLocation);
+    expect(store.rightPanel().tabs[0]?.location).toEqual(rightLocation);
+  });
+
   it('resets the workspace and ignores responses from the previous authenticated session', async () => {
     const listing = deferred<readonly FileEntryDto[]>();
     const api = new FakeCommanderApi([
@@ -981,7 +1004,7 @@ class FakeCommanderApi extends CommanderApiTestBase {
   ) => Promise<ArchiveDirectoryDto>) | null = null;
   listHandler: ((sourceId: string, path: string) => Promise<readonly FileEntryDto[]>) | null = null;
 
-  constructor(private readonly configuredSources: readonly SourceDto[]) {
+  constructor(public configuredSources: readonly SourceDto[]) {
     super();
   }
 

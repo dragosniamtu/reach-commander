@@ -30,11 +30,15 @@ export interface ActivePanelToolbarContext {
 export class ActivePanelToolbarComponent {
   readonly context = input.required<ActivePanelToolbarContext>();
   readonly filter = input.required<string>();
+  readonly sourceManagementSupported = input(false);
+  readonly sourceManagementPending = input(false);
+  readonly sourceManagementDisabledReason = input<string | null>(null);
   readonly renameRequested = output<void>();
   readonly filesSelected = output<readonly File[]>();
   readonly extractRequested = output<void>();
   readonly trashRequested = output<void>();
   readonly filterChanged = output<string>();
+  readonly sourceRequested = output<HTMLElement>();
 
   @ViewChild('searchInput', { read: ElementRef })
   private searchInput?: ElementRef<HTMLInputElement>;
@@ -42,6 +46,24 @@ export class ActivePanelToolbarComponent {
   private fileInput?: ElementRef<HTMLInputElement>;
   @ViewChild('addFilesButton', { read: ElementRef })
   private addFilesButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild('addSourceButton', { read: ElementRef })
+  private addSourceButton?: ElementRef<HTMLButtonElement>;
+
+  sourceManagementReason(): string | null {
+    if (this.sourceManagementPending()) {
+      return 'Checking whether managed host sources are supported.';
+    }
+    if (!this.sourceManagementSupported()) {
+      return this.sourceManagementDisabledReason() ?? 'Source management is unavailable.';
+    }
+    return null;
+  }
+
+  requestSource(): void {
+    if (this.sourceManagementReason() === null && this.addSourceButton) {
+      this.sourceRequested.emit(this.addSourceButton.nativeElement);
+    }
+  }
 
   renameDisabledReason(): string | null {
     const context = this.context();

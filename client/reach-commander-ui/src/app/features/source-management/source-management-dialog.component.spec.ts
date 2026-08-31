@@ -1,0 +1,185 @@
+import { signal } from '@angular/core';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import {
+  SourceAddRequestDto,
+  SourceManagementOperationDto,
+} from '../../core/api/api.models';
+import { SourceManagementStore } from '../../core/state/source-management.store';
+import {
+  SourceManagementDialogComponent,
+  validateSourceDisplayName,
+  validateUbuntuHostPath,
+} from './source-management-dialog.component';
+
+describe('SourceManagementDialogComponent', () => {
+  let fixture: ComponentFixture<SourceManagementDialogComponent>;
+  let store: FakeSourceManagementStore;
+  let opener: HTMLButtonElement;
+
+  beforeEach(async () => {
+    store = new FakeSourceManagementStore();
+    await TestBed.configureTestingModule({
+      imports: [SourceManagementDialogComponent],
+      providers: [{ provide: SourceManagementStore, useValue: store }],
+    }).compileComponents();
+    opener = document.createElement('button');
+    document.body.append(opener);
+    fixture = TestBed.createComponent(SourceManagementDialogComponent);
+    fixture.componentRef.setInput('opener', opener);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => opener.remove());
+
+  it('traps focus, labels the modal, and restores its opener after Escape', async () => {
+    const closed = vi.fn();
+    fixture.componentInstance.closed.subscribe(closed);
+    await fixture.whenStable();
+
+    const dialog = fixture.nativeElement.querySelector('dialog') as HTMLDialogElement;
+    const name = fixture.nativeElement.querySelector('#source-display-name') as HTMLInputElement;
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe('source-management-title');
+    expect(document.activeElement).toBe(name);
+
+    fixture.componentInstance.handleKeydown(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(closed).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it.each([
+    ['', 'Enter a display name.'],
+    ['   ', 'Enter a display name.'],
+    ['bad\u0000name', 'control characters'],
+    ['x'.repeat(81), '80 characters'],
+  ])('rejects display name %j before submission', (name, message) => {
+    expect(validateSourceDisplayName(name)).toContain(message);
+  });
+
+  it.each([
+    ['', 'absolute Ubuntu path'],
+    ['srv/media', 'absolute Ubuntu path'],
+    ['C:\\Media', 'absolute Ubuntu path'],
+    ['/', 'specific folder'],
+    ['/srv', 'specific folder'],
+    ['/home', 'specific folder'],
+    ['/mnt', 'specific folder'],
+    ['/proc/1/root', 'protected system folder'],
+    ['/sys/class', 'protected system folder'],
+    ['/dev/disk', 'protected system folder'],
+    ['/run/secrets', 'protected system folder'],
+    ['/var/run/docker.sock', 'protected system folder'],
+    ['/srv/media\\family', 'backslashes'],
+    [`/srv/${'x'.repeat(1020)}`, '1,024 characters'],
+  ])('rejects host path %j before submission', (path, message) => {
+    expect(validateUbuntuHostPath(path)).toContain(message);
+  });
+
+  it('defaults to read-only and submits one trimmed narrow request', async () => {
+    fixture.componentInstance.setDisplayName('  Family media  ');
+    fixture.componentInstance.setHostPath('/srv/media/family');
+
+    await fixture.componentInstance.submit();
+
+    expect(store.submit).toHaveBeenCalledWith({
+      displayName: 'Family media',
+      hostPath: '/srv/media/family',
+      access: 'readOnly',
+    });
+  });
+
+  it('requires an explicit acknowledgement before a read/write mapping', async () => {
+    fixture.componentInstance.setDisplayName('Family media');
+    fixture.componentInstance.setHostPath('/srv/media/family');
+    fixture.componentInstance.setAccess('readWrite');
+    fixture.detectChanges();
+
+    const warning = fixture.nativeElement.querySelector('[data-testid="read-write-warning"]');
+    expect(warning.textContent).toContain('change or delete files in this host folder');
+    expect(fixture.componentInstance.canSubmit()).toBe(false);
+    await fixture.componentInstance.submit();
+    expect(store.submit).not.toHaveBeenCalled();
+
+    fixture.componentInstance.setReadWriteConfirmed(true);
+    await fixture.componentInstance.submit();
+    expect(store.submit).toHaveBeenCalledWith(expect.objectContaining({ access: 'readWrite' }));
+  });
+
+  it('disables every duplicate submit path and Escape while an operation is active', async () => {
+    fixture.componentInstance.setDisplayName('Family media');
+    fixture.componentInstance.setHostPath('/srv/media/family');
+    store.pending.set(true);
+    fixture.detectChanges();
+    const closed = vi.fn();
+    fixture.componentInstance.closed.subscribe(closed);
+
+    await fixture.componentInstance.submit();
+    fixture.componentInstance.handleKeydown(new KeyboardEvent('keydown', { key: 'Enter' }));
+    fixture.componentInstance.handleKeydown(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(store.submit).not.toHaveBeenCalled();
+    expect(closed).not.toHaveBeenCalled();
+    expect((fixture.nativeElement.querySelector('[data-testid="add-source-submit"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('shows only bounded public store errors and terminal rollback guidance', () => {
+    store.error.set({
+      code: 'source_management_validation_failed',
+      detail: 'Choose a more specific existing host folder.',
+    });
+    store.operation.set(operation({
+      phase: 'rolledBack',
+      reasonCode: 'source_rolled_back',
+      detail: 'The previous source configuration was restored.',
+    }));
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Choose a more specific existing host folder.');
+    expect(text).toContain('previous source configuration was restored');
+    expect(text).not.toContain('/opt/reachcommander');
+  });
+
+  it('presents reconnect and completed catalog-refresh states', () => {
+    store.pending.set(true);
+    store.reconnecting.set(true);
+    store.operation.set(operation({ phase: 'restarting' }));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Reconnecting to ReachCommander');
+
+    store.pending.set(false);
+    store.reconnecting.set(false);
+    store.catalogRefreshed.set(true);
+    store.operation.set(operation({ phase: 'completed', sourceId: 'family-media' }));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('available in both panes');
+  });
+});
+
+class FakeSourceManagementStore {
+  readonly pending = signal(false);
+  readonly reconnecting = signal(false);
+  readonly operation = signal<SourceManagementOperationDto | null>(null);
+  readonly error = signal<{ code: string; detail: string } | null>(null);
+  readonly catalogRefreshed = signal(false);
+  readonly terminal = signal(false);
+  readonly submit = vi.fn((_request: SourceAddRequestDto) => Promise.resolve());
+  readonly close = vi.fn();
+}
+
+function operation(
+  overrides: Partial<SourceManagementOperationDto> = {},
+): SourceManagementOperationDto {
+  return {
+    operationId: '33333333-3333-4333-8333-333333333333',
+    sourceId: null,
+    displayName: 'Family media',
+    phase: 'accepted',
+    reasonCode: 'accepted',
+    detail: 'The source-management operation was accepted.',
+    createdAt: '2026-08-31T08:00:00Z',
+    updatedAt: '2026-08-31T08:00:00Z',
+    ...overrides,
+  };
+}

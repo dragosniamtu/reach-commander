@@ -12,6 +12,10 @@
       (extractRequested)="openArchiveExtraction()"
       (trashRequested)="openTrash()"
       (filesSelected)="reviewUpload($event)"
+      [sourceManagementSupported]="sourceManagement.capability()?.supported === true"
+      [sourceManagementPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
+      [sourceManagementDisabledReason]="sourceManagement.disabledReason()"
+      (sourceRequested)="openSourceManagement($event)"
     />
     <div class="top-actions">
       <span class="read-mode"><i></i> CONTROLLED FILE OPERATIONS</span>
@@ -92,6 +96,13 @@
       [reconnecting]="systemUpdate.reconnecting()"
       [error]="systemUpdate.error()"
       (dismissed)="systemUpdate.dismissTerminal()"
+    />
+  }
+
+  @if (sourceManagement.dialogOpen()) {
+    <app-source-management-dialog
+      [opener]="sourceManagementOpener()"
+      (closed)="closeSourceManagement()"
     />
   }
 
@@ -189,7 +200,8 @@
       <p>
         F4 renames the focused file or folder; Ctrl+M opens Multi-Rename. F5 extracts eligible
         archives or copies filesystem items; F6 moves, F7 creates a directory, and F8 opens safe
-        deletion.
+        deletion. Add source configures one existing Ubuntu host folder on installer-managed
+        deployments; read-only access is the default.
       </p>
     </section>
   }

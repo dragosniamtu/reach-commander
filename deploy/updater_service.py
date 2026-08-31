@@ -1311,27 +1311,28 @@ class SourceManagementRuntime:
             except JournalError:
                 self._gate.release(gate_owner)
                 return self._error(request, "source_management_failed")
-            self._worker = threading.Thread(
-                target=self._add_worker,
-                args=(request, operation, gate_owner),
-                name="reachcommander-source-management",
-                daemon=True,
-            )
             try:
                 self._active_display_name = request.display_name
-                self._worker.start()
-            except RuntimeError:
-                self._active_display_name = None
-                failed = self._finished_operation(
-                    operation,
-                    phase="failed",
-                    reason_code="source_management_failed",
+                self._worker = threading.Thread(
+                    target=self._add_worker,
+                    args=(request, operation, gate_owner),
+                    name="reachcommander-source-management",
+                    daemon=True,
                 )
+                self._worker.start()
+            except Exception:
+                self._active_display_name = None
                 try:
+                    failed = self._finished_operation(
+                        operation,
+                        phase="failed",
+                        reason_code="source_management_failed",
+                    )
                     self._store.write(failed)
-                except JournalError:
+                except Exception:
                     pass
-                self._gate.release(gate_owner)
+                finally:
+                    self._gate.release(gate_owner)
                 return self._error(request, "source_management_failed")
             return SourceManagementResponse.from_operation(
                 request.request_id,
@@ -1355,6 +1356,15 @@ class SourceManagementRuntime:
         source_id: str | None = None,
         display_name: str | None = None,
     ) -> SourceManagementOperation:
+        updated_at = _iso_utc(self._clock())
+        created_time = _parse_timestamp(operation.created_at)
+        updated_time = _parse_timestamp(updated_at)
+        if (
+            created_time is not None
+            and updated_time is not None
+            and updated_time < created_time
+        ):
+            updated_at = operation.created_at
         return SourceManagementOperation(
             operation_id=operation.operation_id,
             source_id=source_id,
@@ -1363,7 +1373,7 @@ class SourceManagementRuntime:
             reason_code=reason_code,
             detail="",
             created_at=operation.created_at,
-            updated_at=_iso_utc(self._clock()),
+            updated_at=updated_at,
         )
 
     @staticmethod
@@ -1500,13 +1510,14 @@ class SourceManagementRuntime:
                         display_name=display_name,
                     )
                 )
-            except JournalError:
+            except Exception:
                 print(
                     "ReachCommander updater could not persist the source-management result.",
                     file=sys.stderr,
                 )
-            self._active_display_name = None
-            self._gate.release(gate_owner)
+            finally:
+                self._active_display_name = None
+                self._gate.release(gate_owner)
 
 
 class UpdaterRuntime:

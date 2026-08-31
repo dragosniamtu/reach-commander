@@ -37,7 +37,7 @@ An initially proposed systemd assertion that allowed writes only to exact files 
 ### GREEN
 
 - `python -m unittest tests.installer.test_updater_protocol tests.installer.test_updater_service tests.installer.test_support_bundle tests.installer.test_updater_trace`
-  - 108 tests passed; 9 expected Windows skips for Unix/POSIX-only behavior.
+  - 110 tests passed; 9 expected Windows skips for Unix/POSIX-only behavior.
 - `tests/installer/test_install.sh`
   - 33/33 passed; expected Windows skips for POSIX filesystem properties.
 - `tests/installer/test_command.sh`
@@ -82,4 +82,4 @@ The unrelated untracked `NC-theme.png` was not touched or staged.
 
 ## Independent review
 
-The independent review found no Critical or Important issues. Its exact-schema Minor was fixed with a RED/GREEN regression for both runtime and helper journals. The remaining observation is intentionally retained at the transport boundary: after the universal 64 KiB socket cap is exceeded, the service returns the existing uncorrelated transport error because it cannot safely establish v5 protocol identity by parsing or guessing from an oversized, potentially duplicate-bearing object. Complete v5 objects from 4,097 through 65,536 bytes are identified and receive the strict v5 `request_too_large` response.
+The independent review's exact-schema Minor was fixed with a RED/GREEN regression for both runtime and helper journals. Its lifecycle follow-up found that exceptional thread construction or terminal-state creation could retain the shared mutation gate; an unconditional cleanup boundary plus monotonic terminal timestamps now cover thread construction, start, worker finalization, and backward wall-clock movement, with focused RED/GREEN regressions. The reviewer verified the fix with 12/12 focused runtime tests and declared Task 3 review-clean. The remaining observation is intentionally retained at the transport boundary: after the universal 64 KiB socket cap is exceeded, the service returns the existing uncorrelated transport error because it cannot safely establish v5 protocol identity by parsing or guessing from an oversized, potentially duplicate-bearing object. Complete v5 objects from 4,097 through 65,536 bytes are identified and receive the strict v5 `request_too_large` response.

@@ -598,6 +598,52 @@ class SourceManagementRuntimeTests(unittest.TestCase):
             self.assertTrue(gate.try_acquire("probe"))
             gate.release("probe")
 
+    def test_thread_construction_failure_is_terminal_and_releases_the_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = updater_service.DeploymentMutationGate()
+            runtime = self.runtime(root, gate=gate)
+            with mock.patch(
+                "deploy.updater_service.threading.Thread",
+                side_effect=RuntimeError("private thread construction failure"),
+            ):
+                response = runtime.handle(source_request("addSource"))
+            persisted = updater_service.AtomicSourceOperationStore(
+                root / "state" / "source-runtime-operation.json"
+            ).read_optional()
+
+        self.assertEqual("source_management_failed", response["payload"]["code"])
+        self.assertIsNotNone(persisted)
+        self.assertEqual("failed", persisted.phase)
+        self.assertTrue(gate.try_acquire("probe"))
+        gate.release("probe")
+
+    def test_backward_clock_during_worker_finalization_never_leaks_the_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = updater_service.DeploymentMutationGate()
+            timestamps = iter((NOW, NOW - dt.timedelta(seconds=1)))
+            runtime = updater_service.SourceManagementRuntime(
+                self.supported_discovery(),
+                updater_service.AtomicSourceOperationStore(
+                    root / "state" / "source-runtime-operation.json"
+                ),
+                runner=RecordingSourceRunner(),
+                gate=gate,
+                clock=lambda: next(timestamps),
+            )
+
+            runtime.handle(source_request("addSource"))
+            runtime.wait_for_worker()
+            persisted = updater_service.AtomicSourceOperationStore(
+                root / "state" / "source-runtime-operation.json"
+            ).read_optional()
+
+        self.assertIsNotNone(persisted)
+        self.assertEqual("completed", persisted.phase)
+        self.assertTrue(gate.try_acquire("probe"))
+        gate.release("probe")
+
     def test_reads_helper_progress_without_rewriting_its_recovery_journal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

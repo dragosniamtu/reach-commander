@@ -213,12 +213,16 @@ internal sealed class UnixSourceManagementGateway(
         }
         catch
         {
-            throw new SourceManagementFailedException();
+            throw mutation
+                ? new SourceManagementMutationOutcomeUnknownException()
+                : new SourceManagementFailedException();
         }
 
         if (Encoding.UTF8.GetByteCount(response) > MaximumMessageBytes)
         {
-            throw new SourceManagementFailedException();
+            throw mutation
+                ? new SourceManagementMutationOutcomeUnknownException()
+                : new SourceManagementFailedException();
         }
 
         try
@@ -238,7 +242,8 @@ internal sealed class UnixSourceManagementGateway(
             var payload = root.GetProperty("payload");
             if (action == "error")
             {
-                throw MapError(payload, expectedAction, operationId);
+                throw new DefiniteHostErrorException(
+                    MapError(payload, expectedAction, operationId));
             }
 
             if (!string.Equals(action, expectedAction, StringComparison.Ordinal))
@@ -255,6 +260,14 @@ internal sealed class UnixSourceManagementGateway(
             }
 
             return result;
+        }
+        catch (DefiniteHostErrorException exception)
+        {
+            throw exception.Error;
+        }
+        catch (SourceManagementException) when (mutation)
+        {
+            throw new SourceManagementMutationOutcomeUnknownException();
         }
         catch (SourceManagementException)
         {
@@ -376,7 +389,7 @@ internal sealed class UnixSourceManagementGateway(
         var requestAction = RequiredString(payload, "requestAction", 20);
         if (requestAction != expectedAction)
         {
-            return new SourceManagementProtocolIncompatibleException();
+            throw new SourceManagementProtocolIncompatibleException();
         }
 
         var operationId = OptionalCanonicalGuid(payload, "operationId");
@@ -384,19 +397,19 @@ internal sealed class UnixSourceManagementGateway(
         {
             if (operationId is null || operationId != expectedOperationId)
             {
-                return new SourceManagementProtocolIncompatibleException();
+                throw new SourceManagementProtocolIncompatibleException();
             }
         }
         else if (operationId is not null)
         {
-            return new SourceManagementProtocolIncompatibleException();
+            throw new SourceManagementProtocolIncompatibleException();
         }
 
         var code = RequiredString(payload, "code", 40);
         var detail = RequiredString(payload, "detail", 240);
         if (!ErrorDetails.TryGetValue(code, out var expectedDetail) || detail != expectedDetail)
         {
-            return new SourceManagementFailedException();
+            throw new SourceManagementFailedException();
         }
 
         return code switch
@@ -407,6 +420,12 @@ internal sealed class UnixSourceManagementGateway(
             "validation_failed" => new SourceManagementValidationException(),
             _ => new SourceManagementFailedException(),
         };
+    }
+
+    private sealed class DefiniteHostErrorException(SourceManagementException error)
+        : Exception
+    {
+        public SourceManagementException Error { get; } = error;
     }
 
     private static void ValidateProtocolVersion(JsonElement root)

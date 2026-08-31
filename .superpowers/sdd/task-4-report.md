@@ -43,6 +43,7 @@ The controller integration suite was added before the API surface. Eleven behavi
 - The shared Boolean drain allowed source/update overlap and let delayed cleanup reopen a newer restart's gate. An exclusive owner lease now rejects the second drain and makes stale disposal idempotent.
 - Caller cancellation or a transport disconnect after host acceptance could release the drain with the host worker still running. Submission is now cancellation-shielded after preflight, and post-send uncertainty retains the owner lease for a bounded fail-closed window.
 - The Unix transport accepted a JSON prefix before a newline while ignoring trailing frames and replacement-decoded invalid UTF-8. It now requires EOF after the sole frame and uses exception-fallback decoding.
+- A syntactically received Add response with duplicate fields or broken request/action/operation correlation was still treated as a definite rejection. Only an exact, fully validated host `error` frame is now definite; every other Add response-validation failure is classified as ambiguous and retains the bounded safety drain.
 
 Each RED failed for the expected missing or unsafe behavior before the corresponding production change. All focused regressions are now GREEN.
 
@@ -61,13 +62,13 @@ Each RED failed for the expected missing or unsafe behavior before the correspon
 
 | Gate | Result |
 |---|---|
-| Focused source-management unit tests | 31/31 passed |
+| Focused source-management unit tests | 32/32 passed |
 | Focused source-management API integration tests | 14/14 passed |
 | Full Debug unit tests | 677/677 passed |
 | Full Debug integration tests before final numeric-contract regression | 124/124 passed |
-| Impacted source/update unit tests | 91/91 passed |
+| Impacted source/update unit tests | 93/93 passed |
 | Impacted source/update API integration tests | 28/28 passed |
-| `dotnet test ReachCommander.slnx -c Release --no-restore` | 686 unit + 126 integration passed; zero failures/skips |
+| `dotnet test ReachCommander.slnx -c Release --no-restore` | 688 unit + 126 integration passed; zero failures/skips |
 | `dotnet publish src/ReachCommander.Api/ReachCommander.Api.csproj -c Release --no-restore -o artifacts/task4-publish -p:BuildAngularOnPublish=false` | passed |
 | Scoped `dotnet format ... whitespace --verify-no-changes --no-restore` | passed |
 | `git diff --check` | passed |

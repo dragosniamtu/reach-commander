@@ -130,6 +130,28 @@ public sealed class SourceManagementGatewayTests
         Assert.DoesNotContain("/srv/private", exception.PublicDetail, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(
+        "\"operationId\":\"22222222-2222-2222-2222-222222222222\"",
+        "\"operationId\":\"22222222-2222-2222-2222-222222222222\",\"operationId\":\"22222222-2222-2222-2222-222222222222\"")]
+    [InlineData(
+        "11111111-1111-1111-1111-111111111111",
+        "33333333-3333-3333-3333-333333333333")]
+    public async Task Add_response_validation_failure_is_an_ambiguous_outcome(
+        string expected,
+        string replacement)
+    {
+        var response = OperationResponse("addSource", "accepted")
+            .Replace(expected, replacement, StringComparison.Ordinal);
+
+        var exception = await Assert.ThrowsAsync<SourceManagementMutationOutcomeUnknownException>(
+            () => Gateway(response).AddAsync(
+                new SourceAddRequest("Archive", "/srv/archive", SourceAccess.ReadOnly),
+                default));
+
+        Assert.Equal("source_management_failed", exception.Code);
+    }
+
     [Fact]
     public async Task Oversized_response_is_rejected_without_exposing_content()
     {

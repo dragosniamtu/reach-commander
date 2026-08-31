@@ -27,4 +27,4 @@ Task 2: complete (commits 8d58ca1, 42ee4c1, 1dc0916, a184993, 9187a94, 302292e; 
 Task 3: complete (commits 0a8bd10, e9b652b, 59fa7ca; review clean)
 Task 4: complete (commits 50ebe32, 9a799b8, c50d5a8, 9190630, f878b0a; final review clean)
 Task 5: complete (commits 83107b8, 8a3e421, 8f2eda8, 4617687; final review clean)
-Task 6: implementation and final-review fixes complete (commits 7e81a9e, a8877c6; canonical E2E fixture follow-up pending final confirmation)
+Task 6: implementation and final-review fixes complete (commits 7e81a9e, a8877c6, c620630; runtime fixture allowlist hardening complete, final confirmation pending)

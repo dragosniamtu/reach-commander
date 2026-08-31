@@ -2,11 +2,21 @@ import { expect, test } from "@playwright/test";
 import {
   routeInstallerManagedSourceManagement,
   routeUnsupportedSourceManagement,
+  sourceOperation,
 } from "../support/source-management-fixture";
 
 test.use({ serviceWorkers: "block" });
 
 test("unsupported deployments explain why Add source is disabled", async ({ page }) => {
+  const runtimeOverride = sourceOperation({
+    phase: "completed",
+    sourceId: "runtime-override-check",
+    reasonCode: "not-a-production-reason",
+    detail: "private /srv detail",
+  } as never);
+  expect(runtimeOverride.reasonCode).toBe("completed");
+  expect(runtimeOverride.detail).toBe("The source has been added.");
+
   await routeUnsupportedSourceManagement(page);
   await page.goto("/");
 

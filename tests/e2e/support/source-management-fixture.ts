@@ -69,20 +69,18 @@ export const baseSources: readonly SourceFixture[] = [
   source("archive", "Archive", true, false, false),
 ];
 
-function sourceOperation(overrides: SourceOperationUpdate = {}): SourceOperationFixture {
-  const { failedReason, ...operationOverrides } = overrides;
-  const phase = operationOverrides.phase ?? "accepted";
-  const status = canonicalOperationStatus(phase, failedReason);
+export function sourceOperation(overrides: SourceOperationUpdate = {}): SourceOperationFixture {
+  const phase = overrides.phase ?? "accepted";
+  const status = canonicalOperationStatus(phase, overrides.failedReason);
   return {
     operationId,
-    sourceId: null,
-    displayName: "Family media",
+    sourceId: overrides.sourceId ?? null,
+    displayName: overrides.displayName ?? "Family media",
     phase,
     reasonCode: status.reasonCode,
     detail: status.detail,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    ...operationOverrides,
+    createdAt: overrides.createdAt ?? timestamp,
+    updatedAt: overrides.updatedAt ?? timestamp,
   };
 }
 

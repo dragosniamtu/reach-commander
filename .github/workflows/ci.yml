@@ -303,6 +303,15 @@ jobs:
           printf '%s\n' 'copy payload' >"$smoke_root/source-a/incoming/copy.txt"
           printf '%s\n' 'copy canary' >"$smoke_root/source-a/incoming/copy-canary.txt"
           printf '%s\n' 'trash canary' >"$smoke_root/source-b/target/trash-canary.txt"
+          printf '%s\n' \
+            '1' \
+            '00:00:01,000 --> 00:00:01,500' \
+            'First cue' \
+            '' \
+            '2' \
+            '00:00:01,600 --> 00:00:01,900' \
+            'Second cue' \
+            >"$smoke_root/source-a/incoming/media-smoke.srt"
           mkdir -p "$smoke_root/data/auth" "$smoke_root/data/keys" "$smoke_root/updater"
           chmod 0755 "$smoke_root" "$smoke_root/source-a" "$smoke_root/source-b"
           chmod 0700 "$smoke_root/data" "$smoke_root/data/auth" "$smoke_root/data/keys"
@@ -421,6 +430,15 @@ jobs:
             sleep 0.25
           done
           [[ -n "$setup_code" ]]
+          if ! failure_context="$(docker exec reachcommander-smoke ffmpeg \
+            -hide_banner -loglevel error \
+            -f lavfi -i color=c=black:s=320x180:r=24 \
+            -f lavfi -i sine=frequency=1000:sample_rate=48000 \
+            -t 2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+            -c:a aac -movflags +faststart \
+            /sources/source-a/incoming/media-smoke.mp4 2>&1)"; then
+            diagnose 1 'generate media-smoke.mp4 with packaged FFmpeg'
+          fi
           mount_destinations="$(docker inspect --format '{{range .Mounts}}{{println .Destination}}{{end}}' reachcommander-smoke)"
           grep -Fx '/run/reachcommander-updater' <<<"$mount_destinations"
           if grep -Fx '/var/run/docker.sock' <<<"$mount_destinations"; then
@@ -434,6 +452,13 @@ jobs:
               --source-a-root "$smoke_root/source-a" \
               --source-b-root "$smoke_root/source-b" 2>&1)"; then
             diagnose 1 'authenticated Copy, Trash, and Restore lifecycle'
+          fi
+          printf '%s\n' "$failure_context"
+          failure_context=''
+          if ! failure_context="$(python3 tools/container_media_preview_smoke.py \
+            --base-url "http://127.0.0.1:$port" \
+            --source-root "$smoke_root/source-a" 2>&1)"; then
+            diagnose 1 'authenticated media preview and subtitle save lifecycle'
           fi
           printf '%s\n' "$failure_context"
 

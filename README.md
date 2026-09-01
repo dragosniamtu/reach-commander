@@ -6,7 +6,7 @@
 [![Angular 22](https://img.shields.io/badge/Angular-22-DD0031)](https://angular.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](Dockerfile)
 
-ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, authoritative single and batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on native Windows and containerized Linux hosts.
+ReachCommander is a production-oriented, self-hosted dual-pane file manager inspired by Total Commander. It pairs an installable Angular 22 Progressive Web App with an ASP.NET Core 10 backend to deliver read-only ZIP/RAR/7z browsing, controlled archive extraction, manual SRT subtitle synchronization, authoritative single and batch rename, bounded streamed uploads, wildcard search, cross-platform hardware telemetry, and hardened filesystem confinement on native Windows and containerized Linux hosts.
 
 ![ReachCommander dual-pane interface](docs/images/reachcommander-overview.png)
 
@@ -21,6 +21,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - **Safe batch algorithms:** two-phase temporary renames support swaps, cycles, and case-only changes with compensation and one-level Undo.
 - **Streamed upload safety:** multipart files are bounded, staged beside their destination, committed all-or-nothing, and serialized with renames through a shared directory lock.
 - **Isolated archive handling:** ZIP, RAR, and 7z parsing runs in a bounded child worker; previews are immutable, extraction is conflict-safe, and the worker never receives destination paths.
+- **Non-destructive subtitle synchronization:** supported videos use an authenticated direct or temporary HLS preview; corrected SRT timing is regenerated server-side after the original is preserved byte-for-byte.
 - **Cross-platform observability:** Windows and Linux collectors normalize CPU, memory, storage, GPU, temperature, fan, network, and uptime data without shelling out to vendor tools.
 - **Installable without data leakage:** Angular's production service worker caches only the versioned application shell; filesystem listings and every `/api` response remain network-only.
 - **Built-in authentication:** first-run administrator creation, rate-limited login, antiforgery protection, password change, logout, and persisted cookie keys protect the API and Angular shell.
@@ -51,6 +52,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Read-only virtual browsing for supported single and multi-volume ZIP, RAR, and 7z archives.
 - F5 extraction of selected archive entries or one focused unopened archive, with immutable review, live progress, cancellation, conflict blocking, and recovery guidance.
 - F5 Copy, F6 Move, F7 MkDir, and F8 Delete with immutable previews, durable queued progress, Background/restore, Overwrite, Skip, and Create Unique Name conflict handling.
+- Enter/double-click MP4, MKV, or AVI files to synchronize a same-name SRT with one constant timing offset and a reviewed, transactional save.
 - Source-local managed Trash with Restore, conflict-safe unique naming, selected permanent deletion, and source-scoped or all-source Empty Trash.
 - Live CPU, memory, storage, GPU, thermal, fan, network, and uptime telemetry when the host exposes it.
 - Installable PWA delivery with offline shell startup, explicit updates, and network-only filesystem/API data.
@@ -58,7 +60,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Canonical path confinement with traversal, rooted-path, UNC-path, and symlink-escape rejection.
 - ASP.NET Core static SPA hosting, Docker packaging, health checks, and hardened Compose defaults.
 
-Downloads, file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
+Downloads, general-purpose file previews, multi-user roles, thumbnails, password-protected archives, nested-archive browsing, recursive search, and host device mounting are intentionally excluded from the current release.
 
 ## Architecture
 
@@ -100,6 +102,7 @@ tests/e2e                           deterministic Playwright acceptance flow
 - .NET SDK 10.0.400 or a compatible .NET 10 feature band (`global.json` permits `latestFeature`).
 - Node.js 24.15 or newer (or Node 22.22.3+) and npm 10 for Angular 22.
 - Docker Engine with Docker Compose v2 for Ubuntu container deployment, or Docker Desktop for macOS.
+- FFmpeg/FFprobe 6.1.2 or compatible binaries on `PATH` when running the backend natively; the production container includes pinned Alpine binaries.
 - Chromium installed through Playwright only when running browser tests.
 
 ## Install on Ubuntu
@@ -216,6 +219,8 @@ services:
 The supplied container runs as UID/GID `1000:1000`, drops all Linux capabilities, enables `no-new-privileges`, uses a read-only root filesystem, and provides only a small `/tmp` tmpfs. Authentication state and Data Protection keys live in the dedicated writable `/data` mount, not in the image. Ensure UID 1000 owns that narrowly scoped data directory and can read the mounted source directories. Any destination enabled for rename, upload, or extraction must be configured with `readOnly: false`, mounted `:rw`, and writable by UID/GID 1000; application policy alone cannot grant host permission. The API listens on container port 8080 and Compose publishes host port 8092.
 
 The framework-dependent archive worker and SharpCompress 0.50.4 are published under `/app/archive-worker/` inside the image. No `unrar`, `7zip`, or other operating-system archive package is installed or invoked.
+
+The image also includes Alpine `ffmpeg`/`ffprobe` `6.1.2-r2` for bounded media inspection and temporary HLS preview generation. See [the FFmpeg third-party notice](THIRD-PARTY-NOTICES-FFMPEG.md) for license and Corresponding Source information.
 
 The checked-in `config/sources.json` and `compose.yaml` intentionally keep every configured source read-only. To opt in one narrowly scoped source, make both changes in deployment-specific files:
 
@@ -412,6 +417,14 @@ Permanent deletion never silently replaces Trash. The UI and API require this ex
 
 Back up `/data` for authentication plus durable operation metadata, and back up each writable source's `.reachcommander-trash` when deleted files must remain recoverable. Uninstallers do not remove source-local Trash. Read-only sources may be copied from but cannot be moved, deleted, restored into, or used for MkDir. None of these controls replaces filesystem backups.
 
+## Subtitle synchronization
+
+Press `Enter` or double-click an MP4, MKV, or AVI file in a filesystem panel to open the blocking **Synchronize subtitles** workspace. ReachCommander automatically loads a same-name SRT from the same directory when present; another same-directory SRT can be entered by logical path. SRT is the only subtitle format in this release. Browser-ready H.264/AAC MP4 uses authenticated byte-range playback. MKV, AVI, or an incompatible MP4 is transcoded to temporary HLS by one bounded FFmpeg worker; temporary assets live under `/data/media-previews` and are removed when the workspace closes or its 20-minute session expires.
+
+The timing control applies one constant offset from `-600000` through `+600000` milliseconds. Positive values display subtitles later and negative values earlier. Defaults limit an SRT to 4 MiB and 20,000 cues, queue at most eight previews, cap each transcode at 90 minutes and 8 GiB of temporary output, and capture no more than 64 KiB of process diagnostics. These limits are configurable under `MediaPreview`, but increasing them also increases CPU, disk, and denial-of-service exposure.
+
+Saving is available only on a writable source. Review shows the exact mapping before execution: `movie.srt` becomes the first free backup name, starting with `movie_original.srt`, then `movie_original (2).srt`; corrected UTF-8 content is published back to `movie.srt`. The original is preserved byte-for-byte, the video is never modified, and a failed publication rolls the subtitle back or reports explicit recovery guidance. A read-only source supports preview and offset testing but never enables Save.
+
 ## Archives
 
 Press `Enter` or double-click a supported primary archive to open it as a virtual folder. The pane displays `Archive · RO`, uses a source-qualified path such as `Downloads:/photos.zip!/Family`, and keeps search, sort, selection, tabs, refresh, and parent navigation available. Archive contents are always read-only: Add files and Multi-Rename remain disabled, and an archive-looking entry inside another archive remains an ordinary file because nested browsing is not supported.
@@ -531,6 +544,13 @@ POST /api/trash/preview-restore
 POST /api/trash/restore
 DELETE /api/trash/items
 DELETE /api/trash
+POST /api/media-previews
+GET /api/media-previews/{sessionId}
+GET /api/media-previews/{sessionId}/content
+GET /api/media-previews/{sessionId}/hls/{assetName}
+POST /api/media-previews/{sessionId}/subtitle-save-plans
+POST /api/media-previews/subtitle-save-plans/{planId}/execute
+DELETE /api/media-previews/{sessionId}
 GET /health
 ```
 

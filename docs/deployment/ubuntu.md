@@ -196,6 +196,16 @@ sudo reachcommander logs
 
 Use the newly emitted first-run setup code to create the replacement administrator. The existing key ring can remain, but the replacement account's security stamp makes old cookies invalid. If `account.json` or another authentication file is malformed, `sudo reachcommander doctor` fails without printing its contents. Preserve the malformed bytes for recovery instead of deleting them casually. Account reset never requires changing or removing a configured source directory.
 
+## Synchronize SRT subtitles
+
+The release image includes pinned Alpine FFmpeg and FFprobe binaries. Press `Enter` or double-click an MP4, MKV, or AVI in a filesystem panel to open **Synchronize subtitles**. A same-name SRT in that directory loads automatically; SRT is the only supported subtitle format. H.264/AAC MP4 can stream directly with authenticated byte ranges. Other supported containers/codecs use a temporary browser-compatible HLS preview.
+
+Temporary preview files are written only below `/data/media-previews`, inside the existing application-data mount, and are removed when the workspace closes or its session expires. Do not add a broad source or separate media-preview host mount. Defaults allow one FFmpeg worker, an eight-item queue, 90 minutes and 8 GiB of temporary output per transcode, 4 MiB per SRT, 20,000 cues, and one constant offset up to ten minutes earlier or later.
+
+Preview works on a read-only source, but Save does not. On a writable source, the review preserves `movie.srt` byte-for-byte as the first free backup—`movie_original.srt`, then `movie_original (2).srt`—and publishes corrected UTF-8 timing at `movie.srt`. The video is never modified. Back up the source normally; subtitle backups are not a version history or a replacement for filesystem backups.
+
+The exact package and license/source offer are documented in the repository's `THIRD-PARTY-NOTICES-FFMPEG.md`. A normal installer-managed update replaces the complete image, including these tools; no host FFmpeg package is required.
+
 ## Put HTTPS in front
 
 Use one of the checked-in examples as a starting point:
@@ -382,3 +392,5 @@ Keep a verified backup until you have confirmed that you no longer need the acco
 - **Add source is disabled:** unsupported platforms remain read-only. On an older installer-managed Ubuntu host, rerun the latest checksum-verified installer once; an image-only update cannot upgrade the root-owned source helper.
 - **A source add is rejected:** enter an existing absolute Ubuntu host folder below a specific child directory, check every parent with `namei -l`, and confirm each ancestor is root-owned and not group- or world-writable. Then test read/traverse/write access as the configured runtime UID/GID. `/home/user/...` normally fails; prepare a narrow root-controlled stable mount below `/srv` instead of weakening a broad parent directory. An unsafe existing configured source also blocks a new add until that mapping is safely reconfigured.
 - **A source add timed out or rolled back:** keep the protected operation/transaction files intact, then collect the `doctor`, `status`, systemd status, and updater journal support diagnostics shown above before retrying.
+- **Media preview reports unavailable or probing/transcoding fails:** confirm the running image is the current official release, then run `sudo docker exec reachcommander ffmpeg -version` and `sudo docker exec reachcommander ffprobe -version`. Both must report 6.1.2. Collect `sudo reachcommander logs` and `sudo reachcommander doctor`; do not install host codecs into the running container or expose physical paths in a support report.
+- **Temporary media previews consume unexpected space:** close abandoned browser workspaces and wait at least one cleanup interval. Confirm `/opt/reachcommander/data/media-previews` is inside the existing data tree and not a separate mount. If files remain after sessions expire, preserve logs and run `sudo reachcommander doctor` before manual cleanup.

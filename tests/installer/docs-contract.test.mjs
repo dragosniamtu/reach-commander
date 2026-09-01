@@ -137,6 +137,37 @@ test('README points operators to the Ubuntu guide without replacing development 
   assert.doesNotMatch(readme, new RegExp(['no built-in', 'authentication'].join(' '), 'i'));
 });
 
+test('operator docs define bounded subtitle synchronization and FFmpeg troubleshooting', async () => {
+  const paths = [
+    'README.md',
+    'docs/INSTALL.md',
+    'docs/deployment/ubuntu.md',
+    'THIRD-PARTY-NOTICES-FFMPEG.md',
+  ];
+  const content = (await Promise.all(paths.map(readRequired))).join('\n');
+  for (const required of [
+    'MP4',
+    'MKV',
+    'AVI',
+    'SRT',
+    'same-name',
+    '_original.srt',
+    '_original (2).srt',
+    'read-only source',
+    '/data/media-previews',
+    '4 MiB',
+    '20,000 cues',
+    '90 minutes',
+    '8 GiB',
+    'ffmpeg -version',
+    'ffprobe -version',
+  ]) {
+    assert.ok(content.includes(required), `subtitle synchronization docs are missing: ${required}`);
+  }
+  assert.match(content, /temporary[\s\S]*removed[\s\S]*(?:close|expire)/i);
+  assert.match(content, /video[\s\S]*never modified/i);
+});
+
 test('macOS guide documents the one-command Docker Desktop boundary', async () => {
   const guide = await readRequired('docs/deployment/macos.md');
   for (const required of [

@@ -9,6 +9,12 @@ const containerOperationsSmokeUrl = new URL(
   '../../tools/container_file_operations_smoke.py',
   import.meta.url,
 );
+const containerMediaPreviewSmokeUrl = new URL(
+  '../../tools/container_media_preview_smoke.py',
+  import.meta.url,
+);
+const dockerfileUrl = new URL('../../Dockerfile', import.meta.url);
+const ffmpegNoticeUrl = new URL('../../THIRD-PARTY-NOTICES-FFMPEG.md', import.meta.url);
 
 async function workflow() {
   return readFile(workflowUrl, 'utf8');
@@ -350,6 +356,48 @@ test('container smoke proves Copy, Trash, Restore, and host-path redaction', asy
   assert.match(lifecycle, /"X-Forwarded-Proto": "https"/);
   assert.match(lifecycle, /DefaultCookiePolicy/);
   assert.match(lifecycle, /secure_protocols=\("https", "http", "wss"\)/);
+});
+
+test('runtime pins FFmpeg and the container smoke proves the media lifecycle', async () => {
+  const content = await workflow();
+  const dockerfile = await readFile(dockerfileUrl, 'utf8');
+  const lifecycle = await readFile(containerMediaPreviewSmokeUrl, 'utf8');
+  const notice = await readFile(ffmpegNoticeUrl, 'utf8');
+  const smokeStart = content.indexOf('  container-smoke:');
+  const publishStart = content.indexOf('  container-publish:');
+  const smoke = content.slice(smokeStart, publishStart);
+
+  assert.match(dockerfile, /FROM mcr\.microsoft\.com\/dotnet\/aspnet:10\.0-alpine3\.22 AS runtime/);
+  assert.match(dockerfile, /ARG FFMPEG_PACKAGE_VERSION=6\.1\.2-r2/);
+  assert.match(dockerfile, /apk add --no-cache "ffmpeg=\$\{FFMPEG_PACKAGE_VERSION\}"/);
+  assert.match(dockerfile, /ffmpeg -version \| grep -F 'ffmpeg version 6\.1\.2'/);
+  assert.match(dockerfile, /ffprobe -version \| grep -F 'ffprobe version 6\.1\.2'/);
+  assert.match(dockerfile, /THIRD-PARTY-NOTICES-FFMPEG\.md/);
+  assert.match(notice, /GPL-2\.0-or-later AND LGPL-2\.1-or-later/);
+  assert.match(notice, /6\.1\.2-r2/);
+  assert.match(notice, /Corresponding Source/i);
+
+  for (const marker of [
+    'container_media_preview_smoke.py',
+    'media-smoke.mp4',
+    'media-smoke.srt',
+    'docker exec reachcommander-smoke ffmpeg',
+  ]) {
+    assert.ok(smoke.includes(marker), `container media smoke is missing: ${marker}`);
+  }
+  assert.doesNotMatch(smoke, /target=\/data\/media-previews/);
+  for (const endpoint of [
+    '/api/auth/login',
+    '/api/media-previews',
+    '/content',
+    '/subtitle-save-plans',
+    '/execute',
+  ]) {
+    assert.ok(lifecycle.includes(endpoint), `media lifecycle is missing: ${endpoint}`);
+  }
+  assert.match(lifecycle, /Range/);
+  assert.match(lifecycle, /media-smoke_original\.srt/);
+  assert.match(lifecycle, /00:00:02,000 --> 00:00:02,500/);
 });
 
 test('container smoke preserves and annotates runtime diagnostics before cleanup', async () => {

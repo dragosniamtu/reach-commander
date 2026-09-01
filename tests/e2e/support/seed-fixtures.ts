@@ -320,12 +320,31 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
     join(mediaRoot, "Movies", "Gladiator II.mkv"),
     "deterministic fixture\n",
   );
+  writeFileSync(join(mediaRoot, "Movies", "Family Movie.mp4"), "mocked video fixture\n");
+  writeFileSync(
+    join(mediaRoot, "Movies", "Family Movie.srt"),
+    "1\r\n00:00:01,000 --> 00:00:02,000\r\nHello family\r\n",
+  );
+  writeFileSync(
+    join(mediaRoot, "Movies", "Alternate.srt"),
+    "1\r\n00:00:03,000 --> 00:00:04,000\r\nAlternate cue\r\n",
+  );
+  writeFileSync(join(mediaRoot, "Movies", "Fallback Movie.mkv"), "mocked MKV fixture\n");
+  writeFileSync(
+    join(mediaRoot, "Movies", "Fallback Movie.srt"),
+    "1\r\n00:00:01,000 --> 00:00:02,000\r\nFallback cue\r\n",
+  );
   writeFileSync(
     join(mediaRoot, "Movies", longFileNameFixture),
     "long filename layout fixture\n",
   );
   writeFileSync(join(mediaRoot, "Conflicts", "root.txt"), "conflict fixture\n");
   writeFileSync(join(archiveRoot, "locked.txt"), "read-only fixture\n");
+  writeFileSync(join(archiveRoot, "Read Only Movie.mp4"), "mocked read-only video\n");
+  writeFileSync(
+    join(archiveRoot, "Read Only Movie.srt"),
+    "1\r\n00:00:01,000 --> 00:00:02,000\r\nRead-only cue\r\n",
+  );
 
   const archiveFixtures = join(repositoryRoot, "tests", "fixtures", "archives");
   for (const name of ["nested.zip", "sample.7z"]) {

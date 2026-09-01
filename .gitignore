@@ -17,6 +17,7 @@ __pycache__/
 # Playwright
 **/playwright-report/
 **/test-results/
+tests/e2e/debug.log
 
 # Local source fixtures
 dev-sources/**

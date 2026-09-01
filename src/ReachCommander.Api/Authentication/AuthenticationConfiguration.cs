@@ -18,6 +18,8 @@ public static class AuthenticationConfiguration
     public const string LoginPolicy = "authentication-login";
     public const string SupportBundlePolicy = "system-update-support-bundle";
     public const string SourceManagementPolicy = "source-management";
+    public const string MediaPreviewPolicy = "media-preview";
+    public const string MediaPreviewAssetPolicy = "media-preview-assets";
     public const string AntiforgeryHeaderName = "X-ReachCommander-CSRF";
 
     public static IServiceCollection AddReachCommanderAuthentication(
@@ -75,15 +77,22 @@ public static class AuthenticationConfiguration
                     StringComparison.OrdinalIgnoreCase);
                 var sourceManagement = IsSourceManagementAddPath(
                     context.HttpContext.Request.Path);
+                var mediaPreview = context.HttpContext.Request.Path.StartsWithSegments(
+                    "/api/media-previews",
+                    StringComparison.OrdinalIgnoreCase);
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
-                    Title = sourceManagement
+                    Title = mediaPreview
+                        ? "Media-preview rate limit exceeded"
+                        : sourceManagement
                         ? "Source-management rate limit exceeded"
                         : supportBundle
                             ? "Support bundle rate limit exceeded"
                             : "Authentication rate limit exceeded",
-                    Detail = sourceManagement
+                    Detail = mediaPreview
+                        ? "Too many media-preview requests were submitted. Try again later."
+                        : sourceManagement
                         ? "Too many source changes were requested. Try again later."
                         : supportBundle
                             ? "Too many support bundles were requested. Try again later."
@@ -91,7 +100,9 @@ public static class AuthenticationConfiguration
                     Type = "https://httpstatuses.io/429",
                     Instance = context.HttpContext.Request.Path,
                 };
-                problem.Extensions["code"] = sourceManagement
+                problem.Extensions["code"] = mediaPreview
+                    ? "media_preview_rate_limited"
+                    : sourceManagement
                     ? "source_management_rate_limited"
                     : supportBundle
                         ? "support_bundle_rate_limited"
@@ -110,6 +121,10 @@ public static class AuthenticationConfiguration
                 FixedWindowPartition(context, permitLimit: 3));
             options.AddPolicy(SourceManagementPolicy, context =>
                 FixedWindowPartition(context, permitLimit: 3));
+            options.AddPolicy(MediaPreviewPolicy, context =>
+                FixedWindowPartition(context, permitLimit: 20));
+            options.AddPolicy(MediaPreviewAssetPolicy, context =>
+                FixedWindowPartition(context, permitLimit: 600));
         });
 
         return services;

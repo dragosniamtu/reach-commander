@@ -45,6 +45,14 @@ public sealed class AuthorizationBoundaryTests
             (HttpMethod.Post, "/api/trash/restore", true),
             (HttpMethod.Delete, "/api/trash/items", true),
             (HttpMethod.Delete, "/api/trash", true),
+            (HttpMethod.Post, "/api/media-previews", true),
+            (HttpMethod.Get, $"/api/media-previews/{identifier}", false),
+            (HttpMethod.Get, $"/api/media-previews/{identifier}/content", false),
+            (HttpMethod.Post, $"/api/media-previews/{identifier}/fallback", false),
+            (HttpMethod.Put, $"/api/media-previews/{identifier}/subtitle", true),
+            (HttpMethod.Post, $"/api/media-previews/{identifier}/subtitle-save-plans", true),
+            (HttpMethod.Post, $"/api/media-previews/subtitle-save-plans/{identifier}/execute", false),
+            (HttpMethod.Delete, $"/api/media-previews/{identifier}", false),
             (HttpMethod.Get, "/api/not-a-real-route", false),
         };
 
@@ -98,5 +106,10 @@ public sealed class AuthorizationBoundaryTests
         Assert.Equal(HttpStatusCode.BadRequest, renameResponse.StatusCode);
         Assert.True(File.Exists(Path.Combine(factory.MediaRoot, originalName)));
         Assert.False(File.Exists(Path.Combine(factory.MediaRoot, renamedName)));
+
+        var previewResponse = await client.PostAsJsonAsync(
+            "/api/media-previews",
+            new { sourceId = "media", videoPath = "/Movies/Gladiator II.mkv" });
+        Assert.Equal(HttpStatusCode.BadRequest, previewResponse.StatusCode);
     }
 }

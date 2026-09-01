@@ -14,6 +14,7 @@ using ReachCommander.Application.Authentication;
 using ReachCommander.Application.SystemMetrics;
 using ReachCommander.Application.Archives;
 using ReachCommander.Application.SourceManagement;
+using ReachCommander.Application.MediaPreviews;
 using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Domain.Archives;
 using ReachCommander.Infrastructure.Archives.Catalog;
@@ -33,6 +34,7 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
     private readonly TestSystemUpdateService _systemUpdates = new();
     private readonly TestSourceManagementService _sourceManagement = new();
     private readonly TestSystemUpdateSupportBundleService _systemUpdateSupportBundle = new();
+    private readonly TestMediaPreviewService _mediaPreviews = new();
     private ISystemMutationDrain? _testDrain;
     private readonly ManualTimeProvider _clock = new(
         new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero));
@@ -159,6 +161,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
 
     internal TestSourceManagementService SourceManagement => _sourceManagement;
 
+    internal TestMediaPreviewService MediaPreviews => _mediaPreviews;
+
     public HttpClient CreateCookieClient() => CreateClient(new()
     {
         AllowAutoRedirect = false,
@@ -251,6 +255,8 @@ public sealed class ReachCommanderApiFactory : WebApplicationFactory<Program>
                 _sourceManagement.MutationGate = provider.GetRequiredService<ISystemMutationGate>();
                 return _sourceManagement;
             });
+            services.RemoveAll<IMediaPreviewService>();
+            services.AddSingleton<IMediaPreviewService>(_mediaPreviews);
             if (!_useRealSecurity)
             {
                 services

@@ -537,6 +537,7 @@ for source_signal in INT TERM; do
     for _ in {1..100}; do
       if [[ -s "$source_command_pid_path" ]] &&
         [[ -s "$SOURCE_HELPER_READY" ]] &&
+        [[ -s "$SOURCE_DESCENDANT_READY" ]] &&
         compgen -G "$INSTALL_ROOT/.source-add-stdout.??????" >/dev/null; then
         break
       fi

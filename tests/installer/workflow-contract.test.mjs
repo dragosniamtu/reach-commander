@@ -45,6 +45,20 @@ test('updater socket polling uses its bounded arithmetic counter', async () => {
   assert.doesNotMatch(installer, /for attempt in \{1\.\.100\}; do/);
 });
 
+test('application data validation narrowly accepts generated media preview assets', async () => {
+  const installer = await readFile(installerUrl, 'utf8');
+
+  assert.match(installer, /auth \| keys \| file-operations \| media-previews/);
+  assert.match(
+    installer,
+    /\^media-previews\/\[0-9a-f\]\{32\}\$/,
+  );
+  assert.match(
+    installer,
+    /\^media-previews\/\[0-9a-f\]\{32\}\/\(index\\\.m3u8\|segment-\[0-9\]\{6\}\\\.ts\)\$/,
+  );
+});
+
 test('installer verification runs inside acceptance before publication', async () => {
   const content = await workflow();
   const acceptanceStart = content.indexOf('  acceptance:');
@@ -305,7 +319,9 @@ test('container smoke uses the real rendered non-root configuration', async () =
   assert.match(smoke, /render_config\.py[\s\S]*render/);
   assert.match(smoke, /--access-mode[\s\\]+secure-https/);
   assert.match(smoke, /--access-mode[\s\\]+trusted-lan-http/);
+  assert.match(smoke, /--cpu-limit[\s\\]+3\.0/);
   assert.match(smoke, /REACHCOMMANDER_BIND_ADDRESS=0\.0\.0\.0/);
+  assert.match(smoke, /REACHCOMMANDER_CPU_LIMIT=3\.0/);
   assert.match(smoke, /REACHCOMMANDER_ALLOW_INSECURE_HTTP=true/);
   assert.match(smoke, /Authentication__AllowInsecureHttp/);
   assert.match(smoke, /--user 1000:1000/);

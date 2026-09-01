@@ -9,6 +9,7 @@ public sealed record SubtitleCue(
 public enum MediaPreviewPhase
 {
     Probing,
+    Queued,
     Transcoding,
     Ready,
     Failed,
@@ -36,7 +37,8 @@ public sealed record MediaPreviewSession(
     bool SourceReadOnly,
     DateTimeOffset ExpiresAt,
     string? FailureCode = null,
-    string? FailureDetail = null);
+    string? FailureDetail = null,
+    bool TranscodeActive = false);
 
 public sealed record MediaAsset(
     Stream Content,

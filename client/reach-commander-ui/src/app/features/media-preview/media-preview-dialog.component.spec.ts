@@ -151,6 +151,38 @@ describe('MediaPreviewDialogComponent', () => {
     expect(store.retryWithFallback).toHaveBeenCalledOnce();
   });
 
+  it('shows queued work separately and lets the user cancel it', () => {
+    store.state.set(readyState({
+      phase: 'queued',
+      session: { ...readyState().session!, phase: 'queued', playbackMode: 'hls' },
+    }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Waiting for preview worker');
+    const close = fixture.nativeElement.querySelector(
+      '[aria-label="Close subtitle synchronization"]',
+    ) as HTMLButtonElement;
+    expect(close.disabled).toBe(false);
+
+    close.click();
+    expect(store.close).toHaveBeenCalledOnce();
+  });
+
+  it('lets the user cancel an active transcode', () => {
+    store.state.set(readyState({
+      phase: 'transcoding',
+      session: { ...readyState().session!, phase: 'transcoding', playbackMode: 'hls' },
+    }));
+    fixture.detectChanges();
+
+    const close = fixture.nativeElement.querySelector(
+      '[aria-label="Close subtitle synchronization"]',
+    ) as HTMLButtonElement;
+    expect(close.disabled).toBe(false);
+    close.click();
+    expect(store.close).toHaveBeenCalledOnce();
+  });
+
   it('shows the exact original-to-backup mapping and confirms execution', () => {
     store.state.set(readyState({
       phase: 'review',
@@ -193,7 +225,7 @@ function readyState(overrides: Partial<MediaPreviewState> = {}): MediaPreviewSta
       subtitlePath: '/Movies/movie.srt',
       cues: [{ index: 0, startMilliseconds: 1_000, endMilliseconds: 2_000, text: 'Hello' }],
       sourceReadOnly: false, expiresAt: '2026-09-01T10:20:00Z',
-      failureCode: null, failureDetail: null,
+      failureCode: null, failureDetail: null, transcodeActive: false,
     },
     subtitleCandidates: [
       { name: 'Alternate.srt', path: '/Movies/Alternate.srt' },

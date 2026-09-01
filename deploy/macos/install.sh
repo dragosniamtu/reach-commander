@@ -10,6 +10,7 @@ RC_LOCK_DIRECTORY=''
 RC_LOCK_OWNED=false
 RC_BIND_ADDRESS='127.0.0.1'
 RC_PORT='8080'
+RC_CPU_LIMIT=''
 RC_CURRENT_PORT=''
 RC_RECONFIGURING=false
 RC_TRANSACTION_ROOT=''
@@ -57,6 +58,35 @@ rc_validate_port() {
     rc_die 'port must be an integer from 1 through 65535'
     return 1
   fi
+}
+
+rc_default_cpu_limit() {
+  local logical_cpus="${1:-}"
+  case "$logical_cpus" in
+    1) printf '0.75\n' ;;
+    2) printf '1.5\n' ;;
+    3) printf '2.0\n' ;;
+    *)
+      [[ "$logical_cpus" =~ ^[1-9][0-9]*$ ]] || {
+        rc_die 'logical CPU count is invalid'
+        return 1
+      }
+      printf '3.0\n'
+      ;;
+  esac
+}
+
+rc_detect_cpu_limit() {
+  local logical_cpus
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' && -n "${REACHCOMMANDER_TEST_LOGICAL_CPUS:-}" ]]; then
+    logical_cpus="$REACHCOMMANDER_TEST_LOGICAL_CPUS"
+  else
+    logical_cpus="$(sysctl -n hw.logicalcpu)" || {
+      rc_die 'logical CPU count could not be detected'
+      return 1
+    }
+  fi
+  RC_CPU_LIMIT="$(rc_default_cpu_limit "$logical_cpus")"
 }
 
 rc_validate_architecture() {
@@ -265,6 +295,7 @@ rc_render_deployment() {
   local port="$5"
   local uid="$6"
   local gid="$7"
+  local cpu_limit="$8"
   local temporary_plist
   local temporary_mounts_plist
   local mounts
@@ -275,6 +306,8 @@ rc_render_deployment() {
   rc_validate_port "$port" || return 1
   [[ "$uid" =~ ^[0-9]+$ && "$gid" =~ ^[0-9]+$ ]] ||
     { rc_die 'UID and GID must be numeric'; return 1; }
+  [[ "$cpu_limit" =~ ^(0\.75|1\.5|2\.0|3\.0)$ ]] ||
+    { rc_die 'CPU limit is invalid'; return 1; }
   [[ -f "$template" && ! -L "$template" ]] ||
     { rc_die 'Compose template is missing or unsafe'; return 1; }
   if [[ -e "$output" ]]; then
@@ -303,6 +336,7 @@ rc_render_deployment() {
     "REACHCOMMANDER_PORT=$port" \
     "REACHCOMMANDER_UID=$uid" \
     "REACHCOMMANDER_GID=$gid" \
+    "REACHCOMMANDER_CPU_LIMIT=$cpu_limit" \
     "REACHCOMMANDER_IMAGE=$image" >"$output/.env" || return 1
   chmod 0600 "$output/.env" || return 1
 
@@ -570,6 +604,7 @@ rc_preflight() {
     architecture="$REACHCOMMANDER_TEST_ARCHITECTURE"
   fi
   rc_validate_architecture "$architecture" || return 1
+  rc_detect_cpu_limit || return 1
   for command_name in \
     curl docker plutil lsof find grep sed tr cut mktemp chmod \
     id basename dirname route ipconfig cp mv rm rmdir cat sleep stat; do
@@ -961,7 +996,7 @@ rc_set_env_image() {
         seen=$((seen + 1))
         ;;
       REACHCOMMANDER_BIND_ADDRESS=* | REACHCOMMANDER_PORT=* | \
-        REACHCOMMANDER_UID=* | REACHCOMMANDER_GID=*)
+        REACHCOMMANDER_UID=* | REACHCOMMANDER_GID=* | REACHCOMMANDER_CPU_LIMIT=*)
         printf '%s\n' "$line" >>"$temporary"
         ;;
       *)
@@ -985,6 +1020,7 @@ rc_load_installed_environment() {
   local port=''
   local uid=''
   local gid=''
+  local cpu_limit=''
   local image=''
   local count=0
   [[ -f "$RC_INSTALL_ROOT/.env" && ! -L "$RC_INSTALL_ROOT/.env" ]] ||
@@ -998,23 +1034,32 @@ rc_load_installed_environment() {
       REACHCOMMANDER_PORT) [[ -z "$port" ]] || return 1; port="$value" ;;
       REACHCOMMANDER_UID) [[ -z "$uid" ]] || return 1; uid="$value" ;;
       REACHCOMMANDER_GID) [[ -z "$gid" ]] || return 1; gid="$value" ;;
+      REACHCOMMANDER_CPU_LIMIT) [[ -z "$cpu_limit" ]] || return 1; cpu_limit="$value" ;;
       REACHCOMMANDER_IMAGE) [[ -z "$image" ]] || return 1; image="$value" ;;
       *) rc_die 'installed environment file contains an unknown setting'; return 1 ;;
     esac
     count=$((count + 1))
   done <"$RC_INSTALL_ROOT/.env"
-  [[ "$count" == '5' ]] || { rc_die 'installed environment file must contain five settings'; return 1; }
+  if [[ "$count" == '5' && -z "$cpu_limit" ]]; then
+    cpu_limit="$RC_CPU_LIMIT"
+  elif [[ "$count" != '6' ]]; then
+    rc_die 'installed environment file must contain five legacy or six current settings'
+    return 1
+  fi
   [[ "$bind" == '127.0.0.1' || "$bind" == '0.0.0.0' ]] ||
     { rc_die 'installed bind address is invalid'; return 1; }
   rc_validate_port "$port" || return 1
   [[ "$uid" =~ ^[0-9]+$ && "$gid" =~ ^[0-9]+$ ]] ||
     { rc_die 'installed UID or GID is invalid'; return 1; }
+  [[ "$cpu_limit" =~ ^(0\.75|1\.5|2\.0|3\.0)$ ]] ||
+    { rc_die 'installed CPU limit is invalid'; return 1; }
   [[ "$image" =~ ^ghcr\.io/dragosniamtu/reach-commander@sha256:[0-9a-f]{64}$ ]] ||
     { rc_die 'installed image digest is invalid'; return 1; }
   RC_BIND_ADDRESS="$bind"
   RC_PORT="$port"
   RC_CURRENT_PORT="$port"
   RC_INSTALLED_IMAGE="$image"
+  RC_CPU_LIMIT="$cpu_limit"
 }
 
 rc_read_current_image() {
@@ -1126,7 +1171,7 @@ rc_reconfigure_existing() {
   stage="$RC_WORK_ROOT/deployment"
   if ! rc_fetch_template "$template" ||
     ! rc_render_deployment "$stage" "$template" "$current_digest" \
-      "$RC_BIND_ADDRESS" "$RC_PORT" "$(id -u)" "$(id -g)" ||
+      "$RC_BIND_ADDRESS" "$RC_PORT" "$(id -u)" "$(id -g)" "$RC_CPU_LIMIT" ||
     ! rc_compose "$stage" config --quiet ||
     ! rc_preflight_sources "$stage"; then
     rc_cleanup_work_root "$RC_WORK_ROOT" || true
@@ -1294,7 +1339,7 @@ main() {
   rc_fetch_template "$template" || return 1
   digest="$(rc_pull_digest stable)" || return 1
   rc_render_deployment "$stage" "$template" "$digest" \
-    "$RC_BIND_ADDRESS" "$RC_PORT" "$(id -u)" "$(id -g)" || return 1
+    "$RC_BIND_ADDRESS" "$RC_PORT" "$(id -u)" "$(id -g)" "$RC_CPU_LIMIT" || return 1
   rc_compose "$stage" config --quiet || return 1
   rc_preflight_sources "$stage" || return 1
   if ! rc_commit_generated "$stage"; then

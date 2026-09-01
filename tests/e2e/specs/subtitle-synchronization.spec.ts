@@ -59,10 +59,27 @@ test('shows bounded MKV fallback preparation before the workspace becomes ready'
 
   await row.dblclick();
   const dialog = page.getByRole('dialog', { name: 'Synchronize subtitles' });
+  await expect(dialog).toContainText('Waiting for preview worker');
   await expect(dialog).toContainText('Preparing browser-compatible video');
   await expect(dialog.getByText('Subtitle synchronization', { exact: true }))
     .toBeVisible({ timeout: 5_000 });
-  expect(media.statusReads).toBeGreaterThan(0);
+  expect(media.statusReads).toBeGreaterThan(1);
+});
+
+test('cancels a queued preview from the close control', async ({ page }) => {
+  const media = await routeMediaPreview(page);
+  const { row } = await openMediaMovie(page, 'Fallback Movie.mkv');
+
+  await row.dblclick();
+  const dialog = page.getByRole('dialog', { name: 'Synchronize subtitles' });
+  await expect(dialog).toContainText('Waiting for preview worker');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await expect(dialog).toBeHidden();
+  expect(media.requests).toContainEqual(expect.objectContaining({
+    method: 'DELETE',
+    path: '/api/media-previews/55555555-5555-4555-8555-555555555555',
+  }));
 });
 
 test('offers explicit HLS fallback when direct browser playback fails', async ({ page }) => {
@@ -74,7 +91,7 @@ test('offers explicit HLS fallback when direct browser playback fails', async ({
   const fallback = dialog.getByRole('button', { name: 'Prepare compatible preview' });
   await expect(fallback).toBeVisible({ timeout: 5_000 });
   await fallback.click();
-  await expect(dialog).toContainText('Preparing browser-compatible video');
+  await expect(dialog).toContainText('Waiting for preview worker');
   await expect.poll(() => media.fallbackRequests).toBe(1);
 });
 

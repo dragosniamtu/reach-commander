@@ -25,12 +25,14 @@ import { MediaPreviewStore } from '../../core/state/media-preview.store';
 export class MediaPreviewDialogComponent implements AfterViewInit {
   readonly store = inject(MediaPreviewStore);
   readonly busy = computed(() => [
-    'opening', 'probing', 'transcoding', 'selectingSubtitle', 'planning', 'saving',
+    'opening', 'probing', 'queued', 'transcoding', 'selectingSubtitle', 'planning', 'saving',
   ].includes(this.store.state().phase));
+  readonly closeBlocked = computed(() => this.store.state().phase === 'saving');
   readonly statusLabel = computed(() => {
     switch (this.store.state().phase) {
       case 'opening': return 'Opening video';
       case 'probing': return 'Inspecting video';
+      case 'queued': return 'Waiting for preview worker';
       case 'transcoding': return 'Preparing browser-compatible video';
       case 'selectingSubtitle': return 'Loading subtitle';
       case 'planning': return 'Preparing save review';
@@ -125,7 +127,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
 
   requestClose(): void {
     const state = this.store.state();
-    if (this.busy()) {
+    if (this.closeBlocked()) {
       return;
     }
     if (state.offsetMilliseconds !== 0 &&

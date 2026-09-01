@@ -121,6 +121,12 @@ export class MediaPreviewStore {
       ]);
       if (this.isCurrent(token, captured)) {
         this.applySession(session, token, captured, subtitleCandidates);
+      } else {
+        try {
+          await this.api.closeMediaPreview(session.sessionId);
+        } catch {
+          // The server heartbeat timeout cleans up if this best-effort close is interrupted.
+        }
       }
     } catch (error: unknown) {
       this.fail(error, token, captured);
@@ -252,7 +258,7 @@ export class MediaPreviewStore {
     const token = ++this.nextRequestToken;
     const context = state.context;
     this.invalidatePolling();
-    this.mutableState.set({ ...state, phase: 'transcoding', error: null, requestToken: token });
+    this.mutableState.set({ ...state, phase: 'queued', error: null, requestToken: token });
     try {
       const session = await this.api.requestMediaPreviewFallback(state.session.sessionId);
       if (this.isCurrent(token, context)) {
@@ -302,7 +308,10 @@ export class MediaPreviewStore {
         : null,
       requestToken: token,
     });
-    if (phase === 'probing' || phase === 'transcoding') {
+    if (phase === 'probing' ||
+        phase === 'queued' ||
+        phase === 'transcoding' ||
+        session.transcodeActive) {
       this.schedulePoll(token, context);
     } else {
       this.clearPoll();

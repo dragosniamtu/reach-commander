@@ -68,6 +68,7 @@ class RendererTestCase(unittest.TestCase):
         self.assertFalse(request.allow_insecure_http)
         self.assertEqual(1000, request.uid)
         self.assertEqual(1000, request.gid)
+        self.assertEqual("3.0", request.cpu_limit)
         self.assertEqual(IMAGE_DIGEST, request.image)
         self.assertEqual("media", request.sources[0].id)
         self.assertEqual("/srv/Family Media", request.sources[0].host_path)
@@ -94,6 +95,22 @@ class RendererTestCase(unittest.TestCase):
         payload["port"] = "8092"
         with self.assertRaisesRegex(ValueError, "port"):
             self.load_payload(payload)
+
+    def test_cpu_limit_is_a_bounded_plain_decimal(self) -> None:
+        accepted = (("0.25", "0.25"), ("3", "3.0"), ("3.00", "3.0"), ("64.0", "64.0"))
+        for value, expected in accepted:
+            with self.subTest(value=value):
+                payload = self.valid_payload()
+                payload["cpuLimit"] = value
+                self.assertEqual(expected, self.load_payload(payload).cpu_limit)
+
+        rejected = ("0.24", "64.01", "1e3", "+3", " 3", "3 ", "3\nOTHER=x", 3, None)
+        for value in rejected:
+            with self.subTest(value=value):
+                payload = self.valid_payload()
+                payload["cpuLimit"] = value
+                with self.assertRaisesRegex(ValueError, "cpuLimit"):
+                    self.load_payload(payload)
 
     def test_rejects_invalid_or_duplicate_source_ids(self) -> None:
         for value in ("Media", "-media", "media.path", "", "a" * 65):
@@ -255,6 +272,7 @@ class RendererTestCase(unittest.TestCase):
             self.assertIn("target: /data", compose)
             self.assertRegex(compose, r"target: /data\s+read_only: false")
             self.assertIn('ReverseProxy__TrustNetworkGateways: "true"', compose)
+            self.assertIn('cpus: "${REACHCOMMANDER_CPU_LIMIT}"', compose)
             self.assertNotIn("source-mounts.json", compose)
             self.assertNotIn("# installer-source-mounts", compose)
 
@@ -317,6 +335,7 @@ class RendererTestCase(unittest.TestCase):
                 "REACHCOMMANDER_ALLOW_INSECURE_HTTP=false\n"
                 "REACHCOMMANDER_UID=1000\n"
                 "REACHCOMMANDER_GID=1000\n"
+                "REACHCOMMANDER_CPU_LIMIT=3.0\n"
                 "REACHCOMMANDER_IMAGE=ghcr.io/dragosniamtu/reach-commander:stable\n",
                 encoding="utf-8",
             )
@@ -324,9 +343,10 @@ class RendererTestCase(unittest.TestCase):
             renderer.set_env_image(env_path, new_image)
             lines = env_path.read_text(encoding="utf-8").splitlines()
 
-            self.assertEqual(7, len(lines))
+            self.assertEqual(8, len(lines))
             self.assertEqual(f"REACHCOMMANDER_IMAGE={new_image}", lines[-1])
             self.assertEqual("REACHCOMMANDER_PORT=8092", lines[2])
+            self.assertEqual("REACHCOMMANDER_CPU_LIMIT=3.0", lines[-2])
 
     def test_source_paths_cli_emits_nul_delimited_host_paths(self) -> None:
         self.require_renderer()
@@ -375,6 +395,8 @@ class RendererTestCase(unittest.TestCase):
                     "1000",
                     "--gid",
                     "1000",
+                    "--cpu-limit",
+                    "3.0",
                     "--image",
                     "ghcr.io/dragosniamtu/reach-commander:stable",
                 ],
@@ -486,6 +508,7 @@ class RendererTestCase(unittest.TestCase):
                 8092,
                 1000,
                 1000,
+                "3.0",
                 "ghcr.io/dragosniamtu/reach-commander:stable",
             )
             with self.assertRaisesRegex(ValueError, "access"):

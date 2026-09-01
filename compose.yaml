@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     image: reachcommander:local
     container_name: reachcommander
+    cpus: "${REACHCOMMANDER_CPU_LIMIT:-3.0}"
     user: "1000:1000"
     ports:
       - "8092:8080"

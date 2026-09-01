@@ -576,7 +576,7 @@ export interface SystemUpdateSupportBundleDownload {
   readonly fileName: string;
 }
 
-export type MediaPreviewPhase = 'probing' | 'transcoding' | 'ready' | 'failed';
+export type MediaPreviewPhase = 'probing' | 'queued' | 'transcoding' | 'ready' | 'failed';
 export type MediaPlaybackMode = 'direct' | 'hls';
 
 export interface SubtitleCueDto {
@@ -604,6 +604,7 @@ export interface MediaPreviewDto {
   readonly expiresAt: string;
   readonly failureCode: string | null;
   readonly failureDetail: string | null;
+  readonly transcodeActive: boolean;
 }
 
 export interface SubtitleSavePlanDto {

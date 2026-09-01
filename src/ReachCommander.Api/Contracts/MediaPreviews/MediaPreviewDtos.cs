@@ -40,7 +40,8 @@ public sealed record MediaPreviewDto(
     bool SourceReadOnly,
     DateTimeOffset ExpiresAt,
     string? FailureCode,
-    string? FailureDetail)
+    string? FailureDetail,
+    bool TranscodeActive)
 {
     public static MediaPreviewDto FromModel(MediaPreviewSession session) => new(
         session.SessionId,
@@ -54,7 +55,8 @@ public sealed record MediaPreviewDto(
         session.SourceReadOnly,
         session.ExpiresAt,
         session.FailureCode,
-        session.FailureDetail);
+        session.FailureDetail,
+        session.TranscodeActive);
 }
 
 public sealed record SubtitleSavePlanDto(

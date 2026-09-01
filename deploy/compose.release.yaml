@@ -2,6 +2,7 @@ services:
   reachcommander:
     image: ${REACHCOMMANDER_IMAGE}
     container_name: reachcommander
+    cpus: "${REACHCOMMANDER_CPU_LIMIT}"
     user: "${REACHCOMMANDER_UID}:${REACHCOMMANDER_GID}"
     ports:
       - "${REACHCOMMANDER_BIND_ADDRESS}:${REACHCOMMANDER_PORT}:8080"

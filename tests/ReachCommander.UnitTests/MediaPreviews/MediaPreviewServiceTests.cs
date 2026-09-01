@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ReachCommander.Application.MediaPreviews;
@@ -134,7 +135,7 @@ public sealed class MediaPreviewServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_queues_HLS_for_a_non_direct_container()
+    public async Task CreateAsync_reports_HLS_as_queued_until_the_worker_starts()
     {
         WriteVideo("Movies/movie.mkv");
         var service = CreateService(
@@ -146,7 +147,93 @@ public sealed class MediaPreviewServiceTests : IDisposable
             default);
 
         Assert.Equal(MediaPlaybackMode.Hls, session.PlaybackMode);
-        Assert.Equal(MediaPreviewPhase.Transcoding, session.Phase);
+        Assert.Equal(MediaPreviewPhase.Queued, session.Phase);
+    }
+
+    [Fact]
+    public async Task ProcessQueuedAsync_reports_transcoding_only_while_the_runner_is_active()
+    {
+        WriteVideo("Movies/movie.mkv");
+        var service = CreateService(
+            readOnly: false,
+            new MediaProbeResult("matroska,webm", "hevc", "aac", 5_000));
+        var session = await service.CreateAsync(
+            new CreateMediaPreviewCommand("media", "/Movies/movie.mkv"),
+            default);
+        var runner = new BlockingTranscodeRunner();
+
+        var processing = service.ProcessQueuedAsync(session.SessionId, runner, default);
+        await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var active = await service.GetAsync(session.SessionId, default);
+        Assert.Equal(MediaPreviewPhase.Transcoding, active.Phase);
+        Assert.True(active.TranscodeActive);
+
+        runner.Complete();
+        await processing.WaitAsync(TimeSpan.FromSeconds(2));
+        var completed = await service.GetAsync(session.SessionId, default);
+        Assert.Equal(MediaPreviewPhase.Ready, completed.Phase);
+        Assert.False(completed.TranscodeActive);
+    }
+
+    [Fact]
+    public async Task DeleteAbandonedPendingOutputs_cancels_an_active_transcode_without_a_browser_heartbeat()
+    {
+        WriteVideo("Movies/abandoned.mkv");
+        var service = CreateService(
+            readOnly: false,
+            new MediaProbeResult("matroska,webm", "hevc", "aac", 5_000),
+            mediaOptions: new MediaPreviewOptions
+            {
+                PendingSessionInactivity = TimeSpan.FromSeconds(30),
+            });
+        var session = await service.CreateAsync(
+            new CreateMediaPreviewCommand("media", "/Movies/abandoned.mkv"),
+            default);
+        var runner = new BlockingTranscodeRunner(announceReadyOnStart: true);
+        var processing = service.ProcessQueuedAsync(session.SessionId, runner, default);
+        await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var playable = await service.GetAsync(session.SessionId, default);
+        Assert.Equal(MediaPreviewPhase.Ready, playable.Phase);
+        Assert.True(playable.TranscodeActive);
+        _clock.Advance(TimeSpan.FromSeconds(31));
+
+        service.DeleteAbandonedPendingOutputs();
+
+        await processing.WaitAsync(TimeSpan.FromSeconds(2));
+        var error = await Assert.ThrowsAsync<MediaPreviewException>(() =>
+            service.GetAsync(session.SessionId, default).AsTask());
+        Assert.Equal("preview_session_not_found", error.Code);
+    }
+
+    [Fact]
+    public async Task Hls_lifecycle_emits_traceable_session_logs()
+    {
+        WriteVideo("Movies/diagnostic.mkv");
+        var logger = new RecordingLogger<MediaPreviewService>();
+        var service = CreateService(
+            readOnly: false,
+            new MediaProbeResult("matroska,webm", "hevc", "aac", 5_000),
+            logger);
+        var session = await service.CreateAsync(
+            new CreateMediaPreviewCommand("media", "/Movies/diagnostic.mkv"),
+            default);
+        var runner = new BlockingTranscodeRunner();
+
+        var processing = service.ProcessQueuedAsync(session.SessionId, runner, default);
+        await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        runner.Complete();
+        await processing.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Contains(logger.Messages, message =>
+            message.Contains(session.SessionId.ToString(), StringComparison.Ordinal) &&
+            message.Contains("queued", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(logger.Messages, message =>
+            message.Contains(session.SessionId.ToString(), StringComparison.Ordinal) &&
+            message.Contains("started transcoding", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(logger.Messages, message =>
+            message.Contains(session.SessionId.ToString(), StringComparison.Ordinal) &&
+            message.Contains("ready", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -200,7 +287,9 @@ public sealed class MediaPreviewServiceTests : IDisposable
 
     private MediaPreviewService CreateService(
         bool readOnly,
-        MediaProbeResult? probeResult = null)
+        MediaProbeResult? probeResult = null,
+        ILogger<MediaPreviewService>? serviceLogger = null,
+        MediaPreviewOptions? mediaOptions = null)
     {
         var source = new SourceDefinition(
             "media",
@@ -211,7 +300,7 @@ public sealed class MediaPreviewServiceTests : IDisposable
             DefaultRight: false);
         var pathSecurity = new PathSecurityService(new FakeSourceCatalog(source));
         var paths = AuthenticationDataPaths.ForRoot(_temporary.CreateDirectory("data"));
-        var options = Options.Create(new MediaPreviewOptions());
+        var options = Options.Create(mediaOptions ?? new MediaPreviewOptions());
         var store = new MediaPreviewSessionStore(_clock, options);
         var queue = new MediaPreviewQueue(options);
         var fileSystem = new LocalMediaPreviewFileSystem();
@@ -244,7 +333,7 @@ public sealed class MediaPreviewServiceTests : IDisposable
             options,
             planner,
             executor,
-            NullLogger<MediaPreviewService>.Instance);
+            serviceLogger ?? NullLogger<MediaPreviewService>.Instance);
     }
 
     private void WriteVideo(string relativePath)
@@ -269,6 +358,50 @@ public sealed class MediaPreviewServiceTests : IDisposable
         public ValueTask<MediaProbeResult> ProbeAsync(
             string inputPhysicalPath,
             CancellationToken cancellationToken) => ValueTask.FromResult(result);
+    }
+
+    private sealed class BlockingTranscodeRunner(bool announceReadyOnStart = false)
+        : IMediaTranscodeRunner
+    {
+        private readonly TaskCompletionSource _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task RunAsync(
+            string inputPhysicalPath,
+            string outputDirectory,
+            Action ready,
+            CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            if (announceReadyOnStart)
+            {
+                ready();
+            }
+            await _completion.Task.WaitAsync(cancellationToken);
+            ready();
+        }
+
+        public void Complete() => _completion.TrySetResult();
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 
     private sealed class FakeSourceCatalog(SourceDefinition source) : ISourceCatalog

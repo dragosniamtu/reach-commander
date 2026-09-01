@@ -323,6 +323,7 @@ jobs:
             --port 38092 \
             --uid 1000 \
             --gid 1000 \
+            --cpu-limit 3.0 \
             --image ghcr.io/dragosniamtu/reach-commander:stable
           python3 deploy/render_config.py add-source \
             --request "$smoke_root/request.json" \
@@ -351,6 +352,7 @@ jobs:
             --port 8092 \
             --uid 1000 \
             --gid 1000 \
+            --cpu-limit 3.0 \
             --image ghcr.io/dragosniamtu/reach-commander:stable
           python3 deploy/render_config.py add-source \
             --request "$smoke_root/lan-request.json" \
@@ -373,6 +375,7 @@ jobs:
             --template deploy/compose.release.yaml \
             --output "$smoke_root/lan-deployment"
           grep -Fx 'REACHCOMMANDER_BIND_ADDRESS=0.0.0.0' "$smoke_root/lan-deployment/.env"
+          grep -Fx 'REACHCOMMANDER_CPU_LIMIT=3.0' "$smoke_root/lan-deployment/.env"
           grep -Fx 'REACHCOMMANDER_ALLOW_INSECURE_HTTP=true' "$smoke_root/lan-deployment/.env"
           grep -F 'Authentication__AllowInsecureHttp' "$smoke_root/lan-deployment/compose.yaml"
           docker compose --project-directory "$smoke_root/lan-deployment" config --quiet

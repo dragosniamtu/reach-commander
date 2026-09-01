@@ -202,19 +202,8 @@ internal static class MediaProcessExecution
             throw MediaPreviewException.MediaToolsUnavailable();
         }
 
-        using var cancellationRegistration = timeoutSource.Token.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-        });
+        using var cancellationRegistration = timeoutSource.Token.Register(
+            () => TryKill(process));
 
         var standardOutput = new BoundedProcessOutput(maximumOutputCharacters);
         var standardError = new BoundedProcessOutput(maximumOutputCharacters);
@@ -229,6 +218,18 @@ internal static class MediaProcessExecution
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw MediaPreviewException.MediaProbeFailed();
+        }
+        finally
+        {
+            timeoutSource.Cancel();
+            TryKill(process);
+            try
+            {
+                await Task.WhenAll(stdoutTask, stderrTask);
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
     }
 
@@ -247,6 +248,38 @@ internal static class MediaProcessExecution
             }
 
             destination.Append(buffer.AsSpan(0, read));
+        }
+    }
+
+    internal static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+        }
+    }
+
+    internal static bool TrySetBelowNormalPriority(Process process)
+    {
+        try
+        {
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+            System.ComponentModel.Win32Exception or
+            NotSupportedException or
+            UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 }

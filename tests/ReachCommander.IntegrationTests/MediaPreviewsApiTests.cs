@@ -56,10 +56,12 @@ public sealed class MediaPreviewsApiTests
         var fallback = await client.PostAsync(
             $"/api/media-previews/{session.SessionId}/fallback",
             content: null);
+        var fallbackPreview = await fallback.Content.ReadFromJsonAsync<PreviewResponse>();
         var invalid = await client.GetAsync(
             $"/api/media-previews/{session.SessionId}/hls/not-a-segment.txt");
 
         Assert.Equal(HttpStatusCode.Accepted, fallback.StatusCode);
+        Assert.Equal("queued", fallbackPreview!.Phase);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
         Assert.Equal(
             "hls_asset_invalid",
@@ -131,6 +133,7 @@ public sealed class MediaPreviewsApiTests
 
     private sealed record PreviewResponse(
         Guid SessionId,
+        string Phase,
         string PlaybackMode,
         string? SubtitlePath);
 

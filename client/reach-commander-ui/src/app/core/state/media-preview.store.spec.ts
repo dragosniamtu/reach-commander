@@ -95,6 +95,48 @@ describe('MediaPreviewStore', () => {
     expect(scheduler.pending).toBe(0);
   });
 
+  it('keeps polling while a preview moves from queued to transcoding to ready', async () => {
+    const opening = store.open(context(), null);
+    api.resolveCreate(ready({ phase: 'queued', playbackMode: 'hls' }));
+    await opening;
+
+    expect(store.state().phase).toBe('queued');
+    expect(scheduler.pending).toBe(1);
+
+    const queuedPoll = scheduler.runNext();
+    api.resolveStatus(ready({ phase: 'transcoding', playbackMode: 'hls' }));
+    await queuedPoll;
+    expect(store.state().phase).toBe('transcoding');
+    expect(scheduler.pending).toBe(1);
+
+    const transcodePoll = scheduler.runNext();
+    api.resolveStatus(ready({ playbackMode: 'hls' }));
+    await transcodePoll;
+    expect(store.state().phase).toBe('ready');
+    expect(scheduler.pending).toBe(0);
+  });
+
+  it('keeps the heartbeat active while a playable HLS transcode is still running', async () => {
+    const opening = store.open(context(), null);
+    api.resolveCreate(ready({
+      phase: 'ready',
+      playbackMode: 'hls',
+      transcodeActive: true,
+    }));
+    await opening;
+
+    expect(store.state().phase).toBe('ready');
+    expect(store.mediaUrl()).toContain('/hls/index.m3u8');
+    expect(scheduler.pending).toBe(1);
+
+    const heartbeat = scheduler.runNext();
+    api.resolveStatus(ready({ playbackMode: 'hls', transcodeActive: false }));
+    await heartbeat;
+
+    expect(store.state().phase).toBe('ready');
+    expect(scheduler.pending).toBe(0);
+  });
+
   it('selects cues on adjusted clipped boundaries', async () => {
     await openReady(store, api);
     store.setOffset(-1_500);
@@ -166,6 +208,18 @@ describe('MediaPreviewStore', () => {
     opener.remove();
   });
 
+  it('closes a session that finishes opening after the dialog was dismissed', async () => {
+    const opening = store.open(context(), null);
+
+    await store.close();
+    api.resolveCreate(ready({ phase: 'queued', playbackMode: 'hls' }));
+    await opening;
+    await Promise.resolve();
+
+    expect(store.state().phase).toBe('closed');
+    expect(api.closeRequests).toEqual(['session-id']);
+  });
+
   it('clears protected state without applying late responses', async () => {
     const opening = store.open(context(), null);
     protectedState.reset();
@@ -209,7 +263,7 @@ function ready(overrides: Partial<MediaPreviewDto> = {}): MediaPreviewDto {
     subtitlePath: '/Movies/movie.srt',
     cues: [{ index: 0, startMilliseconds: 1_000, endMilliseconds: 2_000, text: 'Hello' }],
     sourceReadOnly: false, expiresAt: '2026-09-01T10:20:00Z',
-    failureCode: null, failureDetail: null, ...overrides,
+    failureCode: null, failureDetail: null, transcodeActive: false, ...overrides,
   };
 }
 

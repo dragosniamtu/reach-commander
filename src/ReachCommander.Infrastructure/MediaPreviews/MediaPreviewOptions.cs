@@ -10,6 +10,10 @@ public sealed class MediaPreviewOptions
 
     public string FfmpegPath { get; set; } = "ffmpeg";
 
+    public int MaximumTranscodeThreads { get; set; } = 2;
+
+    public string TranscodePreset { get; set; } = "ultrafast";
+
     public int QueueCapacity { get; set; } = 8;
 
     public int MaximumProcessOutputCharacters { get; set; } = 64 * 1024;
@@ -24,7 +28,9 @@ public sealed class MediaPreviewOptions
 
     public TimeSpan SessionInactivity { get; set; } = TimeSpan.FromMinutes(20);
 
-    public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(1);
+    public TimeSpan PendingSessionInactivity { get; set; } = TimeSpan.FromMinutes(2);
+
+    public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     public long MaximumOffsetMilliseconds { get; set; } = 600_000;
 

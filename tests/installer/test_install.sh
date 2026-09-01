@@ -51,6 +51,7 @@ printf 'keep two\n' >"$SOURCE_TWO/canary.txt"
 
 export PATH="$FAKE_BIN:$PATH"
 export REACHCOMMANDER_TESTING=1
+export REACHCOMMANDER_TEST_LOGICAL_CPUS=8
 export REACHCOMMANDER_TEST_BASE="$TEST_ROOT"
 export REACHCOMMANDER_TEST_INSTALL_ROOT="$TEST_ROOT/install root"
 export REACHCOMMANDER_TEST_COMMAND_PATH="$TEST_ROOT/bin/reachcommander"
@@ -297,7 +298,9 @@ grep -q '^REACHCOMMANDER_PORT=8092$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ||
 grep -q '^REACHCOMMANDER_ALLOW_INSECURE_HTTP=false$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "secure HTTP policy missing"
 grep -q '^REACHCOMMANDER_UID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "UID default missing"
 grep -q '^REACHCOMMANDER_GID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "GID default missing"
+grep -q '^REACHCOMMANDER_CPU_LIMIT=3.0$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "CPU safety limit missing"
 grep -q '^REACHCOMMANDER_IMAGE=ghcr.io/dragosniamtu/reach-commander@sha256:a\{64\}$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "digest pin missing"
+grep -Fq 'cpus: "${REACHCOMMANDER_CPU_LIMIT}"' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "Compose CPU safety limit missing"
 grep -q 'read_only: true' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RO mount missing"
 grep -q 'read_only: false' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RW mount missing"
 grep -q 'Authentication__AllowInsecureHttp' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "backend HTTP policy missing"
@@ -360,21 +363,30 @@ printf '<key id="installer-fixture" />\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml"
 mkdir -p \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans" \
-  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations"
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef"
 printf '{"schemaVersion":1,"kind":"copy"}\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json"
 printf '{"schemaVersion":1,"phase":"completed"}\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+printf '#EXTM3U\n#EXT-X-VERSION:3\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8"
+printf 'fixture segment\n' \
+  >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
 chmod 0700 \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans" \
-  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations"
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef"
 chmod 0600 \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/account.json" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/bootstrap.json" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-installer.xml" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
-  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
 application_data_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
 
 run_installer $'n\n' "$TEST_ROOT/decline-with-operation-data.out"
@@ -383,7 +395,7 @@ assert_equal \
   "$application_data_before" \
   "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" \
   "legitimate file-operation data preservation"
-pass "installer accepts exact durable file-operation state without mutating it"
+pass "installer accepts exact durable and media-preview state without mutating it"
 
 printf 'unexpected\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"

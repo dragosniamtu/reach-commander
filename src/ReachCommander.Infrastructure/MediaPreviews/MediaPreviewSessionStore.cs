@@ -32,7 +32,8 @@ internal sealed record StoredMediaPreviewSession(
     DateTimeOffset LastAccessedAt,
     CancellationTokenSource Lifetime,
     string? FailureCode = null,
-    string? FailureDetail = null);
+    string? FailureDetail = null,
+    bool TranscodeActive = false);
 
 internal sealed class MediaPreviewSessionStore(
     TimeProvider clock,
@@ -119,6 +120,29 @@ internal sealed class MediaPreviewSessionStore(
         foreach (var pair in _sessions)
         {
             if (pair.Value.LastAccessedAt > cutoff ||
+                !_sessions.TryRemove(pair.Key, out var session))
+            {
+                continue;
+            }
+
+            session.Lifetime.Cancel();
+            removed.Add(session);
+        }
+
+        return removed;
+    }
+
+    public IReadOnlyList<StoredMediaPreviewSession> RemoveAbandonedPending(
+        TimeSpan inactivity)
+    {
+        var cutoff = clock.GetUtcNow() - inactivity;
+        var removed = new List<StoredMediaPreviewSession>();
+        foreach (var pair in _sessions)
+        {
+            var isPendingOrActive = pair.Value.Phase == MediaPreviewPhase.Queued ||
+                pair.Value.TranscodeActive;
+            if (!isPendingOrActive ||
+                pair.Value.LastAccessedAt > cutoff ||
                 !_sessions.TryRemove(pair.Key, out var session))
             {
                 continue;

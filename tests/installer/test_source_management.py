@@ -151,6 +151,7 @@ class SourceFixture:
                 "allowInsecureHttp": False,
                 "uid": self.runtime_uid,
                 "gid": self.runtime_gid,
+                "cpuLimit": "3.0",
                 "image": IMAGE,
                 "sources": [
                     {
@@ -636,6 +637,7 @@ class SourceTransactionTests(unittest.TestCase):
                 "allowInsecureHttp": False,
                 "uid": self.fixture.runtime_uid,
                 "gid": self.fixture.runtime_gid,
+                "cpuLimit": "3.0",
                 "image": IMAGE,
                 "sources": [
                     {

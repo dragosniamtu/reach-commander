@@ -42,7 +42,7 @@ internal sealed class TestMediaPreviewService : IMediaPreviewService
     {
         var updated = Get(sessionId) with
         {
-            Phase = MediaPreviewPhase.Transcoding,
+            Phase = MediaPreviewPhase.Queued,
             PlaybackMode = MediaPlaybackMode.Hls,
         };
         _sessions[sessionId] = updated;

@@ -30,6 +30,7 @@ UPDATER_RUNTIME_DIRECTORY=''
 UPDATER_SOCKET_PATH=''
 ACCESS_MODE=''
 BIND_ADDRESS=''
+CPU_LIMIT=''
 
 if [[ ! -f "$COMMON_LIBRARY" ]]; then
   printf 'ReachCommander: installer bundle is missing lib/common.sh\n' >&2
@@ -160,9 +161,38 @@ assert_updater_layout_safe() {
 }
 
 preflight() {
-  rc_require_commands docker python3 readlink flock install mktemp setpriv setsid sync find systemctl
+  rc_require_commands docker python3 readlink flock install mktemp setpriv setsid sync find systemctl getconf
   require_bundle
   read_bundle_version
+}
+
+default_cpu_limit() {
+  local logical_cpus="$1"
+  case "$logical_cpus" in
+    1) printf '0.75\n' ;;
+    2) printf '1.5\n' ;;
+    3) printf '2.0\n' ;;
+    *)
+      [[ "$logical_cpus" =~ ^[1-9][0-9]*$ ]] || {
+        rc_die 'logical CPU count is invalid'
+        return 1
+      }
+      printf '3.0\n'
+      ;;
+  esac
+}
+
+detect_cpu_limit() {
+  local logical_cpus
+  if [[ "${REACHCOMMANDER_TESTING:-0}" == '1' && -n "${REACHCOMMANDER_TEST_LOGICAL_CPUS:-}" ]]; then
+    logical_cpus="$REACHCOMMANDER_TEST_LOGICAL_CPUS"
+  else
+    logical_cpus="$(getconf _NPROCESSORS_ONLN)" || {
+      rc_die 'logical CPU count could not be detected'
+      return 1
+    }
+  fi
+  CPU_LIMIT="$(default_cpu_limit "$logical_cpus")"
 }
 
 verify_docker_compose() {
@@ -255,7 +285,7 @@ validate_application_data_tree() {
     fi
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
-      auth | keys | file-operations | file-operations/plans | file-operations/operations)
+      auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations)
         [[ -d "$path" ]] || invalid=1
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
@@ -263,6 +293,10 @@ validate_application_data_tree() {
         ;;
       *)
         if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$path" ]] || invalid=1
+        elif [[ "$relative_path" =~ ^media-previews/[0-9a-f]{32}$ ]]; then
+          [[ -d "$path" ]] || invalid=1
+        elif [[ "$relative_path" =~ ^media-previews/[0-9a-f]{32}/(index\.m3u8|segment-[0-9]{6}\.ts)$ ]]; then
           [[ -f "$path" ]] || invalid=1
         else
           invalid=1
@@ -310,7 +344,7 @@ prepare_application_data() {
   local directory
   local file
   validate_application_data_tree || return 1
-  for directory in data data/auth data/keys; do
+  for directory in data data/auth data/keys data/media-previews; do
     if [[ -L "$RC_INSTALL_ROOT/$directory" ]]; then
       rc_die 'application data directories must not be symlinks'
       return 1
@@ -323,6 +357,9 @@ prepare_application_data() {
       chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
     fi
   done
+  while IFS= read -r -d '' directory; do
+    chmod 0700 -- "$directory" || return 1
+  done < <(find "$RC_INSTALL_ROOT/data/media-previews" -xdev -mindepth 1 -maxdepth 1 -type d -print0)
   while IFS= read -r -d '' file; do
     chmod 0600 -- "$file" || return 1
   done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 2 -type f -print0)
@@ -448,6 +485,7 @@ write_request() {
     --port "$PORT" \
     --uid "$RUNTIME_UID" \
     --gid "$RUNTIME_GID" \
+    --cpu-limit "$CPU_LIMIT" \
     --image "$image"
   for index in "${!SOURCE_IDS[@]}"; do
     default_left=false
@@ -918,6 +956,7 @@ trap 'handle_install_signal 130' INT
 trap 'handle_install_signal 143' TERM
 
 preflight
+detect_cpu_limit
 rc_init_paths
 init_updater_paths
 rc_assert_safe_install_root

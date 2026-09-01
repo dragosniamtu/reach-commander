@@ -109,7 +109,7 @@ state/previous-image
 backups/
 ```
 
-The installer resolves the `stable` image tag to an immutable digest and persists that digest. Recreating the container keeps the account and Data Protection keys because `data` is not part of generated-file replacement.
+The installer resolves the `stable` image tag to an immutable digest and persists that digest. Recreating the container keeps the account and Data Protection keys because `data` is not part of generated-file replacement. It also detects the Mac's logical CPU count and applies a Docker Compose ceiling of `0.75`, `1.5`, `2.0`, or `3.0` CPUs for hosts with one, two, three, or four-or-more logical CPUs. This bounds both the API and FFmpeg preview process while leaving scheduler headroom for macOS and Docker Desktop. Rerun the installer and choose reconfiguration once after upgrading an older deployment to add this generated setting.
 
 Rerunning the one-command installer shows:
 

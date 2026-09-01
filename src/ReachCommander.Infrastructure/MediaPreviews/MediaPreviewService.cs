@@ -52,7 +52,7 @@ internal sealed partial class MediaPreviewService(
             : MediaPlaybackMode.Hls;
         var phase = playbackMode == MediaPlaybackMode.Direct
             ? MediaPreviewPhase.Ready
-            : MediaPreviewPhase.Transcoding;
+            : MediaPreviewPhase.Queued;
         var outputDirectory = playbackMode == MediaPlaybackMode.Hls
             ? GetSessionOutputDirectory(sessionId)
             : null;
@@ -79,6 +79,14 @@ internal sealed partial class MediaPreviewService(
             sessions.Remove(sessionId)?.Lifetime.Dispose();
             throw MediaPreviewException.PreviewCapacityReached();
         }
+
+        logger.LogInformation(
+            playbackMode == MediaPlaybackMode.Hls
+                ? "Media preview {SessionId} queued for source {SourceId}, file {VideoName}."
+                : "Media preview {SessionId} is ready for direct playback from source {SourceId}, file {VideoName}.",
+            sessionId,
+            video.Source.Id,
+            stored.VideoName);
 
         return Map(stored);
     }
@@ -111,10 +119,11 @@ internal sealed partial class MediaPreviewService(
             session => session with
             {
                 PlaybackMode = MediaPlaybackMode.Hls,
-                Phase = MediaPreviewPhase.Transcoding,
+                Phase = MediaPreviewPhase.Queued,
                 OutputDirectory = outputDirectory,
                 FailureCode = null,
                 FailureDetail = null,
+                TranscodeActive = false,
                 LastAccessedAt = clock.GetUtcNow(),
             });
         if (!queue.TryEnqueue(sessionId))
@@ -129,6 +138,11 @@ internal sealed partial class MediaPreviewService(
                 });
             throw MediaPreviewException.PreviewCapacityReached();
         }
+
+        logger.LogInformation(
+            "Media preview {SessionId} queued after direct playback fallback for file {VideoName}.",
+            sessionId,
+            updated.VideoName);
 
         return ValueTask.FromResult(Map(updated));
     }
@@ -243,6 +257,10 @@ internal sealed partial class MediaPreviewService(
         var removed = sessions.Remove(sessionId);
         if (removed is not null)
         {
+            logger.LogInformation(
+                "Media preview {SessionId} closed while in phase {Phase}.",
+                sessionId,
+                removed.Phase);
             TryDeleteOutput(removed.OutputDirectory);
             removed.Lifetime.Dispose();
         }
@@ -279,13 +297,14 @@ internal sealed partial class MediaPreviewService(
             session.Lifetime.Token);
         try
         {
+            MarkTranscoding(sessionId);
             EnsureVideoIsCurrent(session);
             await transcodeRunner.RunAsync(
                 session.VideoPhysicalPath,
                 session.OutputDirectory,
                 () => MarkReady(sessionId),
                 linked.Token);
-            MarkReady(sessionId);
+            MarkTranscodeCompleted(sessionId);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
@@ -312,6 +331,25 @@ internal sealed partial class MediaPreviewService(
     {
         foreach (var session in sessions.RemoveExpired())
         {
+            logger.LogInformation(
+                "Media preview {SessionId} expired while in phase {Phase}.",
+                session.SessionId,
+                session.Phase);
+            TryDeleteOutput(session.OutputDirectory);
+            session.Lifetime.Dispose();
+        }
+    }
+
+    internal void DeleteAbandonedPendingOutputs()
+    {
+        foreach (var session in sessions.RemoveAbandonedPending(
+                     _options.PendingSessionInactivity))
+        {
+            logger.LogWarning(
+                "Media preview {SessionId} was abandoned in phase {Phase} and canceled after {HeartbeatTimeout} without a browser heartbeat.",
+                session.SessionId,
+                session.Phase,
+                _options.PendingSessionInactivity);
             TryDeleteOutput(session.OutputDirectory);
             session.Lifetime.Dispose();
         }
@@ -327,6 +365,7 @@ internal sealed partial class MediaPreviewService(
             }
 
             Directory.CreateDirectory(_previewRoot);
+            MediaTranscodeRunner.HardenOutputPermissions(_previewRoot);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException)
@@ -456,19 +495,50 @@ internal sealed partial class MediaPreviewService(
 
     private void MarkReady(Guid sessionId)
     {
-        if (!sessions.TryGet(sessionId, out _))
+        if (!sessions.TryGet(sessionId, out var current))
         {
             return;
         }
 
-        sessions.Update(
+        var updated = sessions.Update(
             sessionId,
             session => session with
             {
                 Phase = MediaPreviewPhase.Ready,
                 FailureCode = null,
                 FailureDetail = null,
+                TranscodeActive = true,
             });
+        if (current.Phase != MediaPreviewPhase.Ready)
+        {
+            logger.LogInformation(
+                "Media preview {SessionId} is ready for {PlaybackMode} playback for file {VideoName}.",
+                sessionId,
+                updated.PlaybackMode,
+                updated.VideoName);
+        }
+    }
+
+    private void MarkTranscoding(Guid sessionId)
+    {
+        if (!sessions.TryGet(sessionId, out _))
+        {
+            return;
+        }
+
+        var updated = sessions.Update(
+            sessionId,
+            session => session with
+            {
+                Phase = MediaPreviewPhase.Transcoding,
+                FailureCode = null,
+                FailureDetail = null,
+                TranscodeActive = true,
+            });
+        logger.LogInformation(
+            "Media preview {SessionId} started transcoding file {VideoName}.",
+            sessionId,
+            updated.VideoName);
     }
 
     private void MarkFailed(Guid sessionId, string code, string detail)
@@ -478,14 +548,20 @@ internal sealed partial class MediaPreviewService(
             return;
         }
 
-        sessions.Update(
+        var updated = sessions.Update(
             sessionId,
             session => session with
             {
                 Phase = MediaPreviewPhase.Failed,
                 FailureCode = code,
                 FailureDetail = detail,
+                TranscodeActive = false,
             });
+        logger.LogWarning(
+            "Media preview {SessionId} failed while processing file {VideoName}; failure code {FailureCode}.",
+            sessionId,
+            updated.VideoName,
+            code);
     }
 
     private MediaPreviewSession Map(StoredMediaPreviewSession session) => new(
@@ -500,12 +576,35 @@ internal sealed partial class MediaPreviewService(
         session.SourceReadOnly,
         sessions.ExpiresAt(session),
         session.FailureCode,
-        session.FailureDetail);
+        session.FailureDetail,
+        session.TranscodeActive);
+
+    private void MarkTranscodeCompleted(Guid sessionId)
+    {
+        if (!sessions.TryGet(sessionId, out _))
+        {
+            return;
+        }
+
+        var updated = sessions.Update(
+            sessionId,
+            session => session with
+            {
+                Phase = MediaPreviewPhase.Ready,
+                FailureCode = null,
+                FailureDetail = null,
+                TranscodeActive = false,
+            });
+        logger.LogInformation(
+            "Media preview {SessionId} finished transcoding file {VideoName}.",
+            sessionId,
+            updated.VideoName);
+    }
 
     private string GetSessionOutputDirectory(Guid sessionId) =>
         Path.Combine(_previewRoot, sessionId.ToString("N"));
 
-    private static void TryDeleteOutput(string? outputDirectory)
+    private void TryDeleteOutput(string? outputDirectory)
     {
         if (outputDirectory is null)
         {
@@ -522,6 +621,10 @@ internal sealed partial class MediaPreviewService(
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException)
         {
+            logger.LogWarning(
+                exception,
+                "Temporary HLS cleanup failed for media preview {SessionId}.",
+                Path.GetFileName(outputDirectory));
         }
     }
 

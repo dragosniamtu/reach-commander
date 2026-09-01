@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import decimal
 import json
 import os
 import pathlib
@@ -31,6 +32,7 @@ REQUEST_KEYS = {
     "allowInsecureHttp",
     "uid",
     "gid",
+    "cpuLimit",
     "image",
     "sources",
 }
@@ -59,6 +61,7 @@ ENV_KEYS = (
     "REACHCOMMANDER_ALLOW_INSECURE_HTTP",
     "REACHCOMMANDER_UID",
     "REACHCOMMANDER_GID",
+    "REACHCOMMANDER_CPU_LIMIT",
     "REACHCOMMANDER_IMAGE",
 )
 
@@ -115,6 +118,19 @@ def validate_image(value: object) -> str:
     if type(value) is not str or IMAGE_PATTERN.fullmatch(value) is None:
         raise ValueError("image: invalid reference")
     return value
+
+
+def validate_cpu_limit(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value) is None:
+        raise ValueError("cpuLimit: invalid decimal")
+    try:
+        parsed = decimal.Decimal(value)
+    except decimal.InvalidOperation as error:
+        raise ValueError("cpuLimit: invalid decimal") from error
+    if not decimal.Decimal("0.25") <= parsed <= decimal.Decimal("64"):
+        raise ValueError("cpuLimit: must be between 0.25 and 64")
+    normalized = format(parsed.normalize(), "f")
+    return normalized if "." in normalized else normalized + ".0"
 
 
 def _normalize_posix_path(value: str) -> str:
@@ -201,6 +217,7 @@ class DeploymentRequest:
     allow_insecure_http: bool
     uid: int
     gid: int
+    cpu_limit: str
     image: str
     sources: tuple[SourceRequest, ...]
 
@@ -223,7 +240,7 @@ class DeploymentRequest:
         return cls(*common, sources=sources)
 
 
-def _validate_common(mapping: dict) -> tuple[str, str, int, bool, int, int, str]:
+def _validate_common(mapping: dict) -> tuple[str, str, int, bool, int, int, str, str]:
     access_mode = _validate_access_mode(mapping["accessMode"])
     bind_address = _validate_bind_address(mapping["bindAddress"])
     allow_insecure_http = _require_boolean(
@@ -237,6 +254,7 @@ def _validate_common(mapping: dict) -> tuple[str, str, int, bool, int, int, str]
         allow_insecure_http,
         _require_integer(mapping["uid"], 1, 2147483647, "uid"),
         _require_integer(mapping["gid"], 1, 2147483647, "gid"),
+        validate_cpu_limit(mapping["cpuLimit"]),
         validate_image(mapping["image"]),
     )
 
@@ -346,6 +364,7 @@ def render_deployment(
         f"REACHCOMMANDER_ALLOW_INSECURE_HTTP={'true' if request.allow_insecure_http else 'false'}\n"
         f"REACHCOMMANDER_UID={request.uid}\n"
         f"REACHCOMMANDER_GID={request.gid}\n"
+        f"REACHCOMMANDER_CPU_LIMIT={request.cpu_limit}\n"
         f"REACHCOMMANDER_IMAGE={request.image}\n"
     )
     sources = {
@@ -393,6 +412,7 @@ def create_request(
     port: int,
     uid: int,
     gid: int,
+    cpu_limit: str,
     image: str,
     access_mode: str = "secure-https",
 ) -> None:
@@ -407,6 +427,7 @@ def create_request(
         "allowInsecureHttp": allow_insecure_http,
         "uid": uid,
         "gid": gid,
+        "cpuLimit": cpu_limit,
         "image": image,
         "sources": [],
     }
@@ -481,6 +502,7 @@ def _read_env(path: pathlib.Path) -> dict[str, str]:
     _require_integer(port, 1, 65535, "port")
     _require_integer(uid, 1, 2147483647, "uid")
     _require_integer(gid, 1, 2147483647, "gid")
+    validate_cpu_limit(values["REACHCOMMANDER_CPU_LIMIT"])
     validate_image(values["REACHCOMMANDER_IMAGE"])
     return values
 
@@ -564,6 +586,7 @@ def load_installed_request(
             == "true",
             "uid": uid,
             "gid": gid,
+            "cpuLimit": environment["REACHCOMMANDER_CPU_LIMIT"],
             "image": environment["REACHCOMMANDER_IMAGE"],
             "sources": request_sources,
         }
@@ -590,6 +613,7 @@ def append_source(
         "allowInsecureHttp": request.allow_insecure_http,
         "uid": request.uid,
         "gid": request.gid,
+        "cpuLimit": request.cpu_limit,
         "image": request.image,
         "sources": [source.to_request_mapping() for source in request.sources]
         + [
@@ -644,6 +668,7 @@ def remove_source(
             "allowInsecureHttp": request.allow_insecure_http,
             "uid": request.uid,
             "gid": request.gid,
+            "cpuLimit": request.cpu_limit,
             "image": request.image,
             "sources": sources,
         }
@@ -694,6 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--port", required=True, type=int)
     create.add_argument("--uid", required=True, type=int)
     create.add_argument("--gid", required=True, type=int)
+    create.add_argument("--cpu-limit", required=True)
     create.add_argument("--image", required=True)
     create.add_argument(
         "--access-mode",
@@ -719,6 +745,9 @@ def build_parser() -> argparse.ArgumentParser:
     set_image.add_argument("--env", required=True, type=pathlib.Path)
     set_image.add_argument("--image", required=True)
 
+    validate_env = subparsers.add_parser("validate-env")
+    validate_env.add_argument("--env", required=True, type=pathlib.Path)
+
     paths = subparsers.add_parser("source-paths")
     paths.add_argument("--sources", required=True, type=pathlib.Path)
     return parser
@@ -734,6 +763,7 @@ def main(arguments: list[str] | None = None) -> int:
                 args.port,
                 args.uid,
                 args.gid,
+                args.cpu_limit,
                 args.image,
                 args.access_mode,
             )
@@ -751,6 +781,8 @@ def main(arguments: list[str] | None = None) -> int:
             render_deployment(load_request(args.request), args.template, args.output)
         elif args.command == "set-image":
             set_env_image(args.env, args.image)
+        elif args.command == "validate-env":
+            _read_env(args.env)
         elif args.command == "source-paths":
             for path in source_paths(args.sources):
                 os.write(1, path.encode("utf-8") + b"\0")

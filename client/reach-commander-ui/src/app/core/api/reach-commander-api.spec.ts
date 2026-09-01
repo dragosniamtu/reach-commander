@@ -650,6 +650,7 @@ function mediaPreviewResponse(overrides: Partial<MediaPreviewDto> = {}): MediaPr
     expiresAt: '2026-09-01T10:20:00Z',
     failureCode: null,
     failureDetail: null,
+    transcodeActive: false,
     ...overrides,
   };
 }

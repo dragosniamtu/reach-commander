@@ -4,6 +4,9 @@ namespace ReachCommander.Infrastructure.MediaPreviews;
 
 internal sealed class MediaPreviewOptionsValidator : IValidateOptions<MediaPreviewOptions>
 {
+    private static readonly HashSet<string> ApprovedTranscodePresets =
+        new(StringComparer.Ordinal) { "ultrafast", "superfast", "veryfast" };
+
     public ValidateOptionsResult Validate(string? name, MediaPreviewOptions options)
     {
         var failures = new List<string>();
@@ -15,6 +18,17 @@ internal sealed class MediaPreviewOptionsValidator : IValidateOptions<MediaPrevi
         if (string.IsNullOrWhiteSpace(options.FfmpegPath))
         {
             failures.Add("MediaPreview:FfmpegPath is required.");
+        }
+
+        if (options.MaximumTranscodeThreads is < 1 or > 8)
+        {
+            failures.Add("MediaPreview:MaximumTranscodeThreads must be between 1 and 8.");
+        }
+
+        if (!ApprovedTranscodePresets.Contains(options.TranscodePreset))
+        {
+            failures.Add(
+                "MediaPreview:TranscodePreset must be ultrafast, superfast, or veryfast.");
         }
 
         if (options.QueueCapacity is < 1 or > 64)
@@ -40,6 +54,7 @@ internal sealed class MediaPreviewOptionsValidator : IValidateOptions<MediaPrevi
         if (options.MaximumTemporaryOutputBytes <= 0 ||
             options.MaximumTranscodeDuration <= TimeSpan.Zero ||
             options.SessionInactivity <= TimeSpan.Zero ||
+            options.PendingSessionInactivity <= TimeSpan.Zero ||
             options.CleanupInterval <= TimeSpan.Zero ||
             options.SavePlanLifetime <= TimeSpan.Zero ||
             options.MaximumOffsetMilliseconds <= 0)

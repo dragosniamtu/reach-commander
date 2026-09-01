@@ -130,11 +130,25 @@ assert_symlink_layout_rejected() {
 
 export PATH="$FAKE_BIN:$PATH"
 export REACHCOMMANDER_TESTING=1
+export REACHCOMMANDER_TEST_LOGICAL_CPUS=8
 export REACHCOMMANDER_TEST_USER_HOME="$TEST_ROOT/user home"
 export REACHCOMMANDER_TEST_TEMPLATE_URL='https://test.invalid/compose.release.yaml'
 export REACHCOMMANDER_TEST_ARCHITECTURE=x86_64
 export REACHCOMMANDER_TEST_LOCAL_IP=192.168.50.25
 export FAKE_CURL_SOURCE="$REPOSITORY_ROOT/deploy/compose.release.yaml"
+
+for cpu_case in '1:0.75' '2:1.5' '3:2.0' '4:3.0' '12:3.0'; do
+  cpu_count="${cpu_case%%:*}"
+  expected_limit="${cpu_case##*:}"
+  # The positional parameters intentionally expand inside the child Bash process.
+  # shellcheck disable=SC2016
+  actual_limit="$(
+    REACHCOMMANDER_SOURCE_ONLY=1 bash -c \
+      'source "$1"; rc_default_cpu_limit "$2"' \
+      reachcommander-test "$INSTALLER" "$cpu_count"
+  )"
+  assert_equal "$expected_limit" "$actual_limit" "CPU limit for $cpu_count logical CPUs"
+done
 export FAKE_DOCKER_INFO_EXIT=0
 export FAKE_DOCKER_COMPOSE_VERSION_EXIT=0
 export FAKE_DOCKER_PULL_EXIT=0
@@ -189,6 +203,8 @@ assert_equal false \
   "read/write source policy"
 assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" 'REACHCOMMANDER_BIND_ADDRESS=127.0.0.1' "Mac-only bind is missing"
 assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" 'REACHCOMMANDER_PORT=8080' "default port is missing"
+assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" 'REACHCOMMANDER_CPU_LIMIT=3.0' "CPU safety limit is missing"
+assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" 'cpus: "${REACHCOMMANDER_CPU_LIMIT}"' "Compose CPU safety limit is missing"
 assert_contains "$TEST_ROOT/specific.out" 'http://127.0.0.1:8080' "completion endpoint is missing"
 assert_contains "$TEST_ROOT/specific.out" 'logs --tail 200 reachcommander' "setup-code logs command is missing"
 assert_contains "$TEST_ROOT/specific.out" "$REACHCOMMANDER_TEST_INSTALL_ROOT" "state path is missing"

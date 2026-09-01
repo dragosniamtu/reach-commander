@@ -70,6 +70,7 @@ mkdir -p \
   "$INSTALL_ROOT/data/keys" \
   "$INSTALL_ROOT/data/file-operations/plans" \
   "$INSTALL_ROOT/data/file-operations/operations" \
+  "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef" \
   "$SOURCE_PATH" \
   "$(dirname -- "$COMMAND_PATH")"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
@@ -94,6 +95,7 @@ python3 "$RENDERER" create-request \
   --port 8092 \
   --uid "$RUNTIME_UID" \
   --gid "$RUNTIME_GID" \
+  --cpu-limit 3.0 \
   --image "ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'a%.0s' {1..64})"
 python3 "$RENDERER" add-source \
   --request "$REQUEST" \
@@ -122,19 +124,27 @@ printf '{"schemaVersion":1,"kind":"copy"}\n' \
   >"$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json"
 printf '{"schemaVersion":1,"phase":"completed"}\n' \
   >"$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+printf '#EXTM3U\n#EXT-X-VERSION:3\n' \
+  >"$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8"
+printf 'fixture segment\n' \
+  >"$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
 chmod 0700 \
   "$INSTALL_ROOT/data" \
   "$INSTALL_ROOT/data/auth" \
   "$INSTALL_ROOT/data/keys" \
   "$INSTALL_ROOT/data/file-operations" \
   "$INSTALL_ROOT/data/file-operations/plans" \
-  "$INSTALL_ROOT/data/file-operations/operations"
+  "$INSTALL_ROOT/data/file-operations/operations" \
+  "$INSTALL_ROOT/data/media-previews" \
+  "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef"
 chmod 0600 \
   "$INSTALL_ROOT/data/auth/account.json" \
   "$INSTALL_ROOT/data/auth/bootstrap.json" \
   "$INSTALL_ROOT/data/keys/key-command.xml" \
   "$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
-  "$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json"
+  "$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json" \
+  "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8" \
+  "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
 if (( EUID == 0 )); then
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$INSTALL_ROOT/data"
 fi
@@ -820,6 +830,7 @@ fi
 assert_equal "0" "$last_status" "healthy doctor status"
 [[ "$last_output" == *'[PASS] Docker Engine is available'* ]] || fail "doctor Docker pass missing"
 [[ "$last_output" == *'[PASS] Container is healthy'* ]] || fail "doctor health pass missing"
+[[ "$last_output" == *'[PASS] Container CPU limit is valid'* ]] || fail "doctor CPU limit pass missing"
 [[ "$last_output" == *'[PASS] No source operation journal or recovery transaction is present'* ]] ||
   fail "doctor clear source transaction status missing"
 [[ "$last_output" != *'[FAIL]'* ]] || fail "healthy doctor reported a failure"
@@ -835,11 +846,22 @@ for container_path in \
   /data/keys \
   /data/file-operations \
   /data/file-operations/plans \
-  /data/file-operations/operations; do
+  /data/file-operations/operations \
+  /data/media-previews; do
   printf '%s\n' "${doctor_args[@]}" | grep -Fxq "$container_path" ||
     fail "doctor did not probe fixed container path: $container_path"
 done
 pass "doctor reports a healthy deployment without mutating it"
+
+cp -- "$INSTALL_ROOT/.env" "$TEST_ROOT/cpu-env.backup"
+sed 's/^REACHCOMMANDER_CPU_LIMIT=.*/REACHCOMMANDER_CPU_LIMIT=1e9/' \
+  "$TEST_ROOT/cpu-env.backup" >"$INSTALL_ROOT/.env"
+run_command doctor
+assert_equal "1" "$last_status" "doctor malformed CPU limit status"
+[[ "$last_output" == *'[FAIL] Container CPU limit or installer environment is invalid'* ]] ||
+  fail "doctor malformed CPU limit failure missing"
+cp -- "$TEST_ROOT/cpu-env.backup" "$INSTALL_ROOT/.env"
+pass "doctor validates the installer-managed CPU limit"
 
 printf '%s\n' '{"schemaVersion":1,"transactionId":"12345678-1234-4234-8234-123456789abc","sourceId":"archive","displayName":"Archive","phase":"completed","reasonCode":"completed","updatedAt":"2026-08-31T00:00:00Z"}' \
   >"$INSTALL_ROOT/state/source-operation.json"
@@ -937,6 +959,15 @@ assert_equal "1" "$last_status" "doctor unexpected file-operation data status"
   fail "doctor unsafe file-operation tree failure missing"
 rm -f -- "$INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
 pass "doctor rejects file-operation state outside the exact allowlist"
+
+printf 'unexpected\n' \
+  >"$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/not-a-segment.txt"
+run_command doctor
+assert_equal "1" "$last_status" "doctor unexpected media-preview data status"
+[[ "$last_output" == *'[FAIL] Application data tree contains an unsafe entry'* ]] ||
+  fail "doctor unsafe media-preview tree failure missing"
+rm -f -- "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/not-a-segment.txt"
+pass "doctor rejects media-preview state outside the exact allowlist"
 
 mv -- "$INSTALL_ROOT/data/auth/account.json" "$TEST_ROOT/account.json"
 run_command doctor
@@ -1370,7 +1401,9 @@ for application_file in \
   auth/bootstrap.json \
   keys/key-command.xml \
   file-operations/plans/0123456789abcdef0123456789abcdef.json \
-  file-operations/operations/fedcba9876543210fedcba9876543210.json; do
+  file-operations/operations/fedcba9876543210fedcba9876543210.json \
+  media-previews/0123456789abcdef0123456789abcdef/index.m3u8 \
+  media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts; do
   [[ -f "$backup_destination/application-data/$application_file" ]] ||
     fail "backup application file missing: $application_file"
   case "$(uname -s)" in

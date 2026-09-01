@@ -16,6 +16,7 @@ export type MediaPreviewClientPhase =
   | 'closed'
   | 'opening'
   | 'probing'
+  | 'queued'
   | 'transcoding'
   | 'ready'
   | 'selectingSubtitle'

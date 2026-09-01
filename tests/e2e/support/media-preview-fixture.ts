@@ -29,11 +29,12 @@ interface SessionState {
   readonly videoPath: string;
   readonly videoName: string;
   subtitlePath: string | null;
-  phase: 'transcoding' | 'ready' | 'failed';
+  phase: 'queued' | 'transcoding' | 'ready' | 'failed';
   playbackMode: 'direct' | 'hls';
   sourceReadOnly: boolean;
   failureCode: string | null;
   failureDetail: string | null;
+  transcodeActive: boolean;
 }
 
 const sessionId = '55555555-5555-4555-8555-555555555555';
@@ -77,11 +78,12 @@ export async function routeMediaPreview(
         videoPath: create.videoPath,
         videoName: name,
         subtitlePath: create.videoPath.replace(/\.[^.]+$/, '.srt'),
-        phase: fallback ? 'transcoding' : 'ready',
+        phase: fallback ? 'queued' : 'ready',
         playbackMode: fallback ? 'hls' : 'direct',
         sourceReadOnly: create.sourceId === 'archive',
         failureCode: null,
         failureDetail: null,
+        transcodeActive: fallback,
       };
       await json(route, fallback ? 202 : 200, response(session));
       return;
@@ -94,8 +96,12 @@ export async function routeMediaPreview(
 
     if (path === `/api/media-previews/${sessionId}` && method === 'GET') {
       statusReads += 1;
-      if (session.phase === 'transcoding') {
+      if (session.phase === 'queued') {
+        session.phase = 'transcoding';
+      } else if (session.phase === 'transcoding') {
         session.phase = 'ready';
+      } else if (session.phase === 'ready' && session.transcodeActive) {
+        session.transcodeActive = false;
       }
       await json(route, 200, response(session));
       return;
@@ -113,8 +119,9 @@ export async function routeMediaPreview(
 
     if (path === `/api/media-previews/${sessionId}/fallback` && method === 'POST') {
       fallbackRequests += 1;
-      session.phase = 'transcoding';
+      session.phase = 'queued';
       session.playbackMode = 'hls';
+      session.transcodeActive = true;
       await json(route, 202, response(session));
       return;
     }
@@ -209,6 +216,7 @@ function response(session: SessionState) {
     expiresAt,
     failureCode: session.failureCode,
     failureDetail: session.failureDetail,
+    transcodeActive: session.transcodeActive,
   };
 }
 

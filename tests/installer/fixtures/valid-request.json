@@ -5,6 +5,7 @@
   "allowInsecureHttp": false,
   "uid": 1000,
   "gid": 1000,
+  "cpuLimit": "3.0",
   "image": "ghcr.io/dragosniamtu/reach-commander@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "sources": [
     {

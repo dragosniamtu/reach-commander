@@ -933,7 +933,7 @@ application_data_tree_is_safe() {
     fi
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
-      auth | keys | file-operations | file-operations/plans | file-operations/operations)
+      auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations)
         [[ -d "$path" ]] || return 1
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
@@ -941,6 +941,10 @@ application_data_tree_is_safe() {
         ;;
       *)
         if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$path" ]] || return 1
+        elif [[ "$relative_path" =~ ^media-previews/[0-9a-f]{32}$ ]]; then
+          [[ -d "$path" ]] || return 1
+        elif [[ "$relative_path" =~ ^media-previews/[0-9a-f]{32}/(index\.m3u8|segment-[0-9]{6}\.ts)$ ]]; then
           [[ -f "$path" ]] || return 1
         else
           return 1
@@ -1573,6 +1577,9 @@ doctor_application_data() {
       data/file-operations/operations
     )
   fi
+  if [[ -d "$RC_INSTALL_ROOT/data/media-previews" ]]; then
+    data_directories+=(data/media-previews)
+  fi
 
   for relative_path in "${data_directories[@]}"; do
     path="$RC_INSTALL_ROOT/$relative_path"
@@ -1604,7 +1611,14 @@ doctor_application_data() {
     else
       doctor_fail 'Application data file ownership or mode is incorrect'
     fi
-  done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 2 -type f -print0)
+  done < <(
+    find "$RC_INSTALL_ROOT/data" \
+      -xdev \
+      -mindepth 2 \
+      -type f \
+      ! -path "$RC_INSTALL_ROOT/data/media-previews/*" \
+      -print0
+  )
 
   if [[ -f "$RC_INSTALL_ROOT/data/auth/account.json" ]]; then
     if python3 -m json.tool "$RC_INSTALL_ROOT/data/auth/account.json" >/dev/null 2>&1; then
@@ -1716,6 +1730,13 @@ command_doctor() {
     doctor_application_data "$runtime_uid" "$runtime_gid"
   else
     doctor_fail 'Runtime UID or GID is invalid'
+  fi
+
+  if python3 "$RC_INSTALL_ROOT/bin/render_config.py" validate-env \
+      --env "$RC_INSTALL_ROOT/.env" >/dev/null 2>&1; then
+    doctor_pass 'Container CPU limit is valid'
+  else
+    doctor_fail 'Container CPU limit or installer environment is invalid'
   fi
 
   if channel="$(read_state_line "$RC_INSTALL_ROOT/state/channel" 2>/dev/null)" &&

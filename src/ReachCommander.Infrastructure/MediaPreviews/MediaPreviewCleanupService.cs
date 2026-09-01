@@ -16,6 +16,7 @@ internal sealed class MediaPreviewCleanupService(
         while (!stoppingToken.IsCancellationRequested)
         {
             await Task.Delay(_interval, clock, stoppingToken);
+            service.DeleteAbandonedPendingOutputs();
             service.DeleteExpiredOutputs();
         }
     }

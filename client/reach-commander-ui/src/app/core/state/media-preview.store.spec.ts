@@ -2,6 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { DestroyRef } from '@angular/core';
 import {
   CreateMediaPreviewRequestDto,
+  FileEntryDto,
   MediaPreviewDto,
   SubtitleSavePlanDto,
   SubtitleSaveResultDto,
@@ -50,6 +51,33 @@ describe('MediaPreviewStore', () => {
     api.resolveCreate(ready({ videoPath: '/Movies/second.mp4', videoName: 'second.mp4' }));
     await second;
     expect(store.state().session?.videoName).toBe('second.mp4');
+  });
+
+  it('lists only same-directory SRT files as subtitle candidates', async () => {
+    api.fileEntries = [
+      fileEntry('Zulu.SRT'),
+      fileEntry('notes.txt'),
+      fileEntry('Alpha.srt'),
+      fileEntry('Linked.srt', { isSymbolicLink: true }),
+      fileEntry('Folder.srt', { type: 'directory' }),
+    ];
+
+    await openReady(store, api);
+
+    expect(api.fileListRequests).toEqual([{ sourceId: 'media', path: '/Movies' }]);
+    expect(store.state().subtitleCandidates).toEqual([
+      { name: 'Alpha.srt', path: '/Movies/Alpha.srt' },
+      { name: 'Zulu.SRT', path: '/Movies/Zulu.SRT' },
+    ]);
+  });
+
+  it('keeps the preview usable when subtitle discovery fails', async () => {
+    api.fileListError = new Error('listing unavailable');
+
+    await openReady(store, api);
+
+    expect(store.state().phase).toBe('ready');
+    expect(store.state().subtitleCandidates).toEqual([]);
   });
 
   it('polls a transcoding preview one request at a time until it is ready', async () => {
@@ -200,6 +228,26 @@ function saveResult(): SubtitleSaveResultDto {
   };
 }
 
+function fileEntry(
+  name: string,
+  overrides: Partial<FileEntryDto> = {},
+): FileEntryDto {
+  return {
+    name,
+    relativePath: `/Movies/${name}`,
+    type: 'file',
+    size: 100,
+    modifiedAt: '2026-09-01T10:00:00Z',
+    extension: name.slice(name.lastIndexOf('.')),
+    isReadOnly: false,
+    isSymbolicLink: false,
+    attributes: '',
+    archiveFormatHint: null,
+    archiveRole: null,
+    ...overrides,
+  };
+}
+
 async function openReady(store: MediaPreviewStore, api: FakeMediaPreviewApi): Promise<void> {
   const opening = store.open(context(), null);
   api.resolveCreate(ready());
@@ -219,6 +267,9 @@ class FakeScheduler implements MediaPreviewScheduler {
 }
 
 class FakeMediaPreviewApi extends CommanderApiTestBase {
+  fileEntries: readonly FileEntryDto[] = [];
+  fileListError: unknown | null = null;
+  fileListRequests: Array<{ sourceId: string; path: string }> = [];
   statusRequests: string[] = [];
   savePlanRequests: Array<{ sessionId: string; offsetMilliseconds: number }> = [];
   executeRequests: string[] = [];
@@ -231,6 +282,12 @@ class FakeMediaPreviewApi extends CommanderApiTestBase {
 
   override createMediaPreview(_request: CreateMediaPreviewRequestDto): Promise<MediaPreviewDto> {
     return this.creates.nextPromise();
+  }
+  override listFiles(sourceId: string, path: string): Promise<readonly FileEntryDto[]> {
+    this.fileListRequests.push({ sourceId, path });
+    return this.fileListError === null
+      ? Promise.resolve(this.fileEntries)
+      : Promise.reject(this.fileListError);
   }
   override getMediaPreview(sessionId: string): Promise<MediaPreviewDto> {
     this.statusRequests.push(sessionId); return this.statuses.nextPromise();
@@ -260,7 +317,6 @@ class FakeMediaPreviewApi extends CommanderApiTestBase {
 
   getSystemMetrics(): any { throw new Error('unused'); }
   getSources(): any { throw new Error('unused'); }
-  listFiles(): any { throw new Error('unused'); }
   listArchive(): any { throw new Error('unused'); }
   getInfo(): any { throw new Error('unused'); }
   getUploadLimits(): any { throw new Error('unused'); }

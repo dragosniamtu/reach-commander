@@ -35,10 +35,16 @@ export interface AdjustedSubtitleCue extends SubtitleCueDto {
   readonly endMilliseconds: number;
 }
 
+export interface SubtitleCandidate {
+  readonly name: string;
+  readonly path: string;
+}
+
 export interface MediaPreviewState {
   readonly phase: MediaPreviewClientPhase;
   readonly context: MediaPreviewContext | null;
   readonly session: MediaPreviewDto | null;
+  readonly subtitleCandidates: readonly SubtitleCandidate[];
   readonly offsetMilliseconds: number;
   readonly videoTimeMilliseconds: number;
   readonly savePlan: SubtitleSavePlanDto | null;

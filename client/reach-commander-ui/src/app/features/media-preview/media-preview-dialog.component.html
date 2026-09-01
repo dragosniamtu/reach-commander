@@ -73,21 +73,28 @@
           </section>
 
           <section class="subtitle-picker">
-            <label for="subtitle-path">Another SRT in this directory</label>
-            <div>
-              <input
-                #subtitlePath
-                id="subtitle-path"
-                type="text"
-                [placeholder]="session.subtitlePath ?? '/Movies/movie.srt'"
-                [disabled]="busy()"
-              />
-              <button
-                type="button"
-                [disabled]="busy()"
-                (click)="loadSubtitle(subtitlePath)"
-              >Load</button>
-            </div>
+            <label for="subtitle-path">SRT file in this directory</label>
+            <select
+              id="subtitle-path"
+              data-testid="subtitle-picker"
+              [value]="session.subtitlePath ?? ''"
+              [disabled]="busy() || store.state().subtitleCandidates.length === 0"
+              (change)="selectSubtitle($event)"
+            >
+              @if (store.state().subtitleCandidates.length === 0) {
+                <option value="">No SRT files found</option>
+              } @else {
+                @if (session.subtitlePath === null) {
+                  <option value="" selected>Select an SRT file</option>
+                }
+                @for (candidate of store.state().subtitleCandidates; track candidate.path) {
+                  <option
+                    [value]="candidate.path"
+                    [selected]="candidate.path === session.subtitlePath"
+                  >{{ candidate.name }}</option>
+                }
+              }
+            </select>
           </section>
 
           <section class="offset-controls">

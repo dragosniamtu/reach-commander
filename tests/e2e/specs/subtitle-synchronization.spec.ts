@@ -34,8 +34,13 @@ test('opens from the keyboard, selects another same-directory SRT, and protects 
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Synchronize subtitles' });
 
-  await dialog.getByLabel('Another SRT in this directory').fill('/Movies/Alternate.srt');
-  await dialog.getByRole('button', { name: 'Load' }).click();
+  const subtitlePicker = dialog.getByLabel('SRT file in this directory');
+  await expect(subtitlePicker.locator('option')).toHaveText([
+    'Alternate.srt',
+    'Fallback Movie.srt',
+    'Family Movie.srt',
+  ]);
+  await subtitlePicker.selectOption('/Movies/Alternate.srt');
   await expect(dialog).toContainText('/Movies/Alternate.srt');
   await dialog.getByRole('button', { name: '+500 ms' }).click();
 

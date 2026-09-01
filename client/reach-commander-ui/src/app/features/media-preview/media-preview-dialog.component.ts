@@ -88,9 +88,9 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
     this.store.setOffset(this.store.state().offsetMilliseconds + deltaMilliseconds);
   }
 
-  loadSubtitle(input: HTMLInputElement): void {
-    const path = input.value.trim();
-    if (path) {
+  selectSubtitle(event: Event): void {
+    const path = (event.target as HTMLSelectElement | null)?.value.trim() ?? '';
+    if (path && path !== this.store.state().session?.subtitlePath) {
       void this.store.selectSubtitle(path);
     }
   }

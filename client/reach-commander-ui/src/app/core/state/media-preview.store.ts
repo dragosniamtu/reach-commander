@@ -7,6 +7,7 @@ import {
   MediaPreviewClientError,
   MediaPreviewContext,
   MediaPreviewState,
+  SubtitleCandidate,
 } from './media-preview.models';
 
 const pollMilliseconds = 1_000;
@@ -111,12 +112,15 @@ export class MediaPreviewStore {
       context: captured,
     });
     try {
-      const session = await this.api.createMediaPreview({
-        sourceId: captured.sourceId,
-        videoPath: captured.videoPath,
-      });
+      const [session, subtitleCandidates] = await Promise.all([
+        this.api.createMediaPreview({
+          sourceId: captured.sourceId,
+          videoPath: captured.videoPath,
+        }),
+        this.loadSubtitleCandidates(captured),
+      ]);
       if (this.isCurrent(token, captured)) {
-        this.applySession(session, token, captured);
+        this.applySession(session, token, captured, subtitleCandidates);
       }
     } catch (error: unknown) {
       this.fail(error, token, captured);
@@ -283,12 +287,14 @@ export class MediaPreviewStore {
     session: MediaPreviewDto,
     token: number,
     context: MediaPreviewContext,
+    subtitleCandidates: readonly SubtitleCandidate[] = this.state().subtitleCandidates,
   ): void {
     const phase = session.phase;
     this.mutableState.set({
       ...this.state(),
       phase,
       session: Object.freeze({ ...session, cues: Object.freeze([...session.cues]) }),
+      subtitleCandidates,
       savePlan: null,
       saveResult: null,
       error: phase === 'failed'
@@ -300,6 +306,34 @@ export class MediaPreviewStore {
       this.schedulePoll(token, context);
     } else {
       this.clearPoll();
+    }
+  }
+
+  private async loadSubtitleCandidates(
+    context: MediaPreviewContext,
+  ): Promise<readonly SubtitleCandidate[]> {
+    try {
+      const entries = await this.api.listFiles(
+        context.sourceId,
+        parentDirectory(context.videoPath),
+      );
+      return Object.freeze(entries
+        .filter((entry) =>
+          entry.type === 'file' &&
+          !entry.isSymbolicLink &&
+          entry.name.toLocaleLowerCase().endsWith('.srt'),
+        )
+        .map((entry) => Object.freeze({
+          name: entry.name,
+          path: entry.relativePath,
+        }))
+        .sort((left, right) =>
+          left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }) ||
+          left.path.localeCompare(right.path),
+        ));
+    } catch {
+      // Subtitle discovery is a convenience; preview creation remains authoritative.
+      return Object.freeze([]);
     }
   }
 
@@ -448,11 +482,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function parentDirectory(path: string): string {
+  const separator = path.lastIndexOf('/');
+  return separator <= 0 ? '/' : path.slice(0, separator);
+}
+
 function closedState(requestToken = 0): MediaPreviewState {
   return {
     phase: 'closed',
     context: null,
     session: null,
+    subtitleCandidates: Object.freeze([]),
     offsetMilliseconds: 0,
     videoTimeMilliseconds: 0,
     savePlan: null,

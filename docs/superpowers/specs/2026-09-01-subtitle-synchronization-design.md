@@ -12,7 +12,7 @@ The first release supports:
 
 - MP4, MKV, and AVI video selection.
 - SRT subtitles only.
-- Automatic same-base-name SRT selection, with a manual “Choose subtitle” fallback.
+- Automatic same-base-name SRT selection, with a dropdown of the directory's non-symlink SRT files.
 - One constant positive or negative offset applied to every cue.
 - Direct browser playback when the browser-compatible container and codecs can be served safely.
 - Temporary FFmpeg preview output for media that cannot be played directly.
@@ -105,7 +105,7 @@ Media-preview limits are configuration-bound with conservative defaults for maxi
 
 Unit and integration coverage will verify:
 
-- Same-name SRT discovery and manual same-directory selection.
+- Same-name SRT discovery and dropdown-based same-directory selection.
 - Source containment, symlink rejection, path redaction, authentication, antiforgery, and rate limiting.
 - Direct-play classification and correct HTTP range behavior.
 - FFmpeg argument construction without shell evaluation, bounded cancellation, cleanup, and failure diagnostics.

@@ -55,6 +55,25 @@ describe('MediaPreviewDialogComponent', () => {
     expect(fixture.nativeElement.querySelector('.subtitle-overlay').textContent).toBe('Hello');
   });
 
+  it('offers same-directory SRT files and selects one immediately', () => {
+    const picker = fixture.nativeElement.querySelector(
+      '[data-testid="subtitle-picker"]',
+    ) as HTMLSelectElement;
+
+    expect([...picker.options].map((option) => option.text)).toEqual([
+      'Alternate.srt',
+      'movie.srt',
+    ]);
+    expect(picker.value).toBe('/Movies/movie.srt');
+
+    picker.value = '/Movies/Alternate.srt';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(store.selectSubtitle).toHaveBeenCalledWith('/Movies/Alternate.srt');
+    expect(buttonOrNull('Load')).toBeNull();
+    expect(fixture.nativeElement.querySelector('#subtitle-path[type="text"]')).toBeNull();
+  });
+
   it('updates offset presets and the exact millisecond field', () => {
     button('+500 ms').click();
     expect(store.setOffset).toHaveBeenCalledWith(500);
@@ -176,6 +195,10 @@ function readyState(overrides: Partial<MediaPreviewState> = {}): MediaPreviewSta
       sourceReadOnly: false, expiresAt: '2026-09-01T10:20:00Z',
       failureCode: null, failureDetail: null,
     },
+    subtitleCandidates: [
+      { name: 'Alternate.srt', path: '/Movies/Alternate.srt' },
+      { name: 'movie.srt', path: '/Movies/movie.srt' },
+    ],
     offsetMilliseconds: 0,
     videoTimeMilliseconds: 0,
     savePlan: null,

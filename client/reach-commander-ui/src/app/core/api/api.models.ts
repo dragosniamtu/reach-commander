@@ -576,6 +576,51 @@ export interface SystemUpdateSupportBundleDownload {
   readonly fileName: string;
 }
 
+export type MediaPreviewPhase = 'probing' | 'transcoding' | 'ready' | 'failed';
+export type MediaPlaybackMode = 'direct' | 'hls';
+
+export interface SubtitleCueDto {
+  readonly index: number;
+  readonly startMilliseconds: number;
+  readonly endMilliseconds: number;
+  readonly text: string;
+}
+
+export interface CreateMediaPreviewRequestDto {
+  readonly sourceId: string;
+  readonly videoPath: string;
+}
+
+export interface MediaPreviewDto {
+  readonly sessionId: string;
+  readonly phase: MediaPreviewPhase;
+  readonly playbackMode: MediaPlaybackMode;
+  readonly videoName: string;
+  readonly videoPath: string;
+  readonly durationMilliseconds: number | null;
+  readonly subtitlePath: string | null;
+  readonly cues: readonly SubtitleCueDto[];
+  readonly sourceReadOnly: boolean;
+  readonly expiresAt: string;
+  readonly failureCode: string | null;
+  readonly failureDetail: string | null;
+}
+
+export interface SubtitleSavePlanDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly subtitlePath: string;
+  readonly backupPath: string;
+  readonly offsetMilliseconds: number;
+  readonly canExecute: boolean;
+}
+
+export interface SubtitleSaveResultDto {
+  readonly subtitlePath: string;
+  readonly backupPath: string;
+  readonly recoveryRequired: boolean;
+}
+
 export abstract class CommanderApiPort {
   abstract getSystemMetrics(): Promise<SystemMetricsDto>;
 
@@ -666,4 +711,28 @@ export abstract class CommanderApiPort {
   ): Promise<FileOperationStatusDto>;
 
   abstract emptyTrash(request: EmptyTrashRequestDto): Promise<FileOperationStatusDto>;
+
+  abstract createMediaPreview(request: CreateMediaPreviewRequestDto): Promise<MediaPreviewDto>;
+
+  abstract getMediaPreview(sessionId: string): Promise<MediaPreviewDto>;
+
+  abstract selectMediaPreviewSubtitle(
+    sessionId: string,
+    subtitlePath: string,
+  ): Promise<MediaPreviewDto>;
+
+  abstract requestMediaPreviewFallback(sessionId: string): Promise<MediaPreviewDto>;
+
+  abstract planMediaPreviewSubtitleSave(
+    sessionId: string,
+    offsetMilliseconds: number,
+  ): Promise<SubtitleSavePlanDto>;
+
+  abstract executeMediaPreviewSubtitleSave(planId: string): Promise<SubtitleSaveResultDto>;
+
+  abstract closeMediaPreview(sessionId: string): Promise<void>;
+
+  abstract mediaPreviewContentUrl(sessionId: string): string;
+
+  abstract mediaPreviewHlsUrl(sessionId: string, assetName: string): string;
 }

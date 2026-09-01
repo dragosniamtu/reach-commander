@@ -16,6 +16,7 @@ import {
   ExactRenamePreviewRequestDto,
   FileOperationPreviewRequestDto,
   FileOperationStatusDto,
+  MediaPreviewDto,
   RestorePreviewRequestDto,
   SourceAddRequestDto,
   SourceManagementCapabilityDto,
@@ -556,7 +557,102 @@ describe('ReachCommanderApi', () => {
     emptyRequest.flush(fileOperationStatus({ kind: 'emptyTrash' }));
     await empty;
   });
+
+  it('uses opaque identifiers and logical-only values for media preview requests', async () => {
+    const session = mediaPreviewResponse();
+    const created = api.createMediaPreview({
+      sourceId: 'media library',
+      videoPath: '/Movies & TV/Family Movie.mp4',
+    });
+    const createRequest = http.expectOne('/api/media-previews');
+    expect(createRequest.request.method).toBe('POST');
+    expect(createRequest.request.body).toEqual({
+      sourceId: 'media library',
+      videoPath: '/Movies & TV/Family Movie.mp4',
+    });
+    createRequest.flush(session);
+    await expect(created).resolves.toEqual(session);
+
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+    const selected = api.selectMediaPreviewSubtitle(sessionId, '/Movies & TV/Alternate.srt');
+    const selectRequest = http.expectOne(`/api/media-previews/${sessionId}/subtitle`);
+    expect(selectRequest.request.method).toBe('PUT');
+    expect(selectRequest.request.body).toEqual({ subtitlePath: '/Movies & TV/Alternate.srt' });
+    selectRequest.flush({ ...session, subtitlePath: '/Movies & TV/Alternate.srt' });
+    await selected;
+
+    const planned = api.planMediaPreviewSubtitleSave(sessionId, 1400);
+    const planRequest = http.expectOne(`/api/media-previews/${sessionId}/subtitle-save-plans`);
+    expect(planRequest.request.method).toBe('POST');
+    expect(planRequest.request.body).toEqual({ offsetMilliseconds: 1400 });
+    expect(JSON.stringify(planRequest.request.body)).not.toContain('subtitle');
+    planRequest.flush({
+      planId: '22222222-2222-4222-8222-222222222222',
+      expiresAt: '2026-09-01T10:10:00Z',
+      subtitlePath: '/Movies & TV/Family Movie.srt',
+      backupPath: '/Movies & TV/Family Movie_original.srt',
+      offsetMilliseconds: 1400,
+      canExecute: true,
+    });
+    await planned;
+
+    const status = api.getMediaPreview(sessionId);
+    const statusRequest = http.expectOne(`/api/media-previews/${sessionId}`);
+    expect(statusRequest.request.method).toBe('GET');
+    statusRequest.flush(session);
+    await status;
+
+    const fallback = api.requestMediaPreviewFallback(sessionId);
+    const fallbackRequest = http.expectOne(`/api/media-previews/${sessionId}/fallback`);
+    expect(fallbackRequest.request.method).toBe('POST');
+    expect(fallbackRequest.request.body).toBeNull();
+    fallbackRequest.flush({ ...session, phase: 'transcoding', playbackMode: 'hls' });
+    await fallback;
+
+    const planId = '22222222-2222-4222-8222-222222222222';
+    const executed = api.executeMediaPreviewSubtitleSave(planId);
+    const executeRequest = http.expectOne(
+      `/api/media-previews/subtitle-save-plans/${planId}/execute`,
+    );
+    expect(executeRequest.request.method).toBe('POST');
+    expect(executeRequest.request.body).toBeNull();
+    executeRequest.flush({
+      subtitlePath: '/Movies & TV/Family Movie.srt',
+      backupPath: '/Movies & TV/Family Movie_original.srt',
+      recoveryRequired: false,
+    });
+    await executed;
+
+    const closed = api.closeMediaPreview(sessionId);
+    const closeRequest = http.expectOne(`/api/media-previews/${sessionId}`);
+    expect(closeRequest.request.method).toBe('DELETE');
+    closeRequest.flush(null, { status: 204, statusText: 'No Content' });
+    await expect(closed).resolves.toBeUndefined();
+
+    expect(api.mediaPreviewContentUrl(sessionId))
+      .toBe(`/api/media-previews/${sessionId}/content`);
+    expect(api.mediaPreviewHlsUrl(sessionId, 'index.m3u8'))
+      .toBe(`/api/media-previews/${sessionId}/hls/index.m3u8`);
+  });
 });
+
+function mediaPreviewResponse(overrides: Partial<MediaPreviewDto> = {}): MediaPreviewDto {
+  return {
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    phase: 'ready',
+    playbackMode: 'direct',
+    videoName: 'Family Movie.mp4',
+    videoPath: '/Movies & TV/Family Movie.mp4',
+    durationMilliseconds: 10_000,
+    subtitlePath: '/Movies & TV/Family Movie.srt',
+    cues: [{ index: 0, startMilliseconds: 1_000, endMilliseconds: 2_000, text: 'Hello' }],
+    sourceReadOnly: false,
+    expiresAt: '2026-09-01T10:20:00Z',
+    failureCode: null,
+    failureDetail: null,
+    ...overrides,
+  };
+}
 
 function fileOperationStatus(
   overrides: Partial<FileOperationStatusDto> = {},

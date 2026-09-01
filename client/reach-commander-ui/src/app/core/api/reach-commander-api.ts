@@ -30,6 +30,10 @@ import {
   FileOperationPreviewRequestDto,
   FileOperationStatusDto,
   FileOperationSubmissionDto,
+  CreateMediaPreviewRequestDto,
+  MediaPreviewDto,
+  SubtitleSavePlanDto,
+  SubtitleSaveResultDto,
   RestorePreviewDto,
   RestorePreviewRequestDto,
   RestoreSubmissionDto,
@@ -332,6 +336,74 @@ export class ReachCommanderApi extends CommanderApiPort {
     return firstValueFrom(
       this.http.delete<FileOperationStatusDto>('/api/trash', { body: request }),
     );
+  }
+
+  createMediaPreview(request: CreateMediaPreviewRequestDto): Promise<MediaPreviewDto> {
+    return firstValueFrom(this.http.post<MediaPreviewDto>('/api/media-previews', request));
+  }
+
+  getMediaPreview(sessionId: string): Promise<MediaPreviewDto> {
+    return firstValueFrom(
+      this.http.get<MediaPreviewDto>(`/api/media-previews/${encodeURIComponent(sessionId)}`),
+    );
+  }
+
+  selectMediaPreviewSubtitle(
+    sessionId: string,
+    subtitlePath: string,
+  ): Promise<MediaPreviewDto> {
+    return firstValueFrom(
+      this.http.put<MediaPreviewDto>(
+        `/api/media-previews/${encodeURIComponent(sessionId)}/subtitle`,
+        { subtitlePath },
+      ),
+    );
+  }
+
+  requestMediaPreviewFallback(sessionId: string): Promise<MediaPreviewDto> {
+    return firstValueFrom(
+      this.http.post<MediaPreviewDto>(
+        `/api/media-previews/${encodeURIComponent(sessionId)}/fallback`,
+        null,
+      ),
+    );
+  }
+
+  planMediaPreviewSubtitleSave(
+    sessionId: string,
+    offsetMilliseconds: number,
+  ): Promise<SubtitleSavePlanDto> {
+    return firstValueFrom(
+      this.http.post<SubtitleSavePlanDto>(
+        `/api/media-previews/${encodeURIComponent(sessionId)}/subtitle-save-plans`,
+        { offsetMilliseconds },
+      ),
+    );
+  }
+
+  executeMediaPreviewSubtitleSave(planId: string): Promise<SubtitleSaveResultDto> {
+    return firstValueFrom(
+      this.http.post<SubtitleSaveResultDto>(
+        `/api/media-previews/subtitle-save-plans/${encodeURIComponent(planId)}/execute`,
+        null,
+      ),
+    );
+  }
+
+  closeMediaPreview(sessionId: string): Promise<void> {
+    return firstValueFrom(
+      this.http
+        .delete<void>(`/api/media-previews/${encodeURIComponent(sessionId)}`)
+        .pipe(map(() => undefined)),
+    );
+  }
+
+  mediaPreviewContentUrl(sessionId: string): string {
+    return `/api/media-previews/${encodeURIComponent(sessionId)}/content`;
+  }
+
+  mediaPreviewHlsUrl(sessionId: string, assetName: string): string {
+    return `/api/media-previews/${encodeURIComponent(sessionId)}/hls/${encodeURIComponent(assetName)}`;
   }
 }
 

@@ -22,6 +22,10 @@ import {
   SystemUpdateSupportBundleDownload,
   TrashEntryDto,
   TrashPermanentDeleteRequestDto,
+  CreateMediaPreviewRequestDto,
+  MediaPreviewDto,
+  SubtitleSavePlanDto,
+  SubtitleSaveResultDto,
 } from '../core/api/api.models';
 
 export abstract class CommanderApiTestBase extends CommanderApiPort {
@@ -123,6 +127,48 @@ export abstract class CommanderApiTestBase extends CommanderApiPort {
 
   override emptyTrash(_request: EmptyTrashRequestDto): Promise<FileOperationStatusDto> {
     return unsupported();
+  }
+
+  override createMediaPreview(_request: CreateMediaPreviewRequestDto): Promise<MediaPreviewDto> {
+    return unsupported();
+  }
+
+  override getMediaPreview(_sessionId: string): Promise<MediaPreviewDto> {
+    return unsupported();
+  }
+
+  override selectMediaPreviewSubtitle(
+    _sessionId: string,
+    _subtitlePath: string,
+  ): Promise<MediaPreviewDto> {
+    return unsupported();
+  }
+
+  override requestMediaPreviewFallback(_sessionId: string): Promise<MediaPreviewDto> {
+    return unsupported();
+  }
+
+  override planMediaPreviewSubtitleSave(
+    _sessionId: string,
+    _offsetMilliseconds: number,
+  ): Promise<SubtitleSavePlanDto> {
+    return unsupported();
+  }
+
+  override executeMediaPreviewSubtitleSave(_planId: string): Promise<SubtitleSaveResultDto> {
+    return unsupported();
+  }
+
+  override closeMediaPreview(_sessionId: string): Promise<void> {
+    return unsupported();
+  }
+
+  override mediaPreviewContentUrl(sessionId: string): string {
+    return `/api/media-previews/${encodeURIComponent(sessionId)}/content`;
+  }
+
+  override mediaPreviewHlsUrl(sessionId: string, assetName: string): string {
+    return `/api/media-previews/${encodeURIComponent(sessionId)}/hls/${encodeURIComponent(assetName)}`;
   }
 }
 

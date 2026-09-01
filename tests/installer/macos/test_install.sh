@@ -204,6 +204,7 @@ assert_equal false \
 assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" 'REACHCOMMANDER_BIND_ADDRESS=127.0.0.1' "Mac-only bind is missing"
 assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" 'REACHCOMMANDER_PORT=8080' "default port is missing"
 assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" 'REACHCOMMANDER_CPU_LIMIT=3.0' "CPU safety limit is missing"
+# shellcheck disable=SC2016 # Compose interpolation is intentionally asserted literally.
 assert_contains "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" 'cpus: "${REACHCOMMANDER_CPU_LIMIT}"' "Compose CPU safety limit is missing"
 assert_contains "$TEST_ROOT/specific.out" 'http://127.0.0.1:8080' "completion endpoint is missing"
 assert_contains "$TEST_ROOT/specific.out" 'logs --tail 200 reachcommander' "setup-code logs command is missing"

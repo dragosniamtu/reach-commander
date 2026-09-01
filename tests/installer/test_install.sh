@@ -300,6 +300,7 @@ grep -q '^REACHCOMMANDER_UID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || 
 grep -q '^REACHCOMMANDER_GID=1000$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "GID default missing"
 grep -q '^REACHCOMMANDER_CPU_LIMIT=3.0$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "CPU safety limit missing"
 grep -q '^REACHCOMMANDER_IMAGE=ghcr.io/dragosniamtu/reach-commander@sha256:a\{64\}$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "digest pin missing"
+# shellcheck disable=SC2016 # Compose interpolation is intentionally asserted literally.
 grep -Fq 'cpus: "${REACHCOMMANDER_CPU_LIMIT}"' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "Compose CPU safety limit missing"
 grep -q 'read_only: true' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RO mount missing"
 grep -q 'read_only: false' "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" || fail "RW mount missing"

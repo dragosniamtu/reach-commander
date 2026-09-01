@@ -16,7 +16,7 @@ public sealed class MediaProcessRunnerTests
         Assert.Equal(
             new[]
             {
-                "-nostdin", "-v", "error",
+                "-v", "error",
                 "-show_entries", "format=format_name,duration:stream=codec_type,codec_name",
                 "-of", "json", input,
             },

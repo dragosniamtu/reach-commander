@@ -118,7 +118,7 @@ internal sealed class MediaProbeRunner(
         var startInfo = MediaProcessExecution.CreateStartInfo(executable);
         foreach (var argument in new[]
                  {
-                     "-nostdin", "-v", "error",
+                     "-v", "error",
                      "-show_entries", "format=format_name,duration:stream=codec_type,codec_name",
                      "-of", "json", inputPhysicalPath,
                  })

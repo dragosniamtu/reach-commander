@@ -1027,6 +1027,7 @@ validate_uninstall_tree() {
     case "$relative_path" in
       config|state|state/update-traces|bin|lib|backups|data|data/auth|data/keys|\
       data/file-operations|data/file-operations/plans|data/file-operations/operations|\
+      data/media-previews|\
       .env|compose.yaml|compose.override.yaml|\
       config/sources.json|\
       state/source-mounts.json|\
@@ -1059,6 +1060,12 @@ validate_uninstall_tree() {
         ;;
       *)
         if [[ "$relative_path" =~ ^data/file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]] &&
+          [[ -f "$path" ]]; then
+          :
+        elif [[ "$relative_path" =~ ^data/media-previews/[0-9a-f]{32}$ ]] &&
+          [[ -d "$path" ]]; then
+          :
+        elif [[ "$relative_path" =~ ^data/media-previews/[0-9a-f]{32}/(index\.m3u8|segment-[0-9]{6}\.ts)$ ]] &&
           [[ -f "$path" ]]; then
           :
         elif [[ "$relative_path" == state/update-traces/*.jsonl ]] &&

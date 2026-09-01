@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const workflowUrl = new URL('../../.github/workflows/ci.yml', import.meta.url);
 const installerUrl = new URL('../../deploy/install.sh', import.meta.url);
+const commandUrl = new URL('../../deploy/reachcommander', import.meta.url);
 const dockerignoreUrl = new URL('../../.dockerignore', import.meta.url);
 const containerOperationsSmokeUrl = new URL(
   '../../tools/container_file_operations_smoke.py',
@@ -47,6 +48,7 @@ test('updater socket polling uses its bounded arithmetic counter', async () => {
 
 test('application data validation narrowly accepts generated media preview assets', async () => {
   const installer = await readFile(installerUrl, 'utf8');
+  const command = await readFile(commandUrl, 'utf8');
 
   assert.match(installer, /auth \| keys \| file-operations \| media-previews/);
   assert.match(
@@ -56,6 +58,12 @@ test('application data validation narrowly accepts generated media preview asset
   assert.match(
     installer,
     /\^media-previews\/\[0-9a-f\]\{32\}\/\(index\\\.m3u8\|segment-\[0-9\]\{6\}\\\.ts\)\$/,
+  );
+  assert.match(command, /data\/media-previews\|/);
+  assert.match(command, /\^data\/media-previews\/\[0-9a-f\]\{32\}\$/);
+  assert.match(
+    command,
+    /\^data\/media-previews\/\[0-9a-f\]\{32\}\/\(index\\\.m3u8\|segment-\[0-9\]\{6\}\\\.ts\)\$/,
   );
 });
 

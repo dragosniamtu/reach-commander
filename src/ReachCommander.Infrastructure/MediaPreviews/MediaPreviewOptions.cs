@@ -25,4 +25,8 @@ public sealed class MediaPreviewOptions
     public TimeSpan SessionInactivity { get; set; } = TimeSpan.FromMinutes(20);
 
     public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+    public long MaximumOffsetMilliseconds { get; set; } = 600_000;
+
+    public TimeSpan SavePlanLifetime { get; set; } = TimeSpan.FromMinutes(10);
 }

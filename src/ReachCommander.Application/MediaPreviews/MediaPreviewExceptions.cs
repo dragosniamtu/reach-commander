@@ -76,4 +76,36 @@ public sealed class MediaPreviewException(
     public static MediaPreviewException HlsAssetInvalid() => new(
         "hls_asset_invalid",
         "The requested preview asset is invalid.");
+
+    public static MediaPreviewException SubtitleMissing() => new(
+        "subtitle_missing",
+        "Select an SRT subtitle before saving a correction.");
+
+    public static MediaPreviewException SubtitleSourceReadOnly() => new(
+        "subtitle_source_read_only",
+        "The selected source is read-only, so its subtitle cannot be changed.");
+
+    public static MediaPreviewException SubtitleSavePlanNotFound() => new(
+        "subtitle_save_plan_not_found",
+        "The subtitle save plan was not found.");
+
+    public static MediaPreviewException SubtitleSavePlanExpired() => new(
+        "subtitle_save_plan_expired",
+        "The subtitle save plan has expired. Review the change again.");
+
+    public static MediaPreviewException SubtitleSavePlanStale() => new(
+        "subtitle_save_plan_stale",
+        "The subtitle changed after the save was reviewed.");
+
+    public static MediaPreviewException SubtitleBackupUnavailable() => new(
+        "subtitle_backup_unavailable",
+        "A free backup filename could not be reserved.");
+
+    public static MediaPreviewException SubtitleSaveFailed() => new(
+        "subtitle_save_failed",
+        "The corrected subtitle could not be saved; the original was preserved.");
+
+    public static MediaPreviewException SubtitleRecoveryRequired() => new(
+        "subtitle_recovery_required",
+        "The corrected subtitle could not be published and the original is in its backup file. Manual recovery is required.");
 }

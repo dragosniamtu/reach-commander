@@ -7,6 +7,7 @@ using ReachCommander.Application.Sources;
 using ReachCommander.Domain.Sources;
 using ReachCommander.Infrastructure.Authentication;
 using ReachCommander.Infrastructure.MediaPreviews;
+using ReachCommander.Infrastructure.Mutations;
 using ReachCommander.Infrastructure.Security;
 using ReachCommander.UnitTests.Support;
 
@@ -213,6 +214,22 @@ public sealed class MediaPreviewServiceTests : IDisposable
         var options = Options.Create(new MediaPreviewOptions());
         var store = new MediaPreviewSessionStore(_clock, options);
         var queue = new MediaPreviewQueue(options);
+        var fileSystem = new LocalMediaPreviewFileSystem();
+        var plans = new SubtitleSavePlanStore(_clock, options);
+        var planner = new SubtitleSavePlanner(
+            store,
+            pathSecurity,
+            fileSystem,
+            plans,
+            _clock,
+            options);
+        var executor = new SubtitleSaveExecutor(
+            store,
+            pathSecurity,
+            fileSystem,
+            plans,
+            new DirectoryMutationLock(),
+            options);
         return new MediaPreviewService(
             pathSecurity,
             new StubProbeRunner(probeResult ?? new MediaProbeResult(
@@ -225,6 +242,8 @@ public sealed class MediaPreviewServiceTests : IDisposable
             paths,
             _clock,
             options,
+            planner,
+            executor,
             NullLogger<MediaPreviewService>.Instance);
     }
 

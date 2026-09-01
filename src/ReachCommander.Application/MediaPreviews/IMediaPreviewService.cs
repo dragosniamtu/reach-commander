@@ -31,4 +31,13 @@ public interface IMediaPreviewService
     ValueTask CloseAsync(
         Guid sessionId,
         CancellationToken cancellationToken);
+
+    ValueTask<SubtitleSavePlan> PlanSubtitleSaveAsync(
+        Guid sessionId,
+        long offsetMilliseconds,
+        CancellationToken cancellationToken);
+
+    ValueTask<SubtitleSaveResult> ExecuteSubtitleSaveAsync(
+        Guid planId,
+        CancellationToken cancellationToken);
 }

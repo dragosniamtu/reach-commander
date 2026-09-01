@@ -15,6 +15,8 @@ internal sealed partial class MediaPreviewService(
     AuthenticationDataPaths dataPaths,
     TimeProvider clock,
     IOptions<MediaPreviewOptions> options,
+    SubtitleSavePlanner subtitleSavePlanner,
+    SubtitleSaveExecutor subtitleSaveExecutor,
     ILogger<MediaPreviewService> logger) : IMediaPreviewService
 {
     private static readonly HashSet<string> SupportedVideoExtensions =
@@ -248,6 +250,20 @@ internal sealed partial class MediaPreviewService(
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask<SubtitleSavePlan> PlanSubtitleSaveAsync(
+        Guid sessionId,
+        long offsetMilliseconds,
+        CancellationToken cancellationToken) => subtitleSavePlanner.PlanAsync(
+        sessionId,
+        offsetMilliseconds,
+        cancellationToken);
+
+    public ValueTask<SubtitleSaveResult> ExecuteSubtitleSaveAsync(
+        Guid planId,
+        CancellationToken cancellationToken) => subtitleSaveExecutor.ExecuteAsync(
+        planId,
+        cancellationToken);
+
     internal async Task ProcessQueuedAsync(
         Guid sessionId,
         IMediaTranscodeRunner transcodeRunner,
@@ -375,7 +391,7 @@ internal sealed partial class MediaPreviewService(
         }
     }
 
-    private static void EnsureNoSymbolicLinks(ResolvedSourcePath resolved)
+    internal static void EnsureNoSymbolicLinks(ResolvedSourcePath resolved)
     {
         var current = Path.GetFullPath(resolved.Source.RootPath);
         EnsureEntryIsNotLink(current);

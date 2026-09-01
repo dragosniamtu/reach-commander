@@ -122,6 +122,10 @@ public static class DependencyInjection
         services.AddSingleton<IValidateOptions<MediaPreviewOptions>, MediaPreviewOptionsValidator>();
         services.AddSingleton<MediaPreviewSessionStore>();
         services.AddSingleton<MediaPreviewQueue>();
+        services.AddSingleton<IMediaPreviewFileSystem, LocalMediaPreviewFileSystem>();
+        services.AddSingleton<SubtitleSavePlanStore>();
+        services.AddSingleton<SubtitleSavePlanner>();
+        services.AddSingleton<SubtitleSaveExecutor>();
         services.AddSingleton<IMediaProbeRunner, MediaProbeRunner>();
         services.AddSingleton<IMediaTranscodeRunner, MediaTranscodeRunner>();
         services.AddSingleton<MediaPreviewService>();

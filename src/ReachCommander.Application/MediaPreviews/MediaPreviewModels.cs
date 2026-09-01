@@ -43,3 +43,16 @@ public sealed record MediaAsset(
     string ContentType,
     long Length,
     bool EnableRanges);
+
+public sealed record SubtitleSavePlan(
+    Guid PlanId,
+    DateTimeOffset ExpiresAt,
+    string SubtitlePath,
+    string BackupPath,
+    long OffsetMilliseconds,
+    bool CanExecute);
+
+public sealed record SubtitleSaveResult(
+    string SubtitlePath,
+    string BackupPath,
+    bool RecoveryRequired);

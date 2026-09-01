@@ -40,7 +40,9 @@ internal sealed class MediaPreviewOptionsValidator : IValidateOptions<MediaPrevi
         if (options.MaximumTemporaryOutputBytes <= 0 ||
             options.MaximumTranscodeDuration <= TimeSpan.Zero ||
             options.SessionInactivity <= TimeSpan.Zero ||
-            options.CleanupInterval <= TimeSpan.Zero)
+            options.CleanupInterval <= TimeSpan.Zero ||
+            options.SavePlanLifetime <= TimeSpan.Zero ||
+            options.MaximumOffsetMilliseconds <= 0)
         {
             failures.Add("Media preview size and duration limits must be positive.");
         }

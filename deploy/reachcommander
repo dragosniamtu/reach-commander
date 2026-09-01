@@ -1247,10 +1247,19 @@ remove_application_data() {
   while IFS= read -r -d '' data_path; do
     rm -f -- "$data_path" || return 1
   done < <(find "$RC_INSTALL_ROOT/data" -xdev -mindepth 1 -type f -print0)
+  if [[ -d "$RC_INSTALL_ROOT/data/media-previews" ]]; then
+    while IFS= read -r -d '' data_path; do
+      rmdir -- "$data_path" || return 1
+    done < <(
+      find "$RC_INSTALL_ROOT/data/media-previews" \
+        -xdev -mindepth 1 -maxdepth 1 -type d -print0
+    )
+  fi
   for relative_directory in \
     file-operations/plans \
     file-operations/operations \
     file-operations \
+    media-previews \
     auth \
     keys; do
     if [[ -d "$RC_INSTALL_ROOT/data/$relative_directory" ]]; then

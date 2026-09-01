@@ -65,6 +65,10 @@ test('application data validation narrowly accepts generated media preview asset
     command,
     /\^data\/media-previews\/\[0-9a-f\]\{32\}\/\(index\\\.m3u8\|segment-\[0-9\]\{6\}\\\.ts\)\$/,
   );
+  assert.match(
+    command,
+    /find "\$RC_INSTALL_ROOT\/data\/media-previews" \\\n\s+-xdev -mindepth 1 -maxdepth 1 -type d -print0/,
+  );
 });
 
 test('installer verification runs inside acceptance before publication', async () => {

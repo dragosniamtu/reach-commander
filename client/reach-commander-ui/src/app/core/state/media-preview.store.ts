@@ -229,6 +229,7 @@ export class MediaPreviewStore {
         this.mutableState.set({
           ...this.state(),
           phase: 'saved',
+          savePlan: null,
           saveResult: Object.freeze({ ...saveResult }),
           error: null,
         });

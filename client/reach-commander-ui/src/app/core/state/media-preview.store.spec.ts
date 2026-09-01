@@ -109,6 +109,8 @@ describe('MediaPreviewStore', () => {
     api.resolveExecute(saveResult());
     await executing;
     expect(store.state().phase).toBe('saved');
+    expect(store.state().savePlan).toBeNull();
+    expect(store.state().saveResult).toEqual(saveResult());
   });
 
   it('queues an explicit browser fallback and resumes polling', async () => {

@@ -20,6 +20,7 @@ import {
   freezeFileOperationContext,
   TransferOperationKind,
 } from './file-operation.models';
+import { MediaPreviewContext } from './media-preview.models';
 
 @Injectable({ providedIn: 'root' })
 export class CommanderStore {
@@ -234,6 +235,33 @@ export class CommanderStore {
     } else if (entry.archiveFormatHint && entry.archiveRole) {
       await this.openArchive(side, entry.relativePath);
     }
+  }
+
+  createMediaPreviewContext(
+    side: PanelSide,
+    entry: FileEntryDto,
+  ): MediaPreviewContext | null {
+    const state = this.panel(side)();
+    const tab = activeTab(state);
+    const source = this.sourceState().find((candidate) =>
+      candidate.id === tab?.location.sourceId,
+    );
+    const extension = (entry.extension ?? extensionFromName(entry.name)).toLocaleLowerCase();
+    if (!tab || tab.location.kind !== 'filesystem' ||
+        !source?.isAvailable ||
+        (entry as FileEntryDto & { isParent?: boolean }).isParent ||
+        entry.type !== 'file' ||
+        entry.isSymbolicLink ||
+        !['mp4', 'mkv', 'avi'].includes(extension)) {
+      return null;
+    }
+
+    return Object.freeze({
+      sourceId: source.id,
+      videoPath: entry.relativePath,
+      videoName: entry.name,
+      sourceReadOnly: source.isReadOnly || entry.isReadOnly,
+    });
   }
 
   async navigateParent(side: PanelSide): Promise<void> {
@@ -863,6 +891,11 @@ function sameLocation(left: PanelLocation, right: PanelLocation): boolean {
 
 function parentPath(path: string): string {
   return parentLogicalPath(path);
+}
+
+function extensionFromName(name: string): string {
+  const separator = name.lastIndexOf('.');
+  return separator <= 0 || separator === name.length - 1 ? '' : name.slice(separator + 1);
 }
 
 function apiProblem(error: unknown): Pick<ApiProblemDetails, 'code' | 'detail'> {

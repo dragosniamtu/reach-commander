@@ -1,0 +1,158 @@
+<div class="media-backdrop" data-testid="media-preview-dialog">
+  <dialog
+    #dialog
+    class="media-dialog theme-dialog-shell"
+    aria-modal="true"
+    aria-labelledby="media-preview-title"
+    aria-describedby="media-preview-description"
+    tabindex="-1"
+    autofocus
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+    (cancel)="handleNativeCancel($event)"
+  >
+    <header class="theme-dialog-titlebar">
+      <div>
+        <span class="eyebrow">Media workspace</span>
+        <h2 id="media-preview-title">Synchronize subtitles</h2>
+        <p id="media-preview-description">
+          Preview one constant SRT timing offset without modifying the video.
+        </p>
+      </div>
+      <button
+        type="button"
+        aria-label="Close subtitle synchronization"
+        [disabled]="busy()"
+        (click)="requestClose()"
+      >×</button>
+    </header>
+
+    <main>
+      <section class="player-column" aria-label="Video preview">
+        <div class="video-frame">
+          <video
+            #video
+            controls
+            preload="metadata"
+            (timeupdate)="updateVideoTime()"
+            (error)="onPlaybackError()"
+          ></video>
+          @if (store.activeCue(); as cue) {
+            <div class="subtitle-overlay" aria-live="off">{{ cue.text }}</div>
+          }
+          @if (busy()) {
+            <div class="preparing" role="status" aria-live="polite">
+              <span></span>{{ statusLabel() }}…
+            </div>
+          }
+        </div>
+
+        <div class="seek-controls" aria-label="Video position shortcuts">
+          <button type="button" (click)="seek('beginning')">Beginning</button>
+          <button type="button" (click)="seek('middle')">Middle</button>
+          <button type="button" (click)="seek('end')">End</button>
+          <span>Space toggles playback</span>
+        </div>
+
+        @if (playbackFailed()) {
+          <p class="warning" role="alert">
+            Direct playback failed.
+            <button type="button" (click)="retryPlayback()">Prepare compatible preview</button>
+          </p>
+        }
+      </section>
+
+      <aside class="subtitle-column" aria-label="Subtitle timing controls">
+        @if (store.state().session; as session) {
+          <section class="file-summary">
+            <div><span>Video</span><code>{{ session.videoPath }}</code></div>
+            <div>
+              <span>Subtitle</span>
+              <code>{{ session.subtitlePath ?? 'No same-name SRT found' }}</code>
+            </div>
+          </section>
+
+          <section class="subtitle-picker">
+            <label for="subtitle-path">Another SRT in this directory</label>
+            <div>
+              <input
+                #subtitlePath
+                id="subtitle-path"
+                type="text"
+                [placeholder]="session.subtitlePath ?? '/Movies/movie.srt'"
+                [disabled]="busy()"
+              />
+              <button
+                type="button"
+                [disabled]="busy()"
+                (click)="loadSubtitle(subtitlePath)"
+              >Load</button>
+            </div>
+          </section>
+
+          <section class="offset-controls">
+            <h3>Constant timing offset</h3>
+            <p>Positive values show subtitles later; negative values show them earlier.</p>
+            <div class="presets">
+              <button type="button" (click)="adjustOffset(-1000)">−1000 ms</button>
+              <button type="button" (click)="adjustOffset(-500)">−500 ms</button>
+              <button type="button" (click)="adjustOffset(-100)">−100 ms</button>
+              <button type="button" (click)="adjustOffset(100)">+100 ms</button>
+              <button type="button" (click)="adjustOffset(500)">+500 ms</button>
+              <button type="button" (click)="adjustOffset(1000)">+1000 ms</button>
+            </div>
+            <label for="offset-field">Exact offset (milliseconds)</label>
+            <input
+              id="offset-field"
+              data-testid="offset-field"
+              type="number"
+              min="-600000"
+              max="600000"
+              step="1"
+              [value]="store.state().offsetMilliseconds"
+              (input)="setExactOffset($event)"
+            />
+          </section>
+
+          @if (session.sourceReadOnly) {
+            <p class="read-only">Preview only: this source is read-only.</p>
+          }
+
+          @if (store.state().savePlan; as plan) {
+            <section class="save-review" aria-live="polite">
+              <h3>Confirm subtitle save</h3>
+              <code>{{ plan.subtitlePath }}</code>
+              <span aria-hidden="true">→</span>
+              <code>{{ plan.backupPath }}</code>
+              <p>The video is not modified. The original subtitle is preserved byte-for-byte.</p>
+              <button
+                type="button"
+                class="primary"
+                [disabled]="!store.canExecuteSave()"
+                (click)="save()"
+              >Save corrected subtitle</button>
+            </section>
+          } @else if (store.state().saveResult; as result) {
+            <section class="save-success" aria-live="polite">
+              <strong>Corrected subtitle saved</strong>
+              <p>Original: <code>{{ result.backupPath }}</code></p>
+            </section>
+          } @else if (store.canPlanSave()) {
+            <button type="button" class="primary review-save" (click)="reviewSave()">
+              Review save
+            </button>
+          }
+
+          @if (store.state().error; as error) {
+            <p class="error" role="alert">{{ error.detail }}</p>
+          }
+        }
+      </aside>
+    </main>
+
+    <footer>
+      <span aria-live="polite">{{ statusLabel() }}</span>
+      <button type="button" [disabled]="busy()" (click)="requestClose()">Close</button>
+    </footer>
+  </dialog>
+</div>

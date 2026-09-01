@@ -18,8 +18,9 @@
           [class.parent]="row.isParent"
           [attr.aria-selected]="isSelected(row)"
           [attr.data-path]="row.relativePath"
+          tabindex="-1"
           (click)="select(rowIndex, $event)"
-          (dblclick)="rowOpened.emit(row)"
+          (dblclick)="open(row, $event)"
         >
           <td class="name-cell">
             <span class="name-content">

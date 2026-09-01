@@ -32,8 +32,14 @@ export class FileTableComponent {
   }
 
   select(rowIndex: number, event: MouseEvent): void {
+    (event.currentTarget as HTMLElement | null)?.focus();
     const mode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
     this.rowSelected.emit({ rowIndex, mode });
+  }
+
+  open(row: FileTableRow, event: MouseEvent): void {
+    (event.currentTarget as HTMLElement | null)?.focus();
+    this.rowOpened.emit(row);
   }
 
   isSelected(row: FileTableRow): boolean {

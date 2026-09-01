@@ -129,6 +129,10 @@
     <app-archive-extraction-dialog (closeRequested)="closeArchiveExtraction()" />
   }
 
+  @if (mediaPreview.state().phase !== 'closed') {
+    <app-media-preview-dialog />
+  }
+
   @if (fileOperations.dialog() === 'confirm') {
     <app-copy-move-dialog (closed)="restoreFileOperationFocus()" />
   }
@@ -165,6 +169,7 @@
       [sourceRemovalEnabled]="sourceManagement.capability()?.supported === true"
       [sourceRemovalPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
       (sourceRemovalRequested)="openSourceRemoval($event)"
+      (mediaPreviewRequested)="openMediaPreview($event)"
     />
     <div class="divider" aria-hidden="true"><span></span></div>
     <app-commander-panel
@@ -176,6 +181,7 @@
       [sourceRemovalEnabled]="sourceManagement.capability()?.supported === true"
       [sourceRemovalPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
       (sourceRemovalRequested)="openSourceRemoval($event)"
+      (mediaPreviewRequested)="openMediaPreview($event)"
     />
   </section>
 

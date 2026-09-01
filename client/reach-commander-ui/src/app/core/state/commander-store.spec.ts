@@ -800,6 +800,34 @@ describe('CommanderStore', () => {
     expect(api.archiveRequests).toHaveLength(requestsBeforeNestedOpen);
   });
 
+  it('captures only supported non-link filesystem videos for media preview', async () => {
+    const api = new FakeCommanderApi([
+      source('downloads', { defaultLeft: true, defaultRight: true }),
+    ]);
+    api.entries.set('downloads:/', [
+      { ...entry('movie.MKV'), extension: 'MKV' },
+      { ...entry('notes.txt'), extension: 'txt' },
+      { ...entry('linked.mp4'), extension: 'mp4', isSymbolicLink: true },
+    ]);
+    const store = new CommanderStore(api);
+    await store.initialize();
+
+    expect(store.createMediaPreviewContext('left', api.entries.get('downloads:/')![0]!))
+      .toEqual({
+        sourceId: 'downloads',
+        videoPath: '/movie.MKV',
+        videoName: 'movie.MKV',
+        sourceReadOnly: false,
+      });
+    expect(store.createMediaPreviewContext('left', api.entries.get('downloads:/')![1]!))
+      .toBeNull();
+    expect(store.createMediaPreviewContext('left', api.entries.get('downloads:/')![2]!))
+      .toBeNull();
+
+    await store.openArchive('left', '/photos.7z');
+    expect(store.createMediaPreviewContext('left', entry('inside.mp4'))).toBeNull();
+  });
+
   it('returns through archive parents and crosses the archive root boundary', async () => {
     const api = new FakeCommanderApi([
       source('downloads', { defaultLeft: true, defaultRight: true }),

@@ -16,12 +16,14 @@ describe('CommanderPanelComponent archive locations', () => {
     sortBy: vi.fn(),
     selectWithPointer: vi.fn(),
     openEntry: vi.fn(),
+    createMediaPreviewContext: vi.fn((_side?: 'left' | 'right', _entry?: any): any => null),
     refresh: vi.fn(),
     returnArchiveToParent: vi.fn(),
   };
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    store.createMediaPreviewContext.mockReturnValue(null);
     await TestBed.configureTestingModule({
       imports: [CommanderPanelComponent],
       providers: [{ provide: CommanderStore, useValue: store }],
@@ -87,6 +89,44 @@ describe('CommanderPanelComponent archive locations', () => {
     fixture.detectChanges();
     expect((fixture.nativeElement.querySelector('.path-input') as HTMLInputElement).value)
       .toBe('/Complete');
+  });
+
+  it('requests the media workspace for a supported filesystem video on double-click', () => {
+    const video = {
+      ...archivePanel().entries[0]!,
+      name: 'movie.mkv',
+      relativePath: '/Movies/movie.mkv',
+      extension: 'mkv',
+      isReadOnly: false,
+      attributes: 'Normal',
+    };
+    const context = {
+      sourceId: 'downloads',
+      videoPath: '/Movies/movie.mkv',
+      videoName: 'movie.mkv',
+      sourceReadOnly: false,
+    };
+    fixture.componentRef.setInput('panel', archivePanel({
+      tabs: [{
+        id: 'filesystem-tab',
+        label: 'Movies',
+        location: { kind: 'filesystem', sourceId: 'downloads', path: '/Movies' },
+      }],
+      activeTabId: 'filesystem-tab',
+      entries: [video],
+      cursorIndex: 0,
+      archiveMetadata: null,
+    }));
+    store.createMediaPreviewContext.mockReturnValue(context);
+    const requested = vi.fn();
+    fixture.componentInstance.mediaPreviewRequested.subscribe(requested);
+    fixture.detectChanges();
+
+    const row = fixture.nativeElement.querySelector('tbody tr') as HTMLTableRowElement;
+    row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+
+    expect(requested).toHaveBeenCalledWith({ side: 'left', context, opener: row });
+    expect(store.openEntry).not.toHaveBeenCalled();
   });
 
   it('announces an empty location through the stable polite live region', () => {

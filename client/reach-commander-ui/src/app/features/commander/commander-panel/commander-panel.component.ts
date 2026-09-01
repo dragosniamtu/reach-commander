@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { SourceDto } from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
+import { MediaPreviewContext } from '../../../core/state/media-preview.models';
 import {
   locationDisplayPath,
   locationSourceId,
@@ -28,6 +29,12 @@ import { DirectoryTabsComponent } from '../directory-tabs/directory-tabs.compone
 import { PathBarComponent } from '../path-bar/path-bar.component';
 import { FileTableComponent, PointerSelection } from '../file-table/file-table.component';
 
+export interface MediaPreviewRequest {
+  readonly side: PanelSide;
+  readonly context: MediaPreviewContext;
+  readonly opener: HTMLElement | null;
+}
+
 @Component({
   selector: 'app-commander-panel',
   imports: [SourceSelectorComponent, DirectoryTabsComponent, PathBarComponent, FileTableComponent],
@@ -43,6 +50,7 @@ export class CommanderPanelComponent {
   readonly sourceRemovalEnabled = input(false);
   readonly sourceRemovalPending = input(false);
   readonly sourceRemovalRequested = output<SourceRemovalRequest>();
+  readonly mediaPreviewRequested = output<MediaPreviewRequest>();
   readonly activeTab = computed(() =>
     this.panel().tabs.find((tab) => tab.id === this.panel().activeTabId),
   );
@@ -94,8 +102,28 @@ export class CommanderPanelComponent {
   }
 
   async openRow(row: FileTableRow): Promise<void> {
+    const context = this.store.createMediaPreviewContext(this.side(), row);
+    if (context) {
+      this.mediaPreviewRequested.emit({
+        side: this.side(),
+        context,
+        opener: this.openerFor(row.relativePath),
+      });
+      return;
+    }
     await this.store.openEntry(this.side(), row);
     this.focusPanel();
+  }
+
+  openerFor(relativePath: string): HTMLElement | null {
+    const root = this.panelRoot?.nativeElement ?? null;
+    const row = root
+      ? [...root.querySelectorAll<HTMLElement>('tbody tr[data-path]')]
+          .find((candidate) => candidate.dataset['path'] === relativePath) ?? null
+      : null;
+    const opener = row ?? root;
+    opener?.focus();
+    return opener;
   }
 
   async closeTab(tabId: string): Promise<void> {

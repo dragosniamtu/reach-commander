@@ -28,6 +28,7 @@ import { FileOperationStore } from '../file-operations/file-operation.store';
 import { TrashStore } from '../trash/trash.store';
 import { SystemUpdateStore } from '../../../core/state/system-update.store';
 import { SourceManagementStore } from '../../../core/state/source-management.store';
+import { MediaPreviewStore } from '../../../core/state/media-preview.store';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -68,6 +69,13 @@ describe('CommanderShellComponent system metrics integration', () => {
     moveCursor: vi.fn(),
     setFilter: vi.fn(),
     openEntry: vi.fn(() => Promise.resolve()),
+    createMediaPreviewContext: vi.fn((_side?: 'left' | 'right', _entry?: any): any => null),
+  };
+  const mediaPreview = {
+    state: signal<any>({ phase: 'closed' }),
+    open: vi.fn(() => Promise.resolve()),
+    close: vi.fn(() => Promise.resolve()),
+    setCompletionHandler: vi.fn(),
   };
   const upload = {
     state: signal<UploadState>(closedUploadState()),
@@ -218,6 +226,8 @@ describe('CommanderShellComponent system metrics integration', () => {
     trash.deletePreview.set(null);
     store.captureFileOperationContext.mockReturnValue(null);
     store.createSingleRenameContext.mockReturnValue(null);
+    store.createMediaPreviewContext.mockReturnValue(null);
+    mediaPreview.state.set({ phase: 'closed' });
     pwa.canInstall.set(false);
     pwa.online.set(true);
     pwa.updateReady.set(false);
@@ -252,6 +262,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: AuthenticationStore, useValue: authentication },
         { provide: SystemUpdateStore, useValue: systemUpdate },
         { provide: SourceManagementStore, useValue: sourceManagement },
+        { provide: MediaPreviewStore, useValue: mediaPreview },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CommanderShellComponent);
@@ -629,6 +640,33 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.componentInstance.execute({ type: 'open-cursor' });
 
     expect(store.openEntry).toHaveBeenCalledWith('left', expect.objectContaining(candidate));
+  });
+
+  it('opens the subtitle synchronization workspace when Enter targets a supported video', () => {
+    const candidate = {
+      name: 'movie.avi', relativePath: '/Movies/movie.avi', type: 'file' as const, size: 12,
+      modifiedAt: null, extension: 'avi', isReadOnly: false, isSymbolicLink: false,
+      attributes: 'Normal', archiveFormatHint: null, archiveRole: null,
+    };
+    const context = {
+      sourceId: 'media', videoPath: '/Movies/movie.avi', videoName: 'movie.avi',
+      sourceReadOnly: false,
+    };
+    store.sources.set([source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{
+        id: 'movies', label: 'Movies',
+        location: { kind: 'filesystem', sourceId: 'media', path: '/Movies' },
+      }],
+      activeTabId: 'movies', entries: [candidate], cursorIndex: 0,
+    }));
+    store.createMediaPreviewContext.mockReturnValue(context);
+    fixture.detectChanges();
+
+    fixture.componentInstance.execute({ type: 'open-cursor' });
+
+    expect(mediaPreview.open).toHaveBeenCalledWith(context, expect.any(HTMLElement));
+    expect(store.openEntry).not.toHaveBeenCalled();
   });
 
   it('blocks upload inside an archive even when the underlying source is writable', () => {

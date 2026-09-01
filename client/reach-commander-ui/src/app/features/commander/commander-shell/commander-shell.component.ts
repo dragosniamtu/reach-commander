@@ -20,7 +20,10 @@ import {
   locationSourceId,
   PanelSide,
 } from '../../../core/state/commander.models';
-import { CommanderPanelComponent } from '../commander-panel/commander-panel.component';
+import {
+  CommanderPanelComponent,
+  MediaPreviewRequest,
+} from '../commander-panel/commander-panel.component';
 import { SourceRemovalRequest } from '../source-selector/source-selector.component';
 import { CommandBarComponent } from '../command-bar/command-bar.component';
 import { SystemMetricsWidgetComponent } from '../../system-metrics/system-metrics-widget.component';
@@ -60,6 +63,8 @@ import { SystemUpdateDialogComponent } from '../../system-update/system-update-d
 import { SystemUpdateOverlayComponent } from '../../system-update/system-update-overlay.component';
 import { SourceManagementStore } from '../../../core/state/source-management.store';
 import { SourceManagementDialogComponent } from '../../source-management/source-management-dialog.component';
+import { MediaPreviewStore } from '../../../core/state/media-preview.store';
+import { MediaPreviewDialogComponent } from '../../media-preview/media-preview-dialog.component';
 
 export interface CreateDirectoryDialogContext {
   readonly sourceId: string;
@@ -92,6 +97,7 @@ export interface CreateDirectoryDialogContext {
     SystemUpdateDialogComponent,
     SystemUpdateOverlayComponent,
     SourceManagementDialogComponent,
+    MediaPreviewDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -108,6 +114,7 @@ export class CommanderShellComponent implements OnInit {
   readonly trash = inject(TrashStore);
   readonly systemUpdate = inject(SystemUpdateStore);
   readonly sourceManagement = inject(SourceManagementStore);
+  readonly mediaPreview = inject(MediaPreviewStore);
   readonly pwa = inject(PwaService);
   readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
@@ -265,6 +272,9 @@ export class CommanderShellComponent implements OnInit {
     });
     this.singleRename.setCompletionHandler((completion) =>
       this.completeSingleRename(completion));
+    this.mediaPreview.setCompletionHandler(() => {
+      void Promise.all([this.store.refresh('left'), this.store.refresh('right')]);
+    });
   }
 
   ngOnInit(): void {
@@ -754,6 +764,12 @@ export class CommanderShellComponent implements OnInit {
       : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
   }
 
+  openMediaPreview(request: MediaPreviewRequest): void {
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    void this.mediaPreview.open(request.context, request.opener);
+  }
+
   handleTransferDismissed(reason: 'background' | 'closed'): void {
     if (reason === 'background') {
       queueMicrotask(() => this.transferIndicator?.focus());
@@ -778,7 +794,7 @@ export class CommanderShellComponent implements OnInit {
       this.fileOperations.presentation() === 'modal';
     return operationDialogBlocks || this.trash.deleteRequest() !== null || this.trashOpen() ||
       this.createDirectoryContext() !== null || this.systemUpdateDialogStatus() !== null ||
-      this.systemUpdateOverlayStatus() !== null;
+      this.systemUpdateOverlayStatus() !== null || this.mediaPreview.state().phase !== 'closed';
   }
 
   private transferDisabledReason(kind: TransferOperationKind): string {
@@ -870,9 +886,20 @@ export class CommanderShellComponent implements OnInit {
   }
 
   private openCursor(side: PanelSide): void {
-    const state = this.activeState();
+    const state = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
     const row = buildVisibleRows(state)[state.cursorIndex];
     if (!row) {
+      return;
+    }
+
+    const mediaContext = this.store.createMediaPreviewContext(side, row);
+    if (mediaContext) {
+      const panel = side === 'left' ? this.leftPanel : this.rightPanel;
+      this.openMediaPreview({
+        side,
+        context: mediaContext,
+        opener: panel?.openerFor(row.relativePath) ?? null,
+      });
       return;
     }
 

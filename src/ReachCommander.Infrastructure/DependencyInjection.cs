@@ -22,6 +22,7 @@ using ReachCommander.Application.Archives;
 using ReachCommander.Application.Directories;
 using ReachCommander.Application.FileOperations;
 using ReachCommander.Application.Trash;
+using ReachCommander.Application.MediaPreviews;
 using ReachCommander.Infrastructure.Archives;
 using ReachCommander.Infrastructure.Archives.Catalog;
 using ReachCommander.Infrastructure.Archives.Volumes;
@@ -30,6 +31,7 @@ using ReachCommander.Infrastructure.Archives.Extraction;
 using ReachCommander.Infrastructure.Authentication;
 using ReachCommander.Infrastructure.Directories;
 using ReachCommander.Infrastructure.FileOperations;
+using ReachCommander.Infrastructure.MediaPreviews;
 using ReachCommander.Infrastructure.FileOperations.Execution;
 using ReachCommander.Infrastructure.FileOperations.Persistence;
 using ReachCommander.Infrastructure.FileOperations.Planning;
@@ -113,6 +115,20 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<HardwareMetricsOptions>, HardwareMetricsOptionsValidator>();
         services.AddSingleton(TimeProvider.System);
+        services
+            .AddOptions<MediaPreviewOptions>()
+            .Bind(configuration.GetSection(MediaPreviewOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<MediaPreviewOptions>, MediaPreviewOptionsValidator>();
+        services.AddSingleton<MediaPreviewSessionStore>();
+        services.AddSingleton<MediaPreviewQueue>();
+        services.AddSingleton<IMediaProbeRunner, MediaProbeRunner>();
+        services.AddSingleton<IMediaTranscodeRunner, MediaTranscodeRunner>();
+        services.AddSingleton<MediaPreviewService>();
+        services.AddSingleton<IMediaPreviewService>(provider =>
+            provider.GetRequiredService<MediaPreviewService>());
+        services.AddHostedService<MediaPreviewCleanupService>();
+        services.AddHostedService<MediaPreviewWorker>();
         services.AddSingleton<IHostPlatform, RuntimeHostPlatform>();
         services.AddSingleton<BoundedTextFileReader>();
         services.AddSingleton<ITrustedPathResolver, TrustedPathResolver>();

@@ -195,7 +195,7 @@ internal sealed class TextEncodingOperationStore(TimeProvider clock)
         }
     }
 
-    public bool HasActiveOperation()
+    public bool HasActiveOperations()
     {
         lock (_gate)
         {

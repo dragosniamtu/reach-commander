@@ -1,7 +1,9 @@
 using System.Text;
 using ReachCommander.Application.Sources;
 using ReachCommander.Application.TextEncodings;
+using ReachCommander.Application.Files;
 using ReachCommander.Domain.Sources;
+using ReachCommander.Infrastructure.Authentication;
 using ReachCommander.Infrastructure.Mutations;
 using ReachCommander.Infrastructure.Security;
 using ReachCommander.Infrastructure.TextEncodings;
@@ -28,6 +30,7 @@ internal sealed class TextEncodingTestFixture : IDisposable
             DefaultLeft: true,
             DefaultRight: false);
         _paths = new PathSecurityService(new FakeSourceCatalog(_source));
+        AuthenticationPaths = AuthenticationDataPaths.ForRoot(_temporary.CreateDirectory("data"));
         Clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 2, 8, 0, 0, TimeSpan.Zero));
         PlanStore = new TextEncodingPlanStore(Clock);
         Planner = CreatePlanner();
@@ -41,6 +44,12 @@ internal sealed class TextEncodingTestFixture : IDisposable
 
     public TextEncodingPlanner Planner { get; }
 
+    public AuthenticationDataPaths AuthenticationPaths { get; }
+
+    internal IPathSecurityService PathSecurity => _paths;
+
+    internal ITextEncodingFileSystem FileSystem => _fileSystem;
+
     public TextEncodingPlanner CreatePlanner(bool sourceReadOnly = false)
     {
         var source = _source with { IsReadOnly = sourceReadOnly };
@@ -50,12 +59,14 @@ internal sealed class TextEncodingTestFixture : IDisposable
 
     public TextEncodingExecutor CreateExecutor(
         TextEncodingOperationStore operationStore,
-        ITextEncodingFileSystem? fileSystem = null) => new(
+        ITextEncodingFileSystem? fileSystem = null,
+        TextEncodingStagingRegistry? stagingRegistry = null) => new(
             _paths,
             fileSystem ?? _fileSystem,
             operationStore,
             new DirectoryMutationLock(),
-            NullLogger<TextEncodingExecutor>.Instance);
+            NullLogger<TextEncodingExecutor>.Instance,
+            stagingRegistry);
 
     public ITextEncodingFileSystem CreateInjectedFileSystem(
         IReadOnlyCollection<int>? failMoveCalls = null,

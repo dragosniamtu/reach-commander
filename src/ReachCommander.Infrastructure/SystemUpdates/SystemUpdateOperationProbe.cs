@@ -2,6 +2,7 @@ using ReachCommander.Application.Archives;
 using ReachCommander.Application.FileOperations;
 using ReachCommander.Application.SourceManagement;
 using ReachCommander.Infrastructure.Archives.Extraction;
+using ReachCommander.Infrastructure.TextEncodings;
 
 namespace ReachCommander.Infrastructure.SystemUpdates;
 
@@ -12,7 +13,8 @@ internal interface ISystemUpdateOperationProbe
 
 internal sealed class SystemUpdateOperationProbe(
     IFileOperationService fileOperations,
-    ArchiveExtractionOperationStore? archiveOperations = null) :
+    ArchiveExtractionOperationStore? archiveOperations = null,
+    TextEncodingOperationStore? textEncodings = null) :
     ISystemUpdateOperationProbe,
     ISourceManagementOperationEligibility
 {
@@ -28,6 +30,7 @@ internal sealed class SystemUpdateOperationProbe(
             return true;
         }
 
-        return archiveOperations?.HasActiveOperations() == true;
+        return archiveOperations?.HasActiveOperations() == true ||
+            textEncodings?.HasActiveOperations() == true;
     }
 }

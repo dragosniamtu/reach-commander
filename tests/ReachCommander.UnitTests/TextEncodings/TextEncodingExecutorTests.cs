@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using ReachCommander.Application.TextEncodings;
 using ReachCommander.Infrastructure.TextEncodings;
 using ReachCommander.UnitTests.Support;
@@ -158,6 +159,29 @@ public sealed class TextEncodingExecutorTests
         Assert.Equal(TextEncodingRowResult.Skipped, row.Result);
         Assert.Equal("text_symbolic_link_rejected", row.Code);
         Assert.False(File.Exists(fixture.PhysicalPath("TV/episode_original.srt")));
+    }
+
+    [Fact]
+    public async Task Successful_conversion_removes_its_staging_manifest()
+    {
+        using var fixture = new TextEncodingTestFixture();
+        fixture.WriteUtf8("TV/episode.srt", "original");
+        var plan = await PlanAsync(fixture, ["/TV/episode.srt"]);
+        var store = new TextEncodingOperationStore(fixture.Clock);
+        var operationId = Guid.NewGuid();
+        store.Create(operationId, plan.Entries);
+        var registry = new TextEncodingStagingRegistry(
+            fixture.AuthenticationPaths,
+            fixture.Clock,
+            NullLogger<TextEncodingStagingRegistry>.Instance);
+
+        await fixture.CreateExecutor(store, stagingRegistry: registry).RunAsync(
+            plan,
+            operationId,
+            CancellationToken.None);
+
+        Assert.Empty(registry.ReadAll());
+        Assert.Empty(Directory.EnumerateFiles(registry.RegistryDirectory, "*.json"));
     }
 
     private static async Task<StoredTextEncodingPlan> PlanAsync(

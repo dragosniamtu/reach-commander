@@ -66,4 +66,8 @@ public sealed class TextEncodingException(
     public static TextEncodingException OperationExpired() => new(
         "text_encoding_operation_expired",
         "The encoding operation has expired.");
+
+    public static TextEncodingException CapacityReached() => new(
+        "text_encoding_capacity_reached",
+        "Another text encoding operation is already running.");
 }

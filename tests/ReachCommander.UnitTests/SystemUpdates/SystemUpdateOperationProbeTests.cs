@@ -2,6 +2,8 @@ using ReachCommander.Application.Archives;
 using ReachCommander.Application.FileOperations;
 using ReachCommander.Infrastructure.Archives.Extraction;
 using ReachCommander.Infrastructure.SystemUpdates;
+using ReachCommander.Infrastructure.TextEncodings;
+using ReachCommander.Application.TextEncodings;
 
 namespace ReachCommander.UnitTests.SystemUpdates;
 
@@ -56,6 +58,48 @@ public sealed class SystemUpdateOperationProbeTests
         Assert.True(await probe.HasActiveOperationsAsync(default));
         store.MarkCompleted("operation-1");
         Assert.False(await probe.HasActiveOperationsAsync(default));
+    }
+
+    [Theory]
+    [InlineData(TextEncodingOperationState.Queued, true)]
+    [InlineData(TextEncodingOperationState.Running, true)]
+    [InlineData(TextEncodingOperationState.CancelRequested, true)]
+    [InlineData(TextEncodingOperationState.Completed, false)]
+    [InlineData(TextEncodingOperationState.CompletedWithErrors, false)]
+    [InlineData(TextEncodingOperationState.Cancelled, false)]
+    [InlineData(TextEncodingOperationState.Failed, false)]
+    public async Task Text_encoding_operation_state_has_expected_activity(
+        TextEncodingOperationState state,
+        bool expected)
+    {
+        var store = new TextEncodingOperationStore(new FixedTimeProvider());
+        var operationId = Guid.NewGuid();
+        store.Create(operationId, []);
+        if (state != TextEncodingOperationState.Queued)
+        {
+            store.MarkRunning(operationId);
+        }
+
+        if (state == TextEncodingOperationState.CancelRequested)
+        {
+            store.RequestCancellation(operationId);
+        }
+        else if (state is TextEncodingOperationState.Completed or
+                 TextEncodingOperationState.CompletedWithErrors)
+        {
+            store.MarkTerminal(operationId, TextEncodingOperationState.Completed);
+        }
+        else if (state is TextEncodingOperationState.Cancelled or TextEncodingOperationState.Failed)
+        {
+            store.MarkTerminal(operationId, state);
+        }
+
+        var probe = new SystemUpdateOperationProbe(
+            new StubFileOperationService([]),
+            archiveOperations: null,
+            store);
+
+        Assert.Equal(expected, await probe.HasActiveOperationsAsync(default));
     }
 
     private static FileOperationStatus Status(FileOperationPhase phase) => new(

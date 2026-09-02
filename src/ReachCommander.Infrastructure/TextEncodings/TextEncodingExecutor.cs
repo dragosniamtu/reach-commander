@@ -5,12 +5,21 @@ using ReachCommander.Infrastructure.Mutations;
 
 namespace ReachCommander.Infrastructure.TextEncodings;
 
+internal interface ITextEncodingExecutor
+{
+    Task RunAsync(
+        StoredTextEncodingPlan plan,
+        Guid operationId,
+        CancellationToken cancellationToken);
+}
+
 internal sealed class TextEncodingExecutor(
     IPathSecurityService pathSecurity,
     ITextEncodingFileSystem fileSystem,
     TextEncodingOperationStore operationStore,
     DirectoryMutationLock mutationLock,
-    ILogger<TextEncodingExecutor> logger)
+    ILogger<TextEncodingExecutor> logger,
+    TextEncodingStagingRegistry? stagingRegistry = null) : ITextEncodingExecutor
 {
     public async Task RunAsync(
         StoredTextEncodingPlan plan,
@@ -162,8 +171,18 @@ internal sealed class TextEncodingExecutor(
         var stagingPhysicalPath = Path.Combine(entry.PhysicalDirectory, stagingName);
         var backupMoved = false;
         var published = false;
+        TextEncodingStagingRecord? stagingRecord = null;
         try
         {
+            if (stagingRegistry is not null)
+            {
+                stagingRecord = await stagingRegistry.RegisterAsync(
+                    sourceId,
+                    entry.LogicalDirectory,
+                    stagingName,
+                    CancellationToken.None);
+            }
+
             await fileSystem.WriteNewAsync(
                 stagingPhysicalPath,
                 convertedBytes,
@@ -203,6 +222,13 @@ internal sealed class TextEncodingExecutor(
                 stagingPhysicalPath,
                 backupMoved,
                 published);
+        }
+        finally
+        {
+            if (stagingRecord is not null && !fileSystem.FileExists(stagingPhysicalPath))
+            {
+                stagingRegistry!.Remove(stagingRecord.RecordId);
+            }
         }
     }
 

@@ -210,6 +210,7 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   mkdirSync(join(downloadsRoot, "Incomplete"), { recursive: true });
   mkdirSync(join(downloadsRoot, "Rename Lab", "Drafts"), { recursive: true });
   mkdirSync(join(downloadsRoot, "Conflict Lab"), { recursive: true });
+  mkdirSync(join(downloadsRoot, "Encoding Lab"), { recursive: true });
   mkdirSync(join(downloadsRoot, "Single Rename Lab", "File Case"), {
     recursive: true,
   });
@@ -257,6 +258,26 @@ export default async function seedFixtures(): Promise<() => Promise<void>> {
   );
   writeFileSync(join(downloadsRoot, "Conflict Lab", "one.txt"), "one\n");
   writeFileSync(join(downloadsRoot, "Conflict Lab", "two.txt"), "two\n");
+  writeFileSync(
+    join(downloadsRoot, "Encoding Lab", "romanian.srt"),
+    Buffer.from([
+      0x42, 0x75, 0x6e, 0xe3, 0x2c, 0x20, 0xba, 0x74, 0x69, 0x69,
+      0x2c, 0x20, 0xfe, 0x61, 0x72, 0xe3, 0x0d, 0x0a,
+    ]),
+  );
+  writeFileSync(
+    join(downloadsRoot, "Encoding Lab", "notes.txt"),
+    "UTF-8 notes with diacritics: ăîâșț.\r\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(downloadsRoot, "Encoding Lab", "binary.sub"),
+    Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0x00]),
+  );
+  writeFileSync(
+    join(downloadsRoot, "Encoding Lab", "photo.jpg"),
+    "unsupported selection canary\n",
+  );
   writeFileSync(
     join(downloadsRoot, "Single Rename Lab", "File Case", "draft.txt"),
     "draft\n",

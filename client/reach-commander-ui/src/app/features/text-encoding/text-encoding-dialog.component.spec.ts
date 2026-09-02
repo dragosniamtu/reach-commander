@@ -36,6 +36,7 @@ describe('TextEncodingDialogComponent', () => {
     const source = fixture.nativeElement.querySelector('#text-encoding-source') as HTMLSelectElement;
 
     expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('role')).toBe('dialog');
     expect(dialog.getAttribute('aria-labelledby')).toBe('text-encoding-title');
     expect(source).not.toBeNull();
     expect(document.activeElement).toBe(source);

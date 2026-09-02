@@ -210,6 +210,14 @@ Preview works on a read-only source, but Save does not. On a writable source, th
 
 The exact package and license/source offer are documented in the repository's `THIRD-PARTY-NOTICES-FFMPEG.md`. A normal installer-managed update replaces the complete image, including these tools; no host FFmpeg package is required.
 
+## Convert text-file encodings
+
+Select supported text files in one writable active panel and click **Encoding**. The full-screen review accepts `.srt`, `.sub`, `.txt`, `.csv`, `.nfo`, `.md`, and `.json`, shows the detected source encoding, confidence, validation status, and a bounded sample, and converts to UTF-8, UTF-8 with BOM, UTF-16 LE, Windows-1250, or Windows-1252. Automatic legacy detection can be ambiguous; inspect every low-confidence row and choose the source encoding manually when the preview is wrong.
+
+Before publishing a converted file, ReachCommander preserves its byte-exact contents beside it as `<stem>_original<extension>`, then `<stem>_original (2)<extension>` through `(999)`. Strict validation refuses replacement-character loss, binary or NUL-containing content, symbolic links, read-only sources, files over 32 MiB, and batches over 100 files. Conversion runs sequentially under the existing mutation lock, allows cancellation between file transactions, and reports per-file recovery information if rollback cannot be completed safely.
+
+The feature uses existing source bind mounts and the existing `/data` tree for short-lived plan, operation, and staging-registration metadata. It requires no additional Docker volume, host package, host agent, installer migration, or `sources.json` change. Normal image updates include the backend and PWA together.
+
 ## Put HTTPS in front
 
 Use one of the checked-in examples as a starting point:

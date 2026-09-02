@@ -191,7 +191,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
       this.onPlaybackError();
       return;
     }
-    this.hls = new Hls({ enableWorker: true });
+    this.hls = new Hls({ enableWorker: true, startPosition: 0 });
     this.hls.on(Hls.Events.ERROR, (_event, data) => {
       if (data.fatal) {
         this.onPlaybackError();

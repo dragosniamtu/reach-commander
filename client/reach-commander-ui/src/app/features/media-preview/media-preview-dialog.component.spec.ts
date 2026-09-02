@@ -4,6 +4,22 @@ import { MediaPreviewState } from '../../core/state/media-preview.models';
 import { MediaPreviewStore } from '../../core/state/media-preview.store';
 import { MediaPreviewDialogComponent } from './media-preview-dialog.component';
 
+const hlsConfigs = vi.hoisted(() => [] as unknown[]);
+
+vi.mock('hls.js', () => ({
+  default: class FakeHls {
+    static readonly Events = { ERROR: 'error' };
+    static isSupported(): boolean { return true; }
+
+    constructor(config: unknown) { hlsConfigs.push(config); }
+
+    on(): void {}
+    loadSource(): void {}
+    attachMedia(): void {}
+    destroy(): void {}
+  },
+}));
+
 describe('MediaPreviewDialogComponent', () => {
   let fixture: ComponentFixture<MediaPreviewDialogComponent>;
   const store = {
@@ -26,6 +42,7 @@ describe('MediaPreviewDialogComponent', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    hlsConfigs.length = 0;
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
     store.state.set(readyState());
@@ -175,6 +192,17 @@ describe('MediaPreviewDialogComponent', () => {
     await fixture.whenStable();
 
     expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+  });
+
+  it('starts an in-progress HLS preview at the beginning', async () => {
+    store.state.set(readyState({
+      session: { ...readyState().session!, playbackMode: 'hls' },
+    }));
+    store.mediaUrl.set('/api/media-previews/session/hls/index.m3u8');
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(hlsConfigs.at(-1)).toMatchObject({ startPosition: 0 });
   });
 
   it('shows queued work separately and lets the user cancel it', () => {

@@ -19,6 +19,7 @@ export interface ActivePanelToolbarContext {
   readonly uploadPending: boolean;
   readonly extractAvailable: boolean;
   readonly extractDisabledReason: string | null;
+  readonly encodingDisabledReason: string | null;
 }
 
 @Component({
@@ -35,6 +36,7 @@ export class ActivePanelToolbarComponent {
   readonly sourceManagementDisabledReason = input<string | null>(null);
   readonly sourceManagementRetryAvailable = input(false);
   readonly renameRequested = output<void>();
+  readonly encodingRequested = output<HTMLElement>();
   readonly filesSelected = output<readonly File[]>();
   readonly extractRequested = output<void>();
   readonly trashRequested = output<void>();
@@ -48,6 +50,8 @@ export class ActivePanelToolbarComponent {
   private fileInput?: ElementRef<HTMLInputElement>;
   @ViewChild('addFilesButton', { read: ElementRef })
   private addFilesButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild('encodingButton', { read: ElementRef })
+  private encodingButton?: ElementRef<HTMLButtonElement>;
   @ViewChild('addSourceButton', { read: ElementRef })
   private addSourceButton?: ElementRef<HTMLButtonElement>;
 
@@ -114,6 +118,12 @@ export class ActivePanelToolbarComponent {
   requestRename(): void {
     if (this.renameDisabledReason() === null) {
       this.renameRequested.emit();
+    }
+  }
+
+  requestEncoding(): void {
+    if (this.context().encodingDisabledReason === null && this.encodingButton) {
+      this.encodingRequested.emit(this.encodingButton.nativeElement);
     }
   }
 

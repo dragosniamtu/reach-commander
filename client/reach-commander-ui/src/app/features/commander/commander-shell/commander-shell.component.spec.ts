@@ -29,6 +29,7 @@ import { TrashStore } from '../trash/trash.store';
 import { SystemUpdateStore } from '../../../core/state/system-update.store';
 import { SourceManagementStore } from '../../../core/state/source-management.store';
 import { MediaPreviewStore } from '../../../core/state/media-preview.store';
+import { TextEncodingState, TextEncodingStore } from '../../../core/state/text-encoding-store';
 import { CommanderShellComponent } from './commander-shell.component';
 
 describe('CommanderShellComponent system metrics integration', () => {
@@ -117,6 +118,19 @@ describe('CommanderShellComponent system metrics integration', () => {
     open: vi.fn(() => Promise.resolve()),
     close: vi.fn(),
     cancel: vi.fn(() => Promise.resolve()),
+    setCompletionHandler: vi.fn(),
+  };
+  const textEncoding = {
+    state: signal<TextEncodingState>(closedTextEncodingState()),
+    canExecute: signal(false),
+    canCancel: signal(false),
+    open: vi.fn(() => Promise.resolve()),
+    close: vi.fn(() => textEncoding.state.set(closedTextEncodingState())),
+    cancel: vi.fn(() => Promise.resolve()),
+    execute: vi.fn(() => Promise.resolve()),
+    reviewAgain: vi.fn(() => Promise.resolve()),
+    setSourceEncoding: vi.fn(),
+    setOutputEncoding: vi.fn(),
     setCompletionHandler: vi.fn(),
   };
   const fileOperations = {
@@ -219,6 +233,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     multiRename.state.set(closedMultiRenameState());
     singleRename.state.set(closedSingleRenameState());
     archiveExtraction.state.set(closedArchiveExtractionState());
+    textEncoding.state.set(closedTextEncodingState());
     fileOperations.dialog.set('closed');
     fileOperations.presentation.set('modal');
     fileOperations.tasks.set([]);
@@ -256,6 +271,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: MultiRenameStore, useValue: multiRename },
         { provide: SingleRenameStore, useValue: singleRename },
         { provide: ArchiveExtractionStore, useValue: archiveExtraction },
+        { provide: TextEncodingStore, useValue: textEncoding },
         { provide: FileOperationStore, useValue: fileOperations },
         { provide: TrashStore, useValue: trash },
         { provide: PwaService, useValue: pwa },
@@ -420,6 +436,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect(upload.reset).toHaveBeenCalledOnce();
     expect(multiRename.close).toHaveBeenCalledOnce();
     expect(archiveExtraction.close).toHaveBeenCalledOnce();
+    expect(textEncoding.close).toHaveBeenCalledOnce();
     expect(fileOperations.resetProtectedState).toHaveBeenCalledOnce();
     expect(trash.resetProtectedState).toHaveBeenCalledOnce();
   });
@@ -610,6 +627,78 @@ describe('CommanderShellComponent system metrics integration', () => {
     expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe(
       'Search active panel',
     );
+  });
+
+  it('captures supported text rows from the active panel and opens Encoding from its toolbar button', () => {
+    const candidate = textFile('/TV/captions.srt');
+    store.sources.set([source('media', 'Media')]);
+    store.leftPanel.set(panel({
+      tabs: [{
+        id: 'tv', label: 'TV',
+        location: { kind: 'filesystem', sourceId: 'media', path: '/TV' },
+      }],
+      activeTabId: 'tv',
+      entries: [candidate],
+      selectedItems: new Set([candidate.relativePath]),
+      cursorIndex: 0,
+    }));
+    fixture.detectChanges();
+
+    const encoding = fixture.nativeElement.querySelector(
+      '[data-testid="toolbar-text-encoding"]',
+    ) as HTMLButtonElement;
+    expect(encoding.disabled).toBe(false);
+    encoding.click();
+
+    expect(textEncoding.open).toHaveBeenCalledWith(expect.objectContaining({
+      panelSide: 'left', sourceId: 'media', sourceName: 'Media', directoryPath: '/TV',
+      entries: [expect.objectContaining({ relativePath: '/TV/captions.srt' })],
+    }));
+    expect(fixture.componentInstance.textEncodingOpener()).toBe(encoding);
+  });
+
+  it('blocks commander movement during encoding and refreshes only its captured panel on completion', () => {
+    const context = {
+      panelSide: 'right' as const,
+      sourceId: 'media',
+      sourceName: 'Media',
+      directoryPath: '/TV',
+      entries: [textFile('/TV/captions.srt')],
+    };
+    textEncoding.state.set({
+      ...closedTextEncodingState(), phase: 'running', context,
+      operation: {
+        operationId: 'operation', state: 'running', completedFiles: 0, totalFiles: 1,
+        percent: 0, currentFileName: 'captions.srt', canCancel: false, rows: [],
+        errorCode: null, errorDetail: null,
+      },
+    });
+
+    fixture.componentInstance.execute({ type: 'move-cursor', amount: 1, extendSelection: false });
+    expect(store.moveCursor).not.toHaveBeenCalled();
+
+    const completionHandler = textEncoding.setCompletionHandler.mock.calls[0]![0];
+    completionHandler(context);
+    expect(store.refresh).toHaveBeenCalledWith('right');
+  });
+
+  it('restores the exact Encoding opener after a terminal dialog closes', async () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    const context = {
+      panelSide: 'left' as const,
+      sourceId: 'media', sourceName: 'Media', directoryPath: '/', entries: [textFile('/notes.txt')],
+    };
+    fixture.componentInstance.textEncodingOpener.set(opener);
+    textEncoding.state.set({ ...closedTextEncodingState(), phase: 'completed', context });
+
+    fixture.componentInstance.closeTextEncoding();
+    await Promise.resolve();
+
+    expect(textEncoding.close).toHaveBeenCalled();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
   });
 
   it('routes Enter on an archive candidate through the shared store open operation', () => {
@@ -1108,6 +1197,23 @@ function source(id: string, name: string, overrides: Partial<SourceDto> = {}): S
   };
 }
 
+function textFile(relativePath: string) {
+  const name = relativePath.split('/').at(-1) ?? relativePath;
+  return {
+    name,
+    relativePath,
+    type: 'file' as const,
+    size: 12,
+    modifiedAt: null,
+    extension: name.split('.').at(-1) ?? '',
+    isReadOnly: false,
+    isSymbolicLink: false,
+    attributes: 'Normal',
+    archiveFormatHint: null,
+    archiveRole: null,
+  };
+}
+
 function closedUploadState(): UploadState {
   return {
     phase: 'closed',
@@ -1170,6 +1276,19 @@ function closedSingleRenameState(): SingleRenameState {
 function closedArchiveExtractionState(): ArchiveExtractionState {
   return {
     phase: 'closed', context: null, preview: null, operation: null, error: null, requestToken: 0,
+  };
+}
+
+function closedTextEncodingState(): TextEncodingState {
+  return {
+    phase: 'closed',
+    context: null,
+    sourceEncoding: 'auto',
+    outputEncoding: 'utf8',
+    preview: null,
+    operation: null,
+    error: null,
+    requestToken: 0,
   };
 }
 

@@ -101,6 +101,30 @@ describe('ActivePanelToolbarComponent', () => {
     expect(rename.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('places the encoding action after Multi-Rename and emits its real opener element', () => {
+    const requested = vi.fn();
+    fixture.componentInstance.encodingRequested.subscribe(requested);
+    fixture.detectChanges();
+
+    const rename = button('toolbar-multi-rename');
+    const encoding = button('toolbar-text-encoding');
+    expect(encoding.textContent).toContain('Encoding');
+    expect(rename.compareDocumentPosition(encoding) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    encoding.click();
+    expect(requested).toHaveBeenCalledWith(encoding);
+  });
+
+  it('disables encoding with the captured selection reason exposed as a tooltip', () => {
+    setInputs(context({ encodingDisabledReason: 'Select at least one supported text file.' }), '');
+    fixture.detectChanges();
+
+    const encoding = button('toolbar-text-encoding');
+    expect(encoding.disabled).toBe(true);
+    expect(encoding.closest('[role="group"]')?.getAttribute('title'))
+      .toContain('supported text file');
+  });
+
   it('exposes the same extraction action and disabled reason as F5', () => {
     const requested = vi.fn();
     fixture.componentInstance.extractRequested.subscribe(requested);
@@ -195,6 +219,7 @@ function context(overrides: Partial<ActivePanelToolbarContext> = {}): ActivePane
     uploadPending: false,
     extractAvailable: false,
     extractDisabledReason: 'Select a supported archive to extract.',
+    encodingDisabledReason: null,
     ...overrides,
   };
 }

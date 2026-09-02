@@ -91,6 +91,38 @@
     }
   </span>
 
+  <span
+    class="action-wrapper"
+    role="group"
+    [attr.tabindex]="context().encodingDisabledReason ? 0 : null"
+    [attr.aria-describedby]="context().encodingDisabledReason ? 'encoding-disabled-reason' : null"
+    [title]="context().encodingDisabledReason ?? 'Change the encoding of selected text files'"
+  >
+    <button
+      #encodingButton
+      type="button"
+      data-testid="toolbar-text-encoding"
+      [disabled]="context().encodingDisabledReason !== null"
+      (click)="requestEncoding()"
+    >
+      <svg
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d="M4 4h12M10 4v12M6 16h8M5 8h10" vector-effect="non-scaling-stroke" />
+      </svg>
+      <span class="action-text">Encoding</span>
+    </button>
+    @if (context().encodingDisabledReason) {
+      <span id="encoding-disabled-reason" class="sr-only">
+        {{ context().encodingDisabledReason }}
+      </span>
+    }
+  </span>
+
   @let uploadReason = uploadDisabledReason();
   <span
     class="action-wrapper"

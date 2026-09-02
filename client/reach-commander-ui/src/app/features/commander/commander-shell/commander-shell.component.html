@@ -9,6 +9,7 @@
       [filter]="activeState().filter"
       (filterChanged)="setActiveFilter($event)"
       (renameRequested)="openMultiRename()"
+      (encodingRequested)="openTextEncoding($event)"
       (extractRequested)="openArchiveExtraction()"
       (trashRequested)="openTrash()"
       (filesSelected)="reviewUpload($event)"
@@ -127,6 +128,10 @@
 
   @if (archiveExtraction.state().phase !== 'closed') {
     <app-archive-extraction-dialog (closeRequested)="closeArchiveExtraction()" />
+  }
+
+  @if (textEncoding.state().phase !== 'closed') {
+    <app-text-encoding-dialog (closeRequested)="closeTextEncoding()" />
   }
 
   @if (mediaPreview.state().phase !== 'closed') {

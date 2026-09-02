@@ -65,6 +65,9 @@ import { SourceManagementStore } from '../../../core/state/source-management.sto
 import { SourceManagementDialogComponent } from '../../source-management/source-management-dialog.component';
 import { MediaPreviewStore } from '../../../core/state/media-preview.store';
 import { MediaPreviewDialogComponent } from '../../media-preview/media-preview-dialog.component';
+import { TextEncodingStore } from '../../../core/state/text-encoding-store';
+import { captureTextEncodingContext } from '../../../core/state/text-encoding.models';
+import { TextEncodingDialogComponent } from '../../text-encoding/text-encoding-dialog.component';
 
 export interface CreateDirectoryDialogContext {
   readonly sourceId: string;
@@ -98,6 +101,7 @@ export interface CreateDirectoryDialogContext {
     SystemUpdateOverlayComponent,
     SourceManagementDialogComponent,
     MediaPreviewDialogComponent,
+    TextEncodingDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -115,6 +119,7 @@ export class CommanderShellComponent implements OnInit {
   readonly systemUpdate = inject(SystemUpdateStore);
   readonly sourceManagement = inject(SourceManagementStore);
   readonly mediaPreview = inject(MediaPreviewStore);
+  readonly textEncoding = inject(TextEncodingStore);
   readonly pwa = inject(PwaService);
   readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
@@ -129,6 +134,7 @@ export class CommanderShellComponent implements OnInit {
   readonly createDirectoryContext = signal<CreateDirectoryDialogContext | null>(null);
   readonly systemUpdateDialogStatus = signal<SystemUpdateStatusDto | null>(null);
   readonly sourceManagementOpener = signal<HTMLElement | null>(null);
+  readonly textEncodingOpener = signal<HTMLElement | null>(null);
   readonly systemUpdateOverlayStatus = computed(() => {
     const status = this.systemUpdate.status();
     return this.systemUpdate.overlayVisible() && status &&
@@ -157,6 +163,11 @@ export class CommanderShellComponent implements OnInit {
     const opposite = side === 'left' ? this.store.rightPanel() : this.store.leftPanel();
     return captureArchiveExtractionContext(side, active, opposite, this.store.sources());
   });
+  readonly textEncodingContext = computed(() => {
+    const side = this.store.activePanel();
+    const panel = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
+    return captureTextEncodingContext(side, panel, this.store.sources());
+  });
   readonly toolbarContext = computed<ActivePanelToolbarContext>(() => ({
     side: this.store.activePanel(),
     sourceName: this.activeSource()?.name ?? 'Source',
@@ -170,6 +181,7 @@ export class CommanderShellComponent implements OnInit {
     uploadPending: this.uploadStore.isPending(),
     extractAvailable: this.extractionContext().context !== null,
     extractDisabledReason: this.extractionContext().error,
+    encodingDisabledReason: this.textEncodingContext().error,
   }));
   readonly fileCommandAvailability = computed<FileCommandAvailability>(() => {
     const extraction = this.extractionContext();
@@ -252,6 +264,7 @@ export class CommanderShellComponent implements OnInit {
       this.multiRename.close();
       this.singleRename.close();
       this.archiveExtraction.close();
+      this.textEncoding.close();
       this.fileOperations.resetProtectedState();
       this.trash.resetProtectedState();
       this.commandStatus.set(null);
@@ -262,10 +275,14 @@ export class CommanderShellComponent implements OnInit {
       this.createDirectoryContext.set(null);
       this.systemUpdateDialogStatus.set(null);
       this.sourceManagementOpener.set(null);
+      this.textEncodingOpener.set(null);
     });
     this.destroyRef.onDestroy(unregisterProtectedState);
     this.archiveExtraction.setCompletionHandler((source, destination) => {
       void Promise.all([this.store.refresh(source), this.store.refresh(destination)]);
+    });
+    this.textEncoding.setCompletionHandler((context) => {
+      void this.store.refresh(context.panelSide);
     });
     this.fileOperations.setTerminalHandler((status, context) => {
       void this.refreshOperationPanels(status, context);
@@ -308,6 +325,12 @@ export class CommanderShellComponent implements OnInit {
 
   execute(command: CommanderCommand): void {
     if (this.sourceManagement.dialogOpen()) {
+      return;
+    }
+    if (this.textEncoding.state().phase !== 'closed') {
+      if (command.type === 'escape') {
+        this.handleTextEncodingEscape();
+      }
       return;
     }
     if (this.hasBlockingFileModal()) {
@@ -601,6 +624,35 @@ export class CommanderShellComponent implements OnInit {
     queueMicrotask(() => (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
   }
 
+  openTextEncoding(opener: HTMLElement): void {
+    const result = this.textEncodingContext();
+    if (!result.context) {
+      this.commandStatus.set(result.error ?? 'Select at least one supported text file.');
+      return;
+    }
+
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.textEncodingOpener.set(opener);
+    void this.textEncoding.open(result.context);
+  }
+
+  closeTextEncoding(): void {
+    const state = this.textEncoding.state();
+    if (state.phase === 'previewing' || state.phase === 'starting' ||
+        state.phase === 'running' || state.phase === 'cancelling') {
+      return;
+    }
+
+    const opener = this.textEncodingOpener();
+    const side = state.context?.panelSide ?? this.store.activePanel();
+    this.textEncoding.close();
+    this.textEncodingOpener.set(null);
+    queueMicrotask(() => opener?.isConnected
+      ? opener.focus()
+      : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+  }
+
   openArchiveExtraction(): void {
     const result = this.extractionContext();
     if (!result.context) {
@@ -795,6 +847,27 @@ export class CommanderShellComponent implements OnInit {
     return operationDialogBlocks || this.trash.deleteRequest() !== null || this.trashOpen() ||
       this.createDirectoryContext() !== null || this.systemUpdateDialogStatus() !== null ||
       this.systemUpdateOverlayStatus() !== null || this.mediaPreview.state().phase !== 'closed';
+  }
+
+  private handleTextEncodingEscape(): void {
+    const phase = this.textEncoding.state().phase;
+    if (phase === 'review' || phase === 'completed' || phase === 'completedWithErrors' ||
+        phase === 'cancelled' || phase === 'failed') {
+      if (this.textEncoding.state().operation?.rows.some(
+        (row) => row.result === 'recoveryRequired',
+      )) {
+        return;
+      }
+      this.closeTextEncoding();
+      return;
+    }
+    if (
+      (phase === 'starting' || phase === 'running' || phase === 'cancelling') &&
+      this.textEncoding.canCancel() &&
+      window.confirm('Cancel the text encoding operation?')
+    ) {
+      void this.textEncoding.cancel();
+    }
   }
 
   private transferDisabledReason(kind: TransferOperationKind): string {

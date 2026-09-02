@@ -1,0 +1,199 @@
+<div class="encoding-backdrop" data-testid="text-encoding-dialog">
+  <dialog
+    #dialog
+    class="encoding-dialog theme-dialog-shell"
+    aria-modal="true"
+    aria-labelledby="text-encoding-title"
+    aria-describedby="text-encoding-description"
+    tabindex="-1"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+    (cancel)="handleNativeCancel($event)"
+  >
+    <header class="theme-dialog-titlebar">
+      <div>
+        <span class="eyebrow">Safe batch conversion</span>
+        <h2 id="text-encoding-title">Change text encoding</h2>
+        <p id="text-encoding-description">
+          Review detected encodings before replacing the selected text files.
+        </p>
+      </div>
+      <button
+        type="button"
+        aria-label="Close text encoding"
+        [disabled]="!canClose()"
+        (click)="requestClose()"
+      >×</button>
+    </header>
+
+    @if (store.state().context; as context) {
+      <section class="route-summary" aria-label="Captured encoding selection">
+        <span>Location</span>
+        <code>{{ context.sourceName }}:{{ context.directoryPath }}</code>
+        <strong>{{ context.entries.length }} selected</strong>
+      </section>
+    }
+
+    <div class="dialog-body">
+      @if (!store.state().operation) {
+        <section class="encoding-controls" aria-label="Encoding choices">
+          <label for="text-encoding-source">Source encoding
+            <select
+              #sourceEncoding
+              id="text-encoding-source"
+              [value]="store.state().sourceEncoding"
+              [disabled]="store.state().phase === 'previewing' || store.state().phase === 'starting'"
+              (change)="setSourceEncoding($event)"
+            >
+              <option value="auto">Auto detect</option>
+              <option value="utf8">UTF-8</option>
+              <option value="utf8Bom">UTF-8 with BOM</option>
+              <option value="utf16LittleEndian">UTF-16 LE</option>
+              <option value="utf16BigEndian">UTF-16 BE</option>
+              <option value="windows1250">Windows-1250</option>
+              <option value="windows1252">Windows-1252</option>
+            </select>
+          </label>
+          <span aria-hidden="true">→</span>
+          <label for="text-encoding-output">Output encoding
+            <select
+              id="text-encoding-output"
+              [value]="store.state().outputEncoding"
+              [disabled]="store.state().phase === 'previewing' || store.state().phase === 'starting'"
+              (change)="setOutputEncoding($event)"
+            >
+              <option value="utf8">UTF-8</option>
+              <option value="utf8Bom">UTF-8 with BOM</option>
+              <option value="utf16LittleEndian">UTF-16 LE</option>
+              <option value="windows1250">Windows-1250</option>
+              <option value="windows1252">Windows-1252</option>
+            </select>
+          </label>
+        </section>
+      }
+
+      @if (store.state().phase === 'previewing' || store.state().phase === 'starting') {
+        <section class="center-state" role="status" aria-live="polite">
+          <strong>{{ store.state().phase === 'previewing' ? 'Reading text samples…' : 'Starting conversion…' }}</strong>
+          <div class="indeterminate" data-testid="text-encoding-indeterminate"></div>
+        </section>
+      } @else if (store.state().operation; as operation) {
+        @if (operationActive()) {
+          <section class="progress-state">
+            <span class="state-chip">{{ statusLabel() }}</span>
+            <progress
+              max="100"
+              [value]="operation.percent"
+              [attr.aria-label]="operation.percent + '% converted'"
+            ></progress>
+            <p aria-live="polite">
+              {{ operation.completedFiles }} / {{ operation.totalFiles }} ·
+              {{ operation.currentFileName ?? 'Preparing files…' }}
+            </p>
+          </section>
+        }
+
+        <section class="results" aria-labelledby="text-encoding-results-title">
+          <h3 id="text-encoding-results-title">Conversion results</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>File</th><th>Backup</th><th>Result</th><th>Details</th></tr></thead>
+              <tbody>
+                @for (row of operation.rows; track row.filePath) {
+                  <tr [class.recovery-row]="row.result === 'recoveryRequired'">
+                    <td><code>{{ row.filePath }}</code></td>
+                    <td><code>{{ row.backupPath ?? '—' }}</code></td>
+                    <td>{{ resultText(row.result) }}</td>
+                    <td>{{ row.detail ?? '—' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        @if (recoveryRequired()) {
+          <section class="recovery" role="alert">
+            <strong>Manual recovery is required</strong>
+            <p>Inspect every recovery row and its backup before closing this window.</p>
+            <label>
+              <input
+                type="checkbox"
+                data-testid="text-encoding-recovery-acknowledgement"
+                [checked]="recoveryAcknowledged()"
+                (change)="acknowledgeRecovery($event)"
+              />
+              I have recorded the recovery details.
+            </label>
+          </section>
+        }
+      } @else if (store.state().preview; as preview) {
+        <section class="review-summary" aria-live="polite">
+          <span>{{ preview.readyCount }} ready</span>
+          <span [class.warning]="preview.warningCount > 0">{{ preview.warningCount }} warnings</span>
+          <span [class.invalid]="preview.invalidCount > 0">{{ preview.invalidCount }} invalid</span>
+        </section>
+        <section class="preview-table" data-testid="text-encoding-preview">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr><th>File</th><th>Source encoding</th><th>Confidence</th><th>Status</th><th>Text preview</th></tr>
+              </thead>
+              <tbody>
+                @for (row of preview.rows; track row.filePath) {
+                  <tr [class.warning-row]="row.status === 'warning'" [class.invalid-row]="row.status === 'invalid'">
+                    <td><code>{{ row.fileName }}</code></td>
+                    <td>{{ encodingLabel(row.detectedSourceEncoding) }}</td>
+                    <td>{{ row.confidence ?? '—' }}</td>
+                    <td>
+                      <strong>{{ statusText(row.status) }}</strong>
+                      @if (row.detail) { <small>{{ row.detail }}</small> }
+                    </td>
+                    <td><pre>{{ row.previewText }}</pre></td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <aside class="backup-notice">
+          Each converted file keeps an exact original backup named
+          <code>captions_original.srt</code>; existing backups use <code>(2)</code> through
+          <code>(999)</code>.
+        </aside>
+      } @else if (store.state().error; as error) {
+        <section class="failure" role="alert">
+          <strong>Text encoding could not be reviewed</strong>
+          <p>{{ error.detail }}</p>
+        </section>
+      }
+
+      @if (store.state().operation) {
+        @if (store.state().error; as operationError) {
+          <p class="error" role="alert">{{ operationError.detail }}</p>
+        }
+      }
+    </div>
+
+    <footer>
+      <span aria-live="polite">{{ statusLabel() }}</span>
+      <div>
+        @if (store.state().phase === 'review') {
+          <button type="button" (click)="requestClose()">Cancel</button>
+          @if (store.state().error && !store.canExecute()) {
+            <button type="button" class="primary" (click)="reviewAgain()">Review again</button>
+          } @else {
+            <button type="button" class="primary" [disabled]="!store.canExecute()" (click)="start()">Convert files</button>
+          }
+        } @else if (store.canCancel()) {
+          <button type="button" (click)="cancel()">Cancel conversion</button>
+        } @else if (terminal()) {
+          @if (store.state().phase === 'failed' || store.state().phase === 'completedWithErrors') {
+            <button type="button" (click)="reviewAgain()">Review again</button>
+          }
+          <button type="button" [disabled]="!canClose()" (click)="requestClose()">Close</button>
+        }
+      </div>
+    </footer>
+  </dialog>
+</div>

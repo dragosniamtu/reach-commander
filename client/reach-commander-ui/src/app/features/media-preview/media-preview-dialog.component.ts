@@ -55,6 +55,9 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
 
   private hls: Hls | null = null;
   private readonly playbackError = signal(false);
+  private readonly playbackMode = computed(() =>
+    this.store.state().session?.playbackMode ?? null,
+  );
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -64,7 +67,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
     });
     effect(() => {
       const url = this.store.mediaUrl();
-      const mode = this.store.state().session?.playbackMode ?? null;
+      const mode = this.playbackMode();
       queueMicrotask(() => this.attachPlayback(url, mode));
     });
   }

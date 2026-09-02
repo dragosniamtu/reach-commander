@@ -164,6 +164,19 @@ describe('MediaPreviewDialogComponent', () => {
     expect(fixture.nativeElement.textContent).not.toContain('Direct playback failed');
   });
 
+  it('keeps the current media attached when unrelated preview state changes', async () => {
+    store.mediaUrl.set('/api/media-previews/session/content');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    vi.mocked(HTMLMediaElement.prototype.load).mockClear();
+
+    store.state.update((state) => ({ ...state, videoTimeMilliseconds: 1_000 }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+  });
+
   it('shows queued work separately and lets the user cancel it', () => {
     store.state.set(readyState({
       phase: 'queued',

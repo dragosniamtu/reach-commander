@@ -35,6 +35,8 @@
             controls
             preload="metadata"
             (timeupdate)="updateVideoTime()"
+            (pause)="onPlaybackPaused()"
+            (play)="onPlaybackStarted()"
             (error)="onPlaybackError()"
             (canplay)="onPlaybackReady()"
           ></video>

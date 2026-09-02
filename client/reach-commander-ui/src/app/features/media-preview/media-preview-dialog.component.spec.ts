@@ -5,18 +5,41 @@ import { MediaPreviewStore } from '../../core/state/media-preview.store';
 import { MediaPreviewDialogComponent } from './media-preview-dialog.component';
 
 const hlsConfigs = vi.hoisted(() => [] as unknown[]);
+const hlsInstances = vi.hoisted(() => [] as Array<{
+  pauseBuffering: ReturnType<typeof vi.fn>;
+  resumeBuffering: ReturnType<typeof vi.fn>;
+  recoverMediaError: ReturnType<typeof vi.fn>;
+  emitError: (data: unknown) => void;
+}>);
 
 vi.mock('hls.js', () => ({
   default: class FakeHls {
     static readonly Events = { ERROR: 'error' };
+    static readonly ErrorTypes = { MEDIA_ERROR: 'mediaError' };
     static isSupported(): boolean { return true; }
 
-    constructor(config: unknown) { hlsConfigs.push(config); }
+    readonly pauseBuffering = vi.fn();
+    readonly resumeBuffering = vi.fn();
+    readonly recoverMediaError = vi.fn();
+    private errorHandler: ((event: string, data: unknown) => void) | null = null;
 
-    on(): void {}
+    constructor(config: unknown) {
+      hlsConfigs.push(config);
+      hlsInstances.push(this);
+    }
+
+    on(event: string, handler: (event: string, data: unknown) => void): void {
+      if (event === FakeHls.Events.ERROR) {
+        this.errorHandler = handler;
+      }
+    }
     loadSource(): void {}
     attachMedia(): void {}
     destroy(): void {}
+
+    emitError(data: unknown): void {
+      this.errorHandler?.(FakeHls.Events.ERROR, data);
+    }
   },
 }));
 
@@ -43,6 +66,7 @@ describe('MediaPreviewDialogComponent', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     hlsConfigs.length = 0;
+    hlsInstances.length = 0;
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
     store.state.set(readyState());
@@ -203,6 +227,39 @@ describe('MediaPreviewDialogComponent', () => {
     await fixture.whenStable();
 
     expect(hlsConfigs.at(-1)).toMatchObject({ startPosition: 0 });
+  });
+
+  it('suspends HLS buffering while paused and resumes it on play', async () => {
+    store.state.set(readyState({
+      session: { ...readyState().session!, playbackMode: 'hls' },
+    }));
+    store.mediaUrl.set('/api/media-previews/session/hls/index.m3u8');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const hls = hlsInstances.at(-1)!;
+    const video = fixture.nativeElement.querySelector('video') as HTMLVideoElement;
+
+    video.dispatchEvent(new Event('pause'));
+    video.dispatchEvent(new Event('play'));
+
+    expect(hls.pauseBuffering).toHaveBeenCalledOnce();
+    expect(hls.resumeBuffering).toHaveBeenCalledOnce();
+  });
+
+  it('recovers the first fatal HLS media error instead of ending playback', async () => {
+    store.state.set(readyState({
+      session: { ...readyState().session!, playbackMode: 'hls' },
+    }));
+    store.mediaUrl.set('/api/media-previews/session/hls/index.m3u8');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const hls = hlsInstances.at(-1)!;
+
+    hls.emitError({ fatal: true, type: 'mediaError' });
+    fixture.detectChanges();
+
+    expect(hls.recoverMediaError).toHaveBeenCalledOnce();
+    expect(fixture.nativeElement.textContent).not.toContain('Direct playback failed');
   });
 
   it('shows queued work separately and lets the user cancel it', () => {

@@ -54,6 +54,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
   private video!: ElementRef<HTMLVideoElement>;
 
   private hls: Hls | null = null;
+  private mediaErrorRecoveryAttempted = false;
   private readonly playbackError = signal(false);
   private readonly playbackMode = computed(() =>
     this.store.state().session?.playbackMode ?? null,
@@ -102,6 +103,14 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
 
   updateVideoTime(): void {
     this.store.setVideoTime(this.video.nativeElement.currentTime * 1000);
+  }
+
+  onPlaybackPaused(): void {
+    this.hls?.pauseBuffering();
+  }
+
+  onPlaybackStarted(): void {
+    this.hls?.resumeBuffering();
   }
 
   seek(position: 'beginning' | 'middle' | 'end'): void {
@@ -177,6 +186,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
       return;
     }
     this.detachPlayback();
+    this.mediaErrorRecoveryAttempted = false;
     this.playbackError.set(false);
     if (!url || !mode) {
       return;
@@ -193,9 +203,16 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
     }
     this.hls = new Hls({ enableWorker: true, startPosition: 0 });
     this.hls.on(Hls.Events.ERROR, (_event, data) => {
-      if (data.fatal) {
-        this.onPlaybackError();
+      if (!data.fatal) {
+        return;
       }
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !this.mediaErrorRecoveryAttempted) {
+        this.mediaErrorRecoveryAttempted = true;
+        this.playbackError.set(false);
+        this.hls?.recoverMediaError();
+        return;
+      }
+      this.onPlaybackError();
     });
     this.hls.loadSource(url);
     this.hls.attachMedia(video);

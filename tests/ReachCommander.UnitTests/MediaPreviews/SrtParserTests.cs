@@ -66,6 +66,23 @@ public sealed class SrtParserTests
             Encoding.UTF8.GetString(corrected));
     }
 
+    [Fact]
+    public void Parse_reads_windows_1250_subtitles_without_a_byte_order_mark()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var windows1250 = Encoding.GetEncoding(
+            1250,
+            EncoderFallback.ExceptionFallback,
+            DecoderFallback.ExceptionFallback);
+        var source = windows1250.GetBytes(
+            "1\r\n00:00:01,000 --> 00:00:02,000\r\nBună, ştii, ţară, mâine.\r\n");
+
+        var document = _parser.Parse(source);
+
+        var cue = Assert.Single(document.Cues);
+        Assert.Equal("Bună, ştii, ţară, mâine.", cue.Text);
+    }
+
     [Theory]
     [InlineData("00:61:00,000 --> 00:62:00,000")]
     [InlineData("00:00:01.000 --> 00:00:02.000")]

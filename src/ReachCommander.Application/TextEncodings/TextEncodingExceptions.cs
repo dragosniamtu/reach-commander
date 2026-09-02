@@ -58,4 +58,12 @@ public sealed class TextEncodingException(
     public static TextEncodingException UnsupportedExtension() => new(
         "unsupported_text_extension",
         "The selected file extension is not supported by the encoding tool.");
+
+    public static TextEncodingException OperationNotFound() => new(
+        "text_encoding_operation_not_found",
+        "The encoding operation was not found.");
+
+    public static TextEncodingException OperationExpired() => new(
+        "text_encoding_operation_expired",
+        "The encoding operation has expired.");
 }

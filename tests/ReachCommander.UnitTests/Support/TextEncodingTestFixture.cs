@@ -2,8 +2,10 @@ using System.Text;
 using ReachCommander.Application.Sources;
 using ReachCommander.Application.TextEncodings;
 using ReachCommander.Domain.Sources;
+using ReachCommander.Infrastructure.Mutations;
 using ReachCommander.Infrastructure.Security;
 using ReachCommander.Infrastructure.TextEncodings;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ReachCommander.UnitTests.Support;
 
@@ -12,6 +14,7 @@ internal sealed class TextEncodingTestFixture : IDisposable
     private readonly TemporaryDirectory _temporary = new();
     private readonly SourceDefinition _source;
     private readonly TestTextEncodingFileSystem _fileSystem = new();
+    private readonly PathSecurityService _paths;
 
     public TextEncodingTestFixture()
     {
@@ -24,6 +27,7 @@ internal sealed class TextEncodingTestFixture : IDisposable
             IsReadOnly: false,
             DefaultLeft: true,
             DefaultRight: false);
+        _paths = new PathSecurityService(new FakeSourceCatalog(_source));
         Clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 2, 8, 0, 0, TimeSpan.Zero));
         PlanStore = new TextEncodingPlanStore(Clock);
         Planner = CreatePlanner();
@@ -43,6 +47,24 @@ internal sealed class TextEncodingTestFixture : IDisposable
         var paths = new PathSecurityService(new FakeSourceCatalog(source));
         return new TextEncodingPlanner(paths, _fileSystem, PlanStore, Clock);
     }
+
+    public TextEncodingExecutor CreateExecutor(
+        TextEncodingOperationStore operationStore,
+        ITextEncodingFileSystem? fileSystem = null) => new(
+            _paths,
+            fileSystem ?? _fileSystem,
+            operationStore,
+            new DirectoryMutationLock(),
+            NullLogger<TextEncodingExecutor>.Instance);
+
+    public ITextEncodingFileSystem CreateInjectedFileSystem(
+        IReadOnlyCollection<int>? failMoveCalls = null,
+        bool failWrites = false,
+        Action<int, string, string>? afterSuccessfulMove = null) => new InjectedTextEncodingFileSystem(
+            _fileSystem,
+            failMoveCalls ?? [],
+            failWrites,
+            afterSuccessfulMove);
 
     public void WriteUtf8(string relativePath, string contents) =>
         WriteBytes(relativePath, new UTF8Encoding(false, true).GetBytes(contents));
@@ -131,6 +153,53 @@ internal sealed class TextEncodingTestFixture : IDisposable
 
         public void FlushDirectory(string directoryPhysicalPath) =>
             _inner.FlushDirectory(directoryPhysicalPath);
+    }
+
+    private sealed class InjectedTextEncodingFileSystem(
+        ITextEncodingFileSystem inner,
+        IReadOnlyCollection<int> failMoveCalls,
+        bool failWrites,
+        Action<int, string, string>? afterSuccessfulMove) : ITextEncodingFileSystem
+    {
+        private int _moveCount;
+
+        public ValueTask<TextFileSnapshot> ReadSnapshotAsync(
+            string logicalPath,
+            string physicalPath,
+            bool pathTraversedSymbolicLink,
+            CancellationToken cancellationToken) => inner.ReadSnapshotAsync(
+                logicalPath,
+                physicalPath,
+                pathTraversedSymbolicLink,
+                cancellationToken);
+
+        public Task WriteNewAsync(
+            string physicalPath,
+            ReadOnlyMemory<byte> contents,
+            CancellationToken cancellationToken) => failWrites
+            ? Task.FromException(new IOException("Injected staging write failure."))
+            : inner.WriteNewAsync(physicalPath, contents, cancellationToken);
+
+        public void MoveFile(string sourcePhysicalPath, string destinationPhysicalPath)
+        {
+            var call = Interlocked.Increment(ref _moveCount);
+            if (failMoveCalls.Contains(call))
+            {
+                throw new IOException($"Injected move failure {call}.");
+            }
+
+            inner.MoveFile(sourcePhysicalPath, destinationPhysicalPath);
+            afterSuccessfulMove?.Invoke(call, sourcePhysicalPath, destinationPhysicalPath);
+        }
+
+        public void DeleteFile(string physicalPath) => inner.DeleteFile(physicalPath);
+
+        public bool FileExists(string physicalPath) => inner.FileExists(physicalPath);
+
+        public IReadOnlyList<string> ListNames(string directoryPhysicalPath) =>
+            inner.ListNames(directoryPhysicalPath);
+
+        public void FlushDirectory(string directoryPhysicalPath) => inner.FlushDirectory(directoryPhysicalPath);
     }
 
     private sealed class FakeSourceCatalog(SourceDefinition source) : ISourceCatalog

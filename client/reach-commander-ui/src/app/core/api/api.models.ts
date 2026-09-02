@@ -622,6 +622,80 @@ export interface SubtitleSaveResultDto {
   readonly recoveryRequired: boolean;
 }
 
+export type TextEncodingKind =
+  | 'auto'
+  | 'utf8'
+  | 'utf8Bom'
+  | 'utf16LittleEndian'
+  | 'utf16BigEndian'
+  | 'windows1250'
+  | 'windows1252';
+export type TextEncodingConfidence = 'high' | 'medium' | 'low';
+export type TextEncodingPreviewStatus = 'ready' | 'warning' | 'invalid';
+export type TextEncodingOperationState =
+  | 'queued'
+  | 'running'
+  | 'cancelRequested'
+  | 'completed'
+  | 'completedWithErrors'
+  | 'cancelled'
+  | 'failed';
+export type TextEncodingRowResult =
+  | 'pending'
+  | 'converted'
+  | 'skipped'
+  | 'failed'
+  | 'recoveryRequired';
+
+export interface TextEncodingPreviewRequestDto {
+  readonly sourceId: string;
+  readonly filePaths: readonly string[];
+  readonly sourceEncoding: TextEncodingKind;
+  readonly outputEncoding: TextEncodingKind;
+}
+
+export interface TextEncodingPreviewRowDto {
+  readonly filePath: string;
+  readonly fileName: string;
+  readonly detectedSourceEncoding: TextEncodingKind | null;
+  readonly confidence: TextEncodingConfidence | null;
+  readonly status: TextEncodingPreviewStatus;
+  readonly code: string | null;
+  readonly detail: string | null;
+  readonly previewText: string;
+}
+
+export interface TextEncodingPreviewDto {
+  readonly planId: string;
+  readonly expiresAt: string;
+  readonly rows: readonly TextEncodingPreviewRowDto[];
+  readonly readyCount: number;
+  readonly warningCount: number;
+  readonly invalidCount: number;
+  readonly canExecute: boolean;
+}
+
+export interface TextEncodingOperationRowDto {
+  readonly filePath: string;
+  readonly backupPath: string | null;
+  readonly result: TextEncodingRowResult;
+  readonly code: string | null;
+  readonly detail: string | null;
+}
+
+export interface TextEncodingOperationDto {
+  readonly operationId: string;
+  readonly state: TextEncodingOperationState;
+  readonly completedFiles: number;
+  readonly totalFiles: number;
+  readonly percent: number;
+  readonly currentFileName: string | null;
+  readonly canCancel: boolean;
+  readonly rows: readonly TextEncodingOperationRowDto[];
+  readonly errorCode: string | null;
+  readonly errorDetail: string | null;
+}
+
 export abstract class CommanderApiPort {
   abstract getSystemMetrics(): Promise<SystemMetricsDto>;
 
@@ -678,6 +752,16 @@ export abstract class CommanderApiPort {
   abstract getArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto>;
 
   abstract cancelArchiveExtraction(operationId: string): Promise<ArchiveExtractionOperationDto>;
+
+  abstract previewTextEncoding(
+    request: TextEncodingPreviewRequestDto,
+  ): Promise<TextEncodingPreviewDto>;
+
+  abstract executeTextEncoding(planId: string): Promise<TextEncodingOperationDto>;
+
+  abstract getTextEncodingOperation(operationId: string): Promise<TextEncodingOperationDto>;
+
+  abstract cancelTextEncodingOperation(operationId: string): Promise<TextEncodingOperationDto>;
 
   abstract previewFileOperation(
     request: FileOperationPreviewRequestDto,

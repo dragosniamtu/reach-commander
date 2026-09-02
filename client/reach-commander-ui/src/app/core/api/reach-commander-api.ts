@@ -50,6 +50,9 @@ import {
   UploadTarget,
   TrashEntryDto,
   TrashPermanentDeleteRequestDto,
+  TextEncodingOperationDto,
+  TextEncodingPreviewDto,
+  TextEncodingPreviewRequestDto,
 } from './api.models';
 
 @Injectable({ providedIn: 'root' })
@@ -256,6 +259,38 @@ export class ReachCommanderApi extends CommanderApiPort {
     return firstValueFrom(
       this.http.post<ArchiveExtractionOperationDto>(
         `/api/archive-extractions/${encodeURIComponent(operationId)}/cancel`,
+        null,
+      ),
+    );
+  }
+
+  previewTextEncoding(request: TextEncodingPreviewRequestDto): Promise<TextEncodingPreviewDto> {
+    return firstValueFrom(
+      this.http.post<TextEncodingPreviewDto>('/api/text-encodings/preview', request),
+    );
+  }
+
+  executeTextEncoding(planId: string): Promise<TextEncodingOperationDto> {
+    return firstValueFrom(
+      this.http.post<TextEncodingOperationDto>(
+        `/api/text-encodings/${encodeURIComponent(planId)}/execute`,
+        null,
+      ),
+    );
+  }
+
+  getTextEncodingOperation(operationId: string): Promise<TextEncodingOperationDto> {
+    return firstValueFrom(
+      this.http.get<TextEncodingOperationDto>(
+        `/api/text-encodings/operations/${encodeURIComponent(operationId)}`,
+      ),
+    );
+  }
+
+  cancelTextEncodingOperation(operationId: string): Promise<TextEncodingOperationDto> {
+    return firstValueFrom(
+      this.http.post<TextEncodingOperationDto>(
+        `/api/text-encodings/operations/${encodeURIComponent(operationId)}/cancel`,
         null,
       ),
     );

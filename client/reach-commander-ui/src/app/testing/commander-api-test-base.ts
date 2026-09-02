@@ -26,6 +26,9 @@ import {
   MediaPreviewDto,
   SubtitleSavePlanDto,
   SubtitleSaveResultDto,
+  TextEncodingOperationDto,
+  TextEncodingPreviewDto,
+  TextEncodingPreviewRequestDto,
 } from '../core/api/api.models';
 
 export abstract class CommanderApiTestBase extends CommanderApiPort {
@@ -160,6 +163,24 @@ export abstract class CommanderApiTestBase extends CommanderApiPort {
   }
 
   override closeMediaPreview(_sessionId: string): Promise<void> {
+    return unsupported();
+  }
+
+  override previewTextEncoding(
+    _request: TextEncodingPreviewRequestDto,
+  ): Promise<TextEncodingPreviewDto> {
+    return unsupported();
+  }
+
+  override executeTextEncoding(_planId: string): Promise<TextEncodingOperationDto> {
+    return unsupported();
+  }
+
+  override getTextEncodingOperation(_operationId: string): Promise<TextEncodingOperationDto> {
+    return unsupported();
+  }
+
+  override cancelTextEncodingOperation(_operationId: string): Promise<TextEncodingOperationDto> {
     return unsupported();
   }
 

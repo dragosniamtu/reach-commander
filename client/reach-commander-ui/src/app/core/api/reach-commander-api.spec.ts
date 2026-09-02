@@ -23,6 +23,9 @@ import {
   SourceManagementOperationDto,
   SystemMetricsDto,
   SystemUpdateStatusDto,
+  TextEncodingOperationDto,
+  TextEncodingPreviewDto,
+  TextEncodingPreviewRequestDto,
   UploadLimitsDto,
   UploadResultDto,
 } from './api.models';
@@ -218,6 +221,67 @@ describe('ReachCommanderApi', () => {
     expect(applyRequest.request.body).toBeNull();
     applyRequest.flush(applying);
     await expect(apply).resolves.toEqual(applying);
+  });
+
+  it('uses the exact text-encoding preview, execute, status, and cancel routes', async () => {
+    const previewRequest: TextEncodingPreviewRequestDto = {
+      sourceId: 'media',
+      filePaths: ['/TV/episode 1.srt'],
+      sourceEncoding: 'auto',
+      outputEncoding: 'utf8',
+    };
+    const preview: TextEncodingPreviewDto = {
+      planId: 'plan/id',
+      expiresAt: '2026-09-02T10:00:00Z',
+      rows: [],
+      readyCount: 1,
+      warningCount: 0,
+      invalidCount: 0,
+      canExecute: true,
+    };
+    const operation: TextEncodingOperationDto = {
+      operationId: 'operation/id',
+      state: 'queued',
+      completedFiles: 0,
+      totalFiles: 1,
+      percent: 0,
+      currentFileName: null,
+      canCancel: true,
+      rows: [],
+      errorCode: null,
+      errorDetail: null,
+    };
+
+    const previewResult = api.previewTextEncoding(previewRequest);
+    const previewHttp = http.expectOne('/api/text-encodings/preview');
+    expect(previewHttp.request.method).toBe('POST');
+    expect(previewHttp.request.body).toEqual(previewRequest);
+    previewHttp.flush(preview);
+    await expect(previewResult).resolves.toEqual(preview);
+
+    const executeResult = api.executeTextEncoding(preview.planId);
+    const executeHttp = http.expectOne('/api/text-encodings/plan%2Fid/execute');
+    expect(executeHttp.request.method).toBe('POST');
+    expect(executeHttp.request.body).toBeNull();
+    executeHttp.flush(operation);
+    await expect(executeResult).resolves.toEqual(operation);
+
+    const statusResult = api.getTextEncodingOperation(operation.operationId);
+    const statusHttp = http.expectOne('/api/text-encodings/operations/operation%2Fid');
+    expect(statusHttp.request.method).toBe('GET');
+    statusHttp.flush(operation);
+    await expect(statusResult).resolves.toEqual(operation);
+
+    const cancelResult = api.cancelTextEncodingOperation(operation.operationId);
+    const cancelHttp = http.expectOne('/api/text-encodings/operations/operation%2Fid/cancel');
+    expect(cancelHttp.request.method).toBe('POST');
+    expect(cancelHttp.request.body).toBeNull();
+    cancelHttp.flush({ ...operation, state: 'cancelRequested', canCancel: false });
+    await expect(cancelResult).resolves.toEqual({
+      ...operation,
+      state: 'cancelRequested',
+      canCancel: false,
+    });
   });
 
   it('downloads the private support bundle with a safe server filename', async () => {

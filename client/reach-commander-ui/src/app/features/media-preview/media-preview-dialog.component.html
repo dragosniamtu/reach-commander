@@ -36,6 +36,7 @@
             preload="metadata"
             (timeupdate)="updateVideoTime()"
             (error)="onPlaybackError()"
+            (canplay)="onPlaybackReady()"
           ></video>
           @if (store.activeCue(); as cue) {
             <div class="subtitle-overlay" aria-live="off">{{ cue.text }}</div>

@@ -151,6 +151,19 @@ describe('MediaPreviewDialogComponent', () => {
     expect(store.retryWithFallback).toHaveBeenCalledOnce();
   });
 
+  it('clears a transient playback warning once the video becomes playable', () => {
+    const video = fixture.nativeElement.querySelector('video') as HTMLVideoElement;
+
+    video.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Direct playback failed');
+
+    video.dispatchEvent(new Event('canplay'));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).not.toContain('Direct playback failed');
+  });
+
   it('shows queued work separately and lets the user cancel it', () => {
     store.state.set(readyState({
       phase: 'queued',

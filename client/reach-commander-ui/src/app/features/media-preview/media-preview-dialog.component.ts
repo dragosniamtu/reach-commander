@@ -212,6 +212,10 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
   onPlaybackError(): void {
     this.playbackError.set(true);
   }
+
+  onPlaybackReady(): void {
+    this.playbackError.set(false);
+  }
 }
 
 function isTextControl(target: EventTarget | null): boolean {

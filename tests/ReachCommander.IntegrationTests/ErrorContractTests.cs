@@ -53,6 +53,28 @@ public sealed class ErrorContractTests(ReachCommanderApiFactory factory)
         Assert.Equal("path_forbidden", problem?.Code);
     }
 
+    [Fact]
+    public async Task Invalid_text_encoding_request_uses_stable_problem_details()
+    {
+        var fileName = $"encoding-error-{Guid.NewGuid():N}.txt";
+        File.WriteAllText(Path.Combine(factory.MediaRoot, fileName), "text");
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/text-encodings/preview", new
+        {
+            sourceId = "media",
+            filePaths = new[] { $"/{fileName}" },
+            sourceEncoding = "auto",
+            outputEncoding = "auto",
+        });
+        var body = await response.Content.ReadAsStringAsync();
+        var problem = await response.Content.ReadFromJsonAsync<ProblemResponse>();
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal("text_encoding_invalid_request", problem!.Code);
+        Assert.DoesNotContain(factory.WorkspaceRoot, body, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record ProblemResponse(
         string Type,
         string Title,

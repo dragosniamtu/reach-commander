@@ -40,6 +40,8 @@ using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Application.SourceManagement;
 using ReachCommander.Infrastructure.SourceManagement;
 using ReachCommander.Infrastructure.SystemUpdates;
+using ReachCommander.Application.TextEncodings;
+using ReachCommander.Infrastructure.TextEncodings;
 
 namespace ReachCommander.Infrastructure;
 
@@ -83,6 +85,16 @@ public static class DependencyInjection
         services.AddSingleton<BatchRenameRequestLock>();
         services.AddSingleton<BatchRenameExecutor>();
         services.AddSingleton<IBatchRenameService, BatchRenameService>();
+        services.AddSingleton<ITextEncodingFileSystem, LocalTextEncodingFileSystem>();
+        services.AddSingleton<TextEncodingPlanStore>();
+        services.AddSingleton<TextEncodingPlanner>();
+        services.AddSingleton<TextEncodingOperationStore>();
+        services.AddSingleton<TextEncodingStagingRegistry>();
+        services.AddSingleton<TextEncodingExecutor>();
+        services.AddSingleton<ITextEncodingExecutor>(provider =>
+            provider.GetRequiredService<TextEncodingExecutor>());
+        services.AddSingleton<ITextEncodingService, TextEncodingService>();
+        services.AddHostedService<TextEncodingCleanupService>();
         services.AddSingleton(provider => FileOperationDataPaths.FromAuthenticationRoot(
             provider.GetRequiredService<AuthenticationDataPaths>().RootPath));
         services.AddSingleton<IFileOperationInspector, LocalFileOperationInspector>();

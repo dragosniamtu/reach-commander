@@ -22,6 +22,7 @@ builder.Services.AddExceptionHandler<SystemUpdateExceptionHandler>();
 builder.Services.AddExceptionHandler<SourceManagementExceptionHandler>();
 builder.Services.AddExceptionHandler<FileOperationExceptionHandler>();
 builder.Services.AddExceptionHandler<MediaPreviewExceptionHandler>();
+builder.Services.AddExceptionHandler<TextEncodingExceptionHandler>();
 builder.Services.AddExceptionHandler<FileAccessExceptionHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();

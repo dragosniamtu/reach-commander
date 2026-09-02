@@ -55,6 +55,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
 
   private hls: Hls | null = null;
   private mediaErrorRecoveryAttempted = false;
+  private pausedPositionSeconds: number | null = null;
   private readonly playbackError = signal(false);
   private readonly playbackMode = computed(() =>
     this.store.state().session?.playbackMode ?? null,
@@ -106,11 +107,28 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
   }
 
   onPlaybackPaused(): void {
-    this.hls?.pauseBuffering();
+    const hls = this.hls;
+    const video = this.video.nativeElement;
+    if (!hls || video.ended || !Number.isFinite(video.currentTime)) {
+      return;
+    }
+    this.pausedPositionSeconds = video.currentTime;
+    hls.stopLoad();
   }
 
   onPlaybackStarted(): void {
-    this.hls?.resumeBuffering();
+    const hls = this.hls;
+    if (!hls) {
+      return;
+    }
+    const pausedPosition = this.pausedPositionSeconds;
+    if (pausedPosition === null) {
+      hls.resumeBuffering();
+      return;
+    }
+    this.pausedPositionSeconds = null;
+    this.video.nativeElement.currentTime = pausedPosition;
+    hls.startLoad(pausedPosition);
   }
 
   seek(position: 'beginning' | 'middle' | 'end'): void {
@@ -187,6 +205,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
     }
     this.detachPlayback();
     this.mediaErrorRecoveryAttempted = false;
+    this.pausedPositionSeconds = null;
     this.playbackError.set(false);
     if (!url || !mode) {
       return;

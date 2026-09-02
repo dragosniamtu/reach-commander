@@ -8,6 +8,8 @@ const hlsConfigs = vi.hoisted(() => [] as unknown[]);
 const hlsInstances = vi.hoisted(() => [] as Array<{
   pauseBuffering: ReturnType<typeof vi.fn>;
   resumeBuffering: ReturnType<typeof vi.fn>;
+  stopLoad: ReturnType<typeof vi.fn>;
+  startLoad: ReturnType<typeof vi.fn>;
   recoverMediaError: ReturnType<typeof vi.fn>;
   emitError: (data: unknown) => void;
 }>);
@@ -20,6 +22,8 @@ vi.mock('hls.js', () => ({
 
     readonly pauseBuffering = vi.fn();
     readonly resumeBuffering = vi.fn();
+    readonly stopLoad = vi.fn();
+    readonly startLoad = vi.fn();
     readonly recoverMediaError = vi.fn();
     private errorHandler: ((event: string, data: unknown) => void) | null = null;
 
@@ -229,7 +233,7 @@ describe('MediaPreviewDialogComponent', () => {
     expect(hlsConfigs.at(-1)).toMatchObject({ startPosition: 0 });
   });
 
-  it('suspends HLS buffering while paused and resumes it on play', async () => {
+  it('resumes HLS playback from the captured pause position', async () => {
     store.state.set(readyState({
       session: { ...readyState().session!, playbackMode: 'hls' },
     }));
@@ -239,11 +243,14 @@ describe('MediaPreviewDialogComponent', () => {
     const hls = hlsInstances.at(-1)!;
     const video = fixture.nativeElement.querySelector('video') as HTMLVideoElement;
 
+    video.currentTime = 29;
     video.dispatchEvent(new Event('pause'));
+    video.currentTime = 39;
     video.dispatchEvent(new Event('play'));
 
-    expect(hls.pauseBuffering).toHaveBeenCalledOnce();
-    expect(hls.resumeBuffering).toHaveBeenCalledOnce();
+    expect(hls.stopLoad).toHaveBeenCalledOnce();
+    expect(hls.startLoad).toHaveBeenCalledWith(29);
+    expect(video.currentTime).toBe(29);
   });
 
   it('recovers the first fatal HLS media error instead of ending playback', async () => {

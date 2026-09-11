@@ -15,6 +15,7 @@ interface UpdateRoutes {
   applyWith(status: SystemUpdateFixture): void;
   disconnectApplyThen(status: SystemUpdateFixture): void;
   failDiagnostics(): void;
+  readonly checkBodies: unknown[];
   readonly applyBodies: unknown[];
   readonly diagnosticsRequests: unknown[];
 }
@@ -27,6 +28,7 @@ async function routeSystemUpdates(
   let applyResult: SystemUpdateFixture | null = null;
   let disconnectApply = false;
   const applyBodies: unknown[] = [];
+  const checkBodies: unknown[] = [];
   const diagnosticsRequests: unknown[] = [];
   let diagnosticsFail = false;
 
@@ -67,6 +69,11 @@ async function routeSystemUpdates(
       await route.fulfill({ json: current });
       return;
     }
+    if (pathname === "/api/system-update/check") {
+      checkBodies.push(request.postDataJSON());
+      await route.fulfill({ json: current });
+      return;
+    }
 
     await route.fulfill({ json: current });
   });
@@ -85,10 +92,35 @@ async function routeSystemUpdates(
     failDiagnostics() {
       diagnosticsFail = true;
     },
+    checkBodies,
     applyBodies,
     diagnosticsRequests,
   };
 }
+
+test("system update can manually retry after an unavailable capability check", async ({
+  page,
+}) => {
+  const routes = await routeSystemUpdates(page, systemUpdateFixture({
+    supported: false,
+    phase: "unavailable",
+    reasonCode: "system_update_unavailable",
+    detail: "System updates are unavailable on this installation.",
+  }));
+  await page.goto("/");
+  const trigger = page.getByTestId("system-update-trigger");
+
+  await expect(trigger).toBeEnabled();
+  await expect(trigger).toHaveAccessibleName(
+    "Retry update check. System updates unavailable: System updates are unavailable on this installation.",
+  );
+
+  routes.publish(available());
+  await trigger.click();
+
+  await expect(trigger).toHaveAccessibleName("Update available: v1.4.0");
+  expect(routes.checkBodies).toEqual([null]);
+});
 
 const available = () =>
   systemUpdateFixture({

@@ -68,7 +68,7 @@ Do not delete operation metadata to make a warning disappear. Preserve `/data` a
 
 ## Full-stack system update operations
 
-Only an Ubuntu installer-managed deployment provides the in-app system update boundary. Its `reachcommander-updater.service` performs automatic checks at startup and every six hours, while applying a discovered digest requires administrator confirmation. Exact version pins remain pinned. Windows, macOS, and manual container deployments report the feature as unsupported and continue to use their documented platform update commands.
+Only an Ubuntu installer-managed deployment provides the in-app system update boundary. Its `reachcommander-updater.service` performs automatic checks at startup and every six hours. After an unavailable result, the toolbar control can be selected to retry the same target-free Check immediately; it does not force a reinstall. A discovered digest still requires a second selection and administrator confirmation before Apply. Exact version pins remain pinned. Windows, macOS, and manual container deployments continue to use their documented platform update commands.
 
 The application can ask the helper only for status, Check, Apply, or the fixed sanitized diagnostic snapshot through `/run/reachcommander-updater/updater.sock`; it never mounts `/var/run/docker.sock`. Apply blocks new file mutations, drains existing request leases, and rechecks the durable Copy/Move/Trash/archive queues before the host update begins. The browser reconnects after restart. A failed candidate is rolled back to the prior healthy digest when possible.
 

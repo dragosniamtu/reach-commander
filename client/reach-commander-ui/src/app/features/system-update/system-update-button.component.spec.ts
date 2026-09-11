@@ -45,6 +45,44 @@ describe('SystemUpdateButtonComponent', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it('allows a manual retry when the updater was unavailable', () => {
+    const check = vi.fn();
+    fixture.componentInstance.check.subscribe(check);
+    fixture.componentRef.setInput('status', status({
+      supported: false,
+      phase: 'unavailable',
+      reasonCode: 'system_update_unavailable',
+      detail: 'System updates are unavailable on this installation.',
+    }));
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe(
+      'Retry update check. System updates unavailable: System updates are unavailable on this installation.',
+    );
+
+    button.click();
+
+    expect(check).toHaveBeenCalledOnce();
+  });
+
+  it('allows a manual retry when the initial status request did not complete', () => {
+    const check = vi.fn();
+    fixture.componentInstance.check.subscribe(check);
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe(
+      'Retry update check. System update status unavailable',
+    );
+
+    button.click();
+
+    expect(check).toHaveBeenCalledOnce();
+  });
+
   it('disables update checking while a request is pending', () => {
     fixture.componentRef.setInput('status', status({ phase: 'current' }));
     fixture.componentRef.setInput('pending', true);
@@ -118,7 +156,7 @@ describe('SystemUpdateButtonComponent', () => {
     ['completed', 'ReachCommander update completed'],
     ['rolledBack', 'Previous version restored after update failure'],
     ['failed', 'Update requires administrator attention'],
-    ['unavailable', 'System updates unavailable: System updates are unavailable.'],
+    ['unavailable', 'Retry update check. System updates unavailable: System updates are unavailable.'],
   ] as const)('announces %s state', (phase, label) => {
     fixture.componentRef.setInput('status', status({
       phase,
@@ -141,7 +179,9 @@ describe('SystemUpdateButtonComponent', () => {
     }));
     fixture.detectChanges();
     const wrapper = fixture.nativeElement.querySelector('.update-control') as HTMLElement;
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
 
+    expect(button.disabled).toBe(true);
     expect(wrapper.tabIndex).toBe(0);
     expect(wrapper.title).toContain('Updates disabled while version-pinned');
     expect(wrapper.title).toContain('Channel: v1.3.0');

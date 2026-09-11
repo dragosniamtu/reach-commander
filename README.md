@@ -350,7 +350,7 @@ When a complete application update has downloaded, ReachCommander displays **Upd
 
 ### Full-stack system updates
 
-Ubuntu installer-managed deployments also expose a system-update control immediately before hardware telemetry. The backend asks the root-owned `reachcommander-updater.service` to check the configured repository and channel at startup and every six hours. Discovery is automatic; applying an update is always manual and requires administrator confirmation in the Angular UI. The browser sends no image, digest, channel, tag, or host command.
+Ubuntu installer-managed deployments also expose a system-update control immediately before hardware telemetry. The backend asks the root-owned `reachcommander-updater.service` to check the configured repository and channel at startup and every six hours. Discovery is automatic, and an administrator can select the control after an unavailable check to retry discovery immediately. This manual action only checks; a discovered update changes the control to **Update available**, and selecting it again opens the normal confirmation. Applying an update is always manual and requires administrator confirmation in the Angular UI. The browser sends no image, digest, channel, tag, or host command.
 
 The application container receives only the restricted Unix socket directory at `/run/reachcommander-updater`. It never mounts `/var/run/docker.sock`. The helper resolves `stable` to the newest non-prerelease GitHub release and its fixed GHCR digest, or resolves `edge` to its current GHCR digest and revision. Exact version pins remain pinned. A successful update health-checks the matching backend and PWA shell; an unhealthy candidate is rolled back.
 

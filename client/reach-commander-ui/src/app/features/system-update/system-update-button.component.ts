@@ -31,9 +31,15 @@ export class SystemUpdateButtonComponent {
 
   readonly canCheck = computed(() => {
     const status = this.status();
-    return !this.pending() &&
-      status?.supported === true &&
-      status.reasonCode !== 'version_pinned' &&
+    if (this.pending()) {
+      return false;
+    }
+
+    if (!status) {
+      return true;
+    }
+
+    return status.reasonCode !== 'version_pinned' &&
       (status.phase === 'current' || status.phase === 'unavailable');
   });
   readonly canActivate = computed(() =>
@@ -42,6 +48,10 @@ export class SystemUpdateButtonComponent {
     const status = this.status();
     if (this.pending()) {
       return 'Checking for updates';
+    }
+
+    if (!status) {
+      return 'Retry update check. System update status unavailable';
     }
 
     const summary = updateLabel(status);

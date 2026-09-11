@@ -353,7 +353,7 @@ Run `sudo reachcommander status` to see the saved channel and exact running imag
 
 ### Automatic system update control
 
-The installer also deploys the root-owned `reachcommander-updater.service`. ReachCommander's backend checks the fixed `dragosniamtu/reach-commander` GitHub repository and matching GHCR package at startup and every six hours. It enables the toolbar button only when the trusted helper reports a different immutable digest. Discovery is automatic, but Apply always requires administrator confirmation and is refused while durable file or archive operations are active. Exact version pins remain pinned and do not follow new releases.
+The installer also deploys the root-owned `reachcommander-updater.service`. ReachCommander's backend checks the fixed `dragosniamtu/reach-commander` GitHub repository and matching GHCR package at startup and every six hours. After an unavailable check, the toolbar control remains enabled so an administrator can manually retry discovery; this sends only the same target-free Check request. When the trusted helper reports a different immutable digest, the control changes to **Update available** and a second selection opens the existing confirmation. Apply always requires administrator confirmation and is refused while durable file or archive operations are active. Exact version pins remain pinned and do not follow new releases.
 
 The application is never given Docker control. Its container mounts the restricted Unix socket directory `/run/reachcommander-updater` read-only and never mounts `/var/run/docker.sock`. Browser and API requests contain no channel, image, digest, executable, arguments, or target version. The root helper owns discovery, backup, Compose activation, health validation, rollback, and its durable result journal.
 
@@ -375,7 +375,7 @@ sudo reachcommander doctor
 
 During Apply, ReachCommander temporarily drains new mutations and waits for active work to finish. Only the ReachCommander application container is recreated; Docker Engine is never restarted. Keep the browser tab open: it reconnects automatically, activates the matching PWA shell, and reloads once. If the candidate fails its identity or health check, the helper restores the prior digest and verifies the recovered container. Start with **Download diagnostics** or `sudo reachcommander support-bundle > reachcommander-support.zip`; review the ZIP before sharing it. Preserve `/opt/reachcommander/state/system-update.json`, `/opt/reachcommander/state/update-traces`, and the normal update backups when investigating a failure. The root-only `update-log`, `journalctl`, and `doctor` outputs are advanced follow-up evidence and are intentionally not copied into the shareable bundle.
 
-The in-app control is supported only for Ubuntu installer-managed deployments. It remains safely disabled for Windows development, macOS Docker Desktop, and manual container deployments because those environments do not have this restricted systemd boundary.
+The in-app Apply flow is supported only for Ubuntu installer-managed deployments. Windows development, macOS Docker Desktop, and manual container deployments may manually retry discovery, but safely remain unavailable because those environments do not have this restricted systemd boundary.
 
 ## Uninstall without touching source data
 

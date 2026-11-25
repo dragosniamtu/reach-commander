@@ -80,6 +80,8 @@ class FakeCommands:
             if status:
                 raise RuntimeError("compose output containing /private/path")
             return ""
+        if call[:2] == ("docker", "compose") and "stop" in call:
+            return ""
         if call[:3] == ("docker", "image", "inspect"):
             return IMAGE_ID + "\n"
         if call[:2] == ("docker", "inspect") and "{{.Image}}" in call:
@@ -110,6 +112,7 @@ class InjectedAtomicWriter:
             self.root / "config" / "sources.json",
             self.root / "state" / "source-mounts.json",
             self.root / "compose.yaml",
+            self.root / "compose.override.yaml",
         }
         if destination in live_paths:
             self.live_calls += 1
@@ -142,7 +145,7 @@ class SourceFixture:
         shutil.copyfile(ROOT / "deploy" / "updater_protocol.py", self.protocol)
         shutil.copyfile(ROOT / "deploy" / "render_config.py", self.renderer)
         self.helper.write_text("# installed source helper\n", encoding="utf-8")
-        self.override.write_text("services: {}\n", encoding="utf-8")
+        self.override.write_text("services: {}\n", encoding="utf-8", newline="\n")
         request = render_config.DeploymentRequest.from_mapping(
             {
                 "accessMode": "secure-https",
@@ -166,7 +169,7 @@ class SourceFixture:
             }
         )
         render_config.render_deployment(request, self.template, root)
-        self.override.write_text("services: {}\n", encoding="utf-8")
+        self.override.write_text("services: {}\n", encoding="utf-8", newline="\n")
         self.protect()
 
     @property
@@ -408,6 +411,7 @@ class SourceTransactionTests(unittest.TestCase):
                 "config/sources.json",
                 "state/source-mounts.json",
                 "compose.yaml",
+                "compose.override.yaml",
             )
         )
 
@@ -429,6 +433,33 @@ class SourceTransactionTests(unittest.TestCase):
             self.assertEqual(0o755, stat.S_IMODE((self.root / "config").stat().st_mode))
             self.assertEqual(0o700, stat.S_IMODE((self.root / "state").stat().st_mode))
             self.assertEqual(0o700, stat.S_IMODE(self.root.stat().st_mode))
+
+    def test_enabled_worker_allowlist_tracks_add_remove_and_rolls_back_with_sources(self) -> None:
+        from deploy.subtitle_management import SubtitleManager
+        worker = 'ghcr.io/dragosniamtu/reach-commander@sha256:' + 'b' * 64
+        commands = FakeCommands()
+        def run(arguments, timeout):
+            if any('io.reachcommander.subtitle-worker-image' in item for item in arguments):
+                commands.calls.append(tuple(arguments))
+                return worker
+            return commands(arguments, timeout)
+        for name in ('compose.subtitles.yaml', 'compose.updater.yaml'):
+            shutil.copyfile(ROOT / 'deploy' / name, self.root / 'lib' / name)
+        subtitles = SubtitleManager(self.root, run=run)
+        subtitles.set_enabled(True)
+        subtitles.sync()
+        original = self.fixture.override.read_bytes()
+        manager = self.fixture.manager(run)
+        manager.add(add_request())
+        self.assertIn('/sources/archive', self.fixture.override.read_text())
+        self.assertTrue(any('stop' in call and 'subtitle-worker' in call for call in commands.calls))
+        self.assertIn('subtitle-worker', next(call for call in commands.calls if 'up' in call))
+        manager.add(remove_request())
+        self.assertEqual(original, self.fixture.override.read_bytes())
+        commands.health_statuses = ['unhealthy', 'healthy']
+        with self.assertRaises(self.source_management.SourceManagementFailure):
+            manager.add(add_request())
+        self.assertEqual(original, self.fixture.override.read_bytes())
 
     def test_remove_unmaps_source_preserves_remaining_defaults_and_never_deletes_host_data(self) -> None:
         manager = self.fixture.manager()
@@ -787,6 +818,7 @@ class SourceTransactionTests(unittest.TestCase):
         self.assertEqual(
             {
                 "compose.yaml",
+                "compose.override.yaml",
                 "config/sources.json",
                 "state/source-mounts.json",
             },

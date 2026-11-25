@@ -15,6 +15,20 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
+  subtitle-worker:
+    name: Offline subtitle worker contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Test worker without model dependencies or downloads
+        run: python -m unittest discover -s worker/subtitles/tests -v
+
   backend:
     name: Backend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -95,8 +109,19 @@ jobs:
       - name: Test CI diagnostic reporter
         run: python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v
 
+      - name: Test subtitle release verification
+        run: python3 -m unittest tests/ci/test_subtitle_release_smoke.py tests/ci/test_verify_worker_publication.py -v
+
       - name: Test installer common contracts
         run: python3 tools/run_with_annotations.py "Installer common contracts failed" bash tests/installer/test_common.sh
+
+      - name: Test subtitle state validation and retention
+        run: python3 tools/run_with_annotations.py "Subtitle state validation failed" bash tests/installer/test_subtitle_data.sh
+
+      - name: Test installed subtitle lifecycle
+        run: |
+          python3 -m unittest tests/installer/test_subtitle_management.py tests/installer/test_subtitle_smoke.py -v
+          bash tests/installer/test_subtitle_lifecycle.sh
 
       - name: Test installer installation contracts
         run: python3 tools/run_with_annotations.py "Installer installation contracts failed" bash tests/installer/test_install.sh
@@ -121,6 +146,10 @@ jobs:
             tests/installer/test_common.sh \
             tests/installer/test_install.sh \
             tests/installer/test_command.sh \
+            tests/installer/test_subtitle_data.sh \
+            tests/installer/test_subtitle_lifecycle.sh \
+            tests/installer/fixtures/subtitle-data.sh \
+            tools/subtitle_container_smoke.sh \
             tests/installer/test_package.sh \
             tests/installer/fake-bin/systemctl \
             tests/installer/macos/test_helpers.sh \
@@ -222,8 +251,7 @@ jobs:
 
   container-smoke:
     name: Hardened amd64 container smoke
-    if: github.event_name == 'push'
-    needs: [backend, acceptance, macos-installer]
+    needs: [backend, acceptance, macos-installer, subtitle-worker]
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -474,12 +502,35 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  subtitle-inference:
+    name: Real CPU subtitle inference (Linux Docker)
+    needs: [subtitle-worker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Build real inference images
+        run: |
+          docker build --tag reachcommander-subtitles:smoke worker/subtitles
+          docker build --tag reachcommander:subtitle-smoke .
+      - name: Verify offline inference and safe API installation
+        run: bash tools/subtitle_container_smoke.sh
+      - name: Upload real inference diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: subtitle-inference-diagnostics
+          path: artifacts/subtitle-inference
+          if-no-files-found: ignore
+          retention-days: 7
+
   container-publish:
     name: Publish verified multi-architecture image
     if: github.event_name == 'push'
-    needs: [backend, acceptance, container-smoke]
+    needs: [backend, acceptance, container-smoke, subtitle-inference]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     concurrency:
       group: reachcommander-container-publication
       cancel-in-progress: false
@@ -490,6 +541,7 @@ jobs:
       id-token: write
     env:
       IMAGE: ghcr.io/dragosniamtu/reach-commander
+      WORKER_IMAGE: ghcr.io/dragosniamtu/reach-commander
 
     steps:
       - name: Check out complete repository history
@@ -535,6 +587,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Publish amd64 and arm64 worker candidate
+        id: worker_build
+        uses: docker/build-push-action@v6
+        with:
+          context: worker/subtitles
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.WORKER_IMAGE }}:subtitles-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            io.reachcommander.component=subtitle-worker
+            org.opencontainers.image.title=ReachCommander CPU subtitle worker
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=subtitle-worker
+          cache-to: type=gha,scope=subtitle-worker,mode=max
+          sbom: true
+          provenance: mode=max
+
       - name: Publish amd64 and arm64 candidate image
         id: build
         uses: docker/build-push-action@v6
@@ -544,6 +616,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.candidate.outputs.tag }}
           labels: |
+            io.reachcommander.subtitle-worker-image=${{ env.WORKER_IMAGE }}@${{ steps.worker_build.outputs.digest }}
             org.opencontainers.image.title=ReachCommander
             org.opencontainers.image.description=Self-hosted dual-pane file manager for Windows development and Ubuntu deployment
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -667,21 +740,36 @@ jobs:
           }
           NODE
 
+      - name: Verify selected application worker
+        id: selected_worker
+        env:
+          SOURCE_DIGEST: ${{ steps.publication_source.outputs.digest }}
+        run: python3 tools/verify_worker_publication.py "$IMAGE@$SOURCE_DIGEST" "$GITHUB_SHA"
+
+      - name: Verify installed subtitle lifecycle before promotion
+        env:
+          SOURCE_DIGEST: ${{ steps.publication_source.outputs.digest }}
+        run: sudo --preserve-env=IMAGE,SOURCE_DIGEST python3 tools/subtitle_installed_smoke.py --app-image "$IMAGE@$SOURCE_DIGEST"
+
       - name: Promote verified image tags
         shell: bash
         env:
           SOURCE_DIGEST: ${{ steps.publication_source.outputs.digest }}
           TARGET_TAGS: ${{ steps.promotion_tags.outputs.tags }}
+          WORKER_REFERENCE: ${{ steps.selected_worker.outputs.reference }}
         run: |
           set -Eeuo pipefail
           [[ "$SOURCE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
 
           promotion_arguments=()
+          worker_arguments=()
           while IFS= read -r target_tag; do
             [[ -n "$target_tag" ]] || continue
             promotion_arguments+=(--tag "$target_tag")
+            worker_arguments+=(--tag "$WORKER_IMAGE:subtitles-${target_tag#"$IMAGE:"}")
           done <<<"$TARGET_TAGS"
           (( ${#promotion_arguments[@]} > 0 ))
+          docker buildx imagetools create "${worker_arguments[@]}" "$WORKER_REFERENCE"
           docker buildx imagetools create \
             "${promotion_arguments[@]}" \
             "$IMAGE@$SOURCE_DIGEST"
@@ -694,6 +782,9 @@ jobs:
                 cut -d' ' -f1
             )"
             [[ "$actual_digest" == "$SOURCE_DIGEST" ]]
+            worker_tag="$WORKER_IMAGE:subtitles-${target_tag#"$IMAGE:"}"
+            worker_digest="sha256:$(docker buildx imagetools inspect --raw "$worker_tag" | sha256sum | cut -d' ' -f1)"
+            [[ "$worker_digest" == "${WORKER_REFERENCE##*@}" ]]
           done <<<"$TARGET_TAGS"
 
       - name: Build and verify stable installer assets
@@ -714,6 +805,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           if ! gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release create "$VERSION" --verify-tag --generate-notes --title "ReachCommander $VERSION"
+            if [[ -f "docs/releases/$VERSION.md" ]]; then
+              gh release create "$VERSION" --verify-tag --notes-file "docs/releases/$VERSION.md" --title "ReachCommander $VERSION"
+            else
+              gh release create "$VERSION" --verify-tag --generate-notes --title "ReachCommander $VERSION"
+            fi
           fi
           gh release upload "$VERSION" artifacts/installer/reachcommander-installer.tar.gz artifacts/installer/SHA256SUMS --clobber

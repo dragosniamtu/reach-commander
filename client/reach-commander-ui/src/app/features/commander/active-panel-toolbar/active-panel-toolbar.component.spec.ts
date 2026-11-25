@@ -27,6 +27,23 @@ describe('ActivePanelToolbarComponent', () => {
     expect(chip.getAttribute('aria-label')).toContain('/incoming');
   });
 
+  it('exposes subtitle generation eligibility and always allows opening job history', () => {
+    fixture.componentRef.setInput('subtitleDisabledReason', null);
+    fixture.detectChanges();
+    const generated = vi.fn();
+    const history = vi.fn();
+    fixture.componentInstance.subtitlesRequested.subscribe(generated);
+    fixture.componentInstance.subtitleHistoryRequested.subscribe(history);
+    button('toolbar-subtitles').click();
+    button('toolbar-subtitle-jobs').click();
+    expect(generated).toHaveBeenCalledWith(button('toolbar-subtitles'));
+    expect(history).toHaveBeenCalledWith(button('toolbar-subtitle-jobs'));
+    fixture.componentRef.setInput('subtitleDisabledReason', 'Media is read-only.');
+    fixture.detectChanges();
+    expect(button('toolbar-subtitles').disabled).toBe(true);
+    expect(button('toolbar-subtitle-jobs').disabled).toBe(false);
+  });
+
   it('enables actions only for an available writable source with rename targets', () => {
     fixture.detectChanges();
     expect(button('toolbar-multi-rename').disabled).toBe(false);
@@ -52,6 +69,19 @@ describe('ActivePanelToolbarComponent', () => {
     expect(button('toolbar-add-files').closest('[role="group"]')?.getAttribute('title')).toContain(
       'archive',
     );
+  });
+
+  it('explains subtitle readiness while keeping setup and history reachable for valid selections', () => {
+    fixture.componentRef.setInput('subtitleDisabledReason', null);
+    fixture.componentRef.setInput('subtitleReadinessMessage', 'Subtitle generation is disabled on this server.');
+    fixture.detectChanges();
+    expect(button('toolbar-subtitles').disabled).toBe(false);
+    expect(button('toolbar-subtitles').closest('[role="group"]')?.getAttribute('title')).toContain('disabled on this server');
+    expect(button('toolbar-subtitle-jobs').disabled).toBe(false);
+    fixture.componentRef.setInput('subtitleDisabledReason', 'Media is read-only.');
+    fixture.detectChanges();
+    expect(button('toolbar-subtitles').disabled).toBe(true);
+    expect(button('toolbar-subtitles').closest('[role="group"]')?.getAttribute('title')).toBe('Media is read-only.');
   });
 
   it('emits search input and clear while describing wildcard support', () => {

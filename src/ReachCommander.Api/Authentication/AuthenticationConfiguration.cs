@@ -21,6 +21,7 @@ public static class AuthenticationConfiguration
     public const string MediaPreviewPolicy = "media-preview";
     public const string MediaPreviewAssetPolicy = "media-preview-assets";
     public const string TextEncodingPolicy = "text-encoding";
+    public const string SubtitleGenerationPolicy = "subtitle-generation";
     public const string AntiforgeryHeaderName = "X-ReachCommander-CSRF";
 
     public static IServiceCollection AddReachCommanderAuthentication(
@@ -84,10 +85,11 @@ public static class AuthenticationConfiguration
                 var textEncoding = context.HttpContext.Request.Path.StartsWithSegments(
                     "/api/text-encodings",
                     StringComparison.OrdinalIgnoreCase);
+                var subtitles = context.HttpContext.Request.Path.StartsWithSegments("/api/subtitle-jobs");
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
-                    Title = textEncoding
+                    Title = subtitles ? "Subtitle-generation rate limit exceeded" : textEncoding
                         ? "Text-encoding rate limit exceeded"
                         : mediaPreview
                         ? "Media-preview rate limit exceeded"
@@ -96,7 +98,7 @@ public static class AuthenticationConfiguration
                         : supportBundle
                             ? "Support bundle rate limit exceeded"
                             : "Authentication rate limit exceeded",
-                    Detail = textEncoding
+                    Detail = subtitles ? "Too many subtitle jobs were submitted. Try again later." : textEncoding
                         ? "Too many text-encoding requests were submitted. Try again later."
                         : mediaPreview
                         ? "Too many media-preview requests were submitted. Try again later."
@@ -108,7 +110,7 @@ public static class AuthenticationConfiguration
                     Type = "https://httpstatuses.io/429",
                     Instance = context.HttpContext.Request.Path,
                 };
-                problem.Extensions["code"] = textEncoding
+                problem.Extensions["code"] = subtitles ? "subtitle_generation_rate_limited" : textEncoding
                     ? "text_encoding_rate_limited"
                     : mediaPreview
                     ? "media_preview_rate_limited"
@@ -137,6 +139,8 @@ public static class AuthenticationConfiguration
                 FixedWindowPartition(context, permitLimit: 600));
             options.AddPolicy(TextEncodingPolicy, context =>
                 FixedWindowPartition(context, permitLimit: 20));
+            options.AddPolicy(SubtitleGenerationPolicy, context =>
+                FixedWindowPartition(context, permitLimit: 6));
         });
 
         return services;

@@ -679,7 +679,8 @@ rc_validate_application_data_tree() {
     [[ ! -L "$entry" ]] ||
       { rc_die 'application data contains a symbolic link'; return 1; }
     case "$relative" in
-      auth | keys | file-operations | file-operations/plans | file-operations/operations)
+      auth | keys | file-operations | file-operations/plans | file-operations/operations | \
+      subtitle-generation | subtitle-generation/jobs | subtitle-generation/receipts | subtitle-generation/transactions)
         [[ -d "$entry" ]] ||
           { rc_die 'application data directory has an invalid type'; return 1; }
         directory_device="$(rc_device_id "$entry")" || return 1
@@ -698,6 +699,17 @@ rc_validate_application_data_tree() {
         if [[ "$relative" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
           [[ -f "$entry" ]] ||
             { rc_die 'file-operation state has an invalid type'; return 1; }
+        else
+          rc_die 'application data contains an unexpected entry'
+          return 1
+        fi
+        ;;
+      subtitle-generation/jobs/* | subtitle-generation/receipts/* | subtitle-generation/transactions/*)
+        if [[ "$relative" =~ ^subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
+          "$relative" =~ ^subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
+          "$relative" =~ ^subtitle-generation/transactions/[0-9A-F]{64}-[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$entry" ]] ||
+            { rc_die 'subtitle-generation state has an invalid type'; return 1; }
         else
           rc_die 'application data contains an unexpected entry'
           return 1
@@ -724,7 +736,9 @@ rc_prepare_application_data() {
   for directory in data data/auth data/keys; do
     chmod 0700 "$RC_INSTALL_ROOT/$directory" || return 1
   done
-  for directory in data/file-operations data/file-operations/plans data/file-operations/operations; do
+  for directory in data/file-operations data/file-operations/plans data/file-operations/operations \
+    data/subtitle-generation data/subtitle-generation/jobs data/subtitle-generation/receipts \
+    data/subtitle-generation/transactions; do
     if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
       chmod 0700 "$RC_INSTALL_ROOT/$directory" || return 1
     fi

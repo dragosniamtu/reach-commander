@@ -42,6 +42,7 @@ using ReachCommander.Infrastructure.SourceManagement;
 using ReachCommander.Infrastructure.SystemUpdates;
 using ReachCommander.Application.TextEncodings;
 using ReachCommander.Infrastructure.TextEncodings;
+using ReachCommander.Infrastructure.SubtitleGeneration;
 
 namespace ReachCommander.Infrastructure;
 
@@ -145,6 +146,7 @@ public static class DependencyInjection
             provider.GetRequiredService<MediaPreviewService>());
         services.AddHostedService<MediaPreviewCleanupService>();
         services.AddHostedService<MediaPreviewWorker>();
+        services.AddSubtitleGeneration(configuration);
         services.AddSingleton<IHostPlatform, RuntimeHostPlatform>();
         services.AddSingleton<BoundedTextFileReader>();
         services.AddSingleton<ITrustedPathResolver, TrustedPathResolver>();

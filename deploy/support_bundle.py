@@ -69,6 +69,7 @@ _DOCTOR_CHECKS: tuple[tuple[str, str], ...] = (
     ("Docker Compose v2 ", "dockerCompose"),
     ("Required deployment file", "deploymentFiles"),
     ("Required deployment files ", "deploymentFiles"),
+    ("Subtitle deployment ", "deploymentFiles"),
     ("Compose configuration ", "deploymentFiles"),
     ("Secure HTTPS upstream ", "deploymentFiles"),
     ("Trusted LAN HTTP ", "deploymentFiles"),

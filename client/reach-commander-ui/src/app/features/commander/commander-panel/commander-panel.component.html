@@ -62,6 +62,9 @@
         (sortRequested)="store.sortBy(side(), $event)"
         (rowSelected)="selectRow($event)"
         (rowOpened)="openRow($event)"
+        [subtitleDisabledReason]="subtitleContext().error"
+        [subtitleReadinessMessage]="subtitleReadinessMessage()"
+        (subtitlesRequested)="requestSubtitles($event)"
       />
     }
   </div>

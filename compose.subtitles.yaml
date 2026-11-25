@@ -1,0 +1,87 @@
+# Opt-in overlay; see docs/ai-subtitles.md before enabling writable API source mounts.
+services:
+  reachcommander:
+    user: "${REACHCOMMANDER_UID:-1000}:${REACHCOMMANDER_GID:-1000}"
+    environment:
+      SubtitleGeneration__Enabled: "true"
+      SubtitleGeneration__SharedPath: /subtitle-work
+    volumes:
+      - type: bind
+        source: ${SUBTITLE_STATE_ROOT:-./artifacts/subtitles}/mailbox
+        target: /subtitle-work
+      # Only the API installs subtitles. The worker's copies remain read-only.
+      - type: bind
+        source: ${SUBTITLE_MEDIA_HOST_PATH:-./dev-sources/media}
+        target: /sources/media
+        read_only: false
+      - type: bind
+        source: ${SUBTITLE_DOWNLOADS_HOST_PATH:-./dev-sources/downloads}
+        target: /sources/downloads
+        read_only: false
+
+  subtitle-worker:
+    profiles: [subtitles]
+    build:
+      context: ./worker/subtitles
+    image: reachcommander-subtitles:local
+    user: "${REACHCOMMANDER_UID:-1000}:${REACHCOMMANDER_GID:-1000}"
+    init: true
+    read_only: true
+    network_mode: none
+    cpus: "${SUBTITLE_CPU_LIMIT:-2.0}"
+    mem_limit: "${SUBTITLE_MEMORY_LIMIT:-6g}"
+    pids_limit: 256
+    environment:
+      SUBTITLE_SHARED_PATH: /subtitle-work
+      SUBTITLE_MODEL_PATH: /models
+      SUBTITLE_TEMP_PATH: /tmp/subtitles
+      SUBTITLE_MEDIA_ROOTS: '["/sources/media","/sources/downloads"]'
+      SUBTITLE_THREADS: "${SUBTITLE_THREADS:-2}"
+      SUBTITLE_JOB_TIMEOUT: "21600"
+      SUBTITLE_MAX_DURATION: "14400"
+    volumes:
+      - type: bind
+        source: ${SUBTITLE_STATE_ROOT:-./artifacts/subtitles}/mailbox
+        target: /subtitle-work
+      - type: bind
+        source: ${SUBTITLE_STATE_ROOT:-./artifacts/subtitles}/models
+        target: /models
+        read_only: true
+      - type: bind
+        source: ${SUBTITLE_MEDIA_HOST_PATH:-./dev-sources/media}
+        target: /sources/media
+        read_only: true
+      - type: bind
+        source: ${SUBTITLE_DOWNLOADS_HOST_PATH:-./dev-sources/downloads}
+        target: /sources/downloads
+        read_only: true
+    tmpfs:
+      - /tmp:size=768m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+  subtitle-model-download:
+    profiles: [subtitle-setup]
+    image: reachcommander-subtitles:local
+    user: "${REACHCOMMANDER_UID:-1000}:${REACHCOMMANDER_GID:-1000}"
+    entrypoint: [python, /app/download_models.py]
+    command: [--romanian]
+    read_only: true
+    cpus: "2.0"
+    mem_limit: 2g
+    pids_limit: 128
+    environment:
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+    volumes:
+      - type: bind
+        source: ${SUBTITLE_STATE_ROOT:-./artifacts/subtitles}/models
+        target: /models
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]

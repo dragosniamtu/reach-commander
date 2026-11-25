@@ -1,0 +1,55 @@
+services:
+  reachcommander:
+    environment:
+      SubtitleGeneration__Enabled: "true"
+      SubtitleGeneration__SharedPath: /subtitle-work
+    volumes:
+      - type: bind
+        source: /run/reachcommander-updater
+        target: /run/reachcommander-updater
+        read_only: true
+      - type: bind
+        source: ./subtitles/mailbox
+        target: /subtitle-work
+        bind:
+          create_host_path: false
+  subtitle-worker:
+    image: @WORKER_IMAGE@
+    container_name: reachcommander-subtitles
+    user: "${REACHCOMMANDER_UID}:${REACHCOMMANDER_GID}"
+    init: true
+    read_only: true
+    network_mode: none
+    cpus: "2.0"
+    mem_limit: 6g
+    pids_limit: 256
+    environment:
+      SUBTITLE_SHARED_PATH: /subtitle-work
+      SUBTITLE_MODEL_PATH: /models
+      SUBTITLE_TEMP_PATH: /tmp/subtitles
+      SUBTITLE_MEDIA_ROOTS: '@MEDIA_ROOTS@'
+      SUBTITLE_THREADS: "2"
+      SUBTITLE_JOB_TIMEOUT: "21600"
+      SUBTITLE_MAX_DURATION: "14400"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: ./subtitles/mailbox
+        target: /subtitle-work
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./subtitles/models
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+      # subtitle-source-mounts
+    tmpfs:
+      - /tmp:size=768m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    restart: unless-stopped
+    stop_grace_period: 20s

@@ -16,6 +16,8 @@ SUPPORT_BUNDLE="$REPOSITORY_ROOT/deploy/support_bundle.py"
 SUPPORT_BUNDLE_CLI="$REPOSITORY_ROOT/deploy/support_bundle_cli.py"
 UPDATER_UNIT="$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
+# shellcheck source=fixtures/subtitle-data.sh
+source "$TEST_DIRECTORY/fixtures/subtitle-data.sh"
 
 if [[ ! -f "$COMMAND_SOURCE" ]]; then
   printf 'not ok - deploy/reachcommander must exist\n' >&2
@@ -76,6 +78,10 @@ mkdir -p \
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$INSTALL_ROOT/lib/common.sh"
 cp -- "$RENDERER" "$INSTALL_ROOT/bin/render_config.py"
 cp -- "$SOURCE_MANAGEMENT" "$INSTALL_ROOT/bin/source_management.py"
+cp -- "$REPOSITORY_ROOT/deploy/subtitle_management.py" "$INSTALL_ROOT/bin/subtitle_management.py"
+cp -- "$REPOSITORY_ROOT/deploy/compose.subtitles.yaml" "$INSTALL_ROOT/lib/compose.subtitles.yaml"
+cp -- "$UPDATER_COMPOSE" "$INSTALL_ROOT/lib/compose.updater.yaml"
+printf 'false\n' >"$INSTALL_ROOT/state/subtitles-enabled"
 cp -- "$TEMPLATE" "$INSTALL_ROOT/lib/compose.release.yaml"
 cp -- "$UPDATER_SERVICE" "$INSTALL_ROOT/bin/updater_service.py"
 cp -- "$SUPPORT_BUNDLE_CLI" "$INSTALL_ROOT/bin/support_bundle_cli.py"
@@ -145,6 +151,7 @@ chmod 0600 \
   "$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json" \
   "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8" \
   "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
+create_subtitle_fixture "$INSTALL_ROOT/data"
 if (( EUID == 0 )); then
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$INSTALL_ROOT/data"
 fi
@@ -270,6 +277,13 @@ run_command_with_input_split() {
   last_stdout="$(<"$stdout_path")"
   last_stderr="$(<"$stderr_path")"
 }
+
+run_command subtitles status
+assert_equal '0' "$last_status" 'subtitle status command is installed'
+[[ "$last_output" == *'disabled'* ]] || fail 'subtitles must be disabled by default'
+run_command subtitles enable ghcr.io/attacker/worker:latest
+assert_equal '64' "$last_status" 'subtitle CLI must not accept image references'
+pass 'subtitle manager is opt-in and exposes no arbitrary image input'
 
 for invocation in \
   'unknown' \
@@ -885,7 +899,7 @@ backup_root = transaction_root / "backup"
 transaction_root.mkdir(mode=0o700)
 backup_root.mkdir(mode=0o700)
 digests = {}
-for relative in ("config/sources.json", "state/source-mounts.json", "compose.yaml"):
+for relative in ("config/sources.json", "state/source-mounts.json", "compose.yaml", "compose.override.yaml"):
     destination = backup_root / relative
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     destination.write_bytes((root / relative).read_bytes())
@@ -1403,7 +1417,8 @@ for application_file in \
   file-operations/plans/0123456789abcdef0123456789abcdef.json \
   file-operations/operations/fedcba9876543210fedcba9876543210.json \
   media-previews/0123456789abcdef0123456789abcdef/index.m3u8 \
-  media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts; do
+  media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts \
+  "${SUBTITLE_FIXTURE_FILES[@]}"; do
   [[ -f "$backup_destination/application-data/$application_file" ]] ||
     fail "backup application file missing: $application_file"
   case "$(uname -s)" in
@@ -1415,6 +1430,7 @@ for application_file in \
       ;;
   esac
 done
+assert_subtitle_fixture "$backup_destination/application-data" || fail 'backup changed subtitle state'
 cmp -s \
   "$TEST_ROOT/account-valid.json" \
   "$backup_destination/application-data/auth/account.json" ||
@@ -1490,6 +1506,7 @@ chmod 0600 \
   "$INSTALL_ROOT/data/file-operations/plans/"*.json \
   "$INSTALL_ROOT/data/file-operations/operations/"*.json
 
+create_subtitle_fixture "$INSTALL_ROOT/data"
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'retain\nuninstall ReachCommander' uninstall
 assert_equal "0" "$last_status" "retain uninstall status"
@@ -1501,6 +1518,7 @@ assert_equal "0" "$last_status" "retain uninstall status"
 [[ -f "$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" ]] ||
   fail "retain uninstall removed file-operation state"
 [[ ! -e "$COMMAND_PATH" ]] || fail "retain uninstall kept management command"
+assert_subtitle_fixture "$INSTALL_ROOT/data" || fail 'retain uninstall changed subtitle state'
 unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
   ! -path "$INSTALL_ROOT/data" \
   ! -path "$INSTALL_ROOT/data/auth" \
@@ -1513,6 +1531,13 @@ unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
   ! -path "$INSTALL_ROOT/data/file-operations/plans/0123456789abcdef0123456789abcdef.json" \
   ! -path "$INSTALL_ROOT/data/file-operations/operations" \
   ! -path "$INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json" \
+  ! -path "$INSTALL_ROOT/data/subtitle-generation" \
+  ! -path "$INSTALL_ROOT/data/subtitle-generation/jobs" \
+  ! -path "$INSTALL_ROOT/data/subtitle-generation/receipts" \
+  ! -path "$INSTALL_ROOT/data/subtitle-generation/transactions" \
+  ! -path "$INSTALL_ROOT/data/${SUBTITLE_FIXTURE_FILES[0]}" \
+  ! -path "$INSTALL_ROOT/data/${SUBTITLE_FIXTURE_FILES[1]}" \
+  ! -path "$INSTALL_ROOT/data/${SUBTITLE_FIXTURE_FILES[2]}" \
   -print -quit)"
 [[ -z "$unexpected_retained" ]] || fail "retain uninstall left generated deployment state"
 [[ "$last_output" == *"Application data retained at: $INSTALL_ROOT/data"* ]] ||

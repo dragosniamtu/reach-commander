@@ -17,7 +17,7 @@ test('Ubuntu guide uses a version-pinned, checksum-verified installation flow', 
   for (const required of [
     'Docker Engine',
     'Docker Compose v2',
-    'REACHCOMMANDER_VERSION=v1.0.0',
+    'REACHCOMMANDER_VERSION=v1.5.0',
     'reachcommander-installer.tar.gz',
     'SHA256SUMS',
     'sha256sum --check --strict SHA256SUMS',

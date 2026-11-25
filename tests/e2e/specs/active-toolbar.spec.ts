@@ -124,6 +124,17 @@ test("keeps toolbar and metrics usable at supported compact width", async ({
   await page.keyboard.press("Escape");
   await expect(metrics).toBeFocused();
 
+  const search = page.getByRole("searchbox", { name: "Search active panel" });
+  await search.fill("*.txt");
+  const toolbarBounds = await toolbar.boundingBox();
+  const metricsBounds = await metrics.boundingBox();
+  expect(toolbarBounds!.y).toBeGreaterThanOrEqual(metricsBounds!.y + metricsBounds!.height);
+  await page.getByTestId("toolbar-clear-search").click();
+  await expect(search).toHaveValue("");
+  await page.getByTestId("toolbar-subtitle-jobs").click();
+  await expect(page.getByRole("dialog", { name: "Subtitle jobs" })).toBeVisible();
+  await page.getByRole("button", { name: "Close subtitles" }).click();
+
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
@@ -149,8 +160,12 @@ test("keeps the toolbar hierarchy clear at desktop widths", async ({
   page,
 }, testInfo) => {
   for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1600, height: 900 },
     { width: 1440, height: 900 },
     { width: 1200, height: 800 },
+    { width: 1121, height: 800 },
+    { width: 1120, height: 800 },
     { width: 1024, height: 768 },
   ]) {
     await page.setViewportSize(viewport);

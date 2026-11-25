@@ -32,7 +32,7 @@ test('diagnostic uploads use the current Node 24 artifact action', async () => {
   const content = await workflow();
   const uploads = content.match(/uses: actions\/upload-artifact@v7/g) ?? [];
 
-  assert.equal(uploads.length, 3);
+  assert.equal(uploads.length, 4);
   assert.doesNotMatch(content, /uses: actions\/upload-artifact@v4/);
 });
 
@@ -196,7 +196,7 @@ test('macOS installer contracts run before container publication', async () => {
     'tests/installer/macos/test_helpers.sh',
     'tests/installer/macos/test_install.sh',
     'tests/installer/macos/fake-bin/plutil',
-    'needs: [backend, acceptance, macos-installer]',
+    'needs: [backend, acceptance, macos-installer, subtitle-worker]',
   ]) {
     assert.ok(content.includes(required), `CI is missing macOS contract: ${required}`);
   }
@@ -206,14 +206,44 @@ test('smoke and publication jobs depend on all required gates', async () => {
   const content = await workflow();
   assert.match(
     content,
-    /container-smoke:[\s\S]*?needs:\s*\[backend, acceptance, macos-installer\]/,
+    /container-smoke:[\s\S]*?needs:\s*\[backend, acceptance, macos-installer, subtitle-worker\]/,
   );
   assert.match(
     content,
-    /container-publish:[\s\S]*?needs:\s*\[backend, acceptance, container-smoke\]/,
+    /container-publish:[\s\S]*?needs:\s*\[backend, acceptance, container-smoke, subtitle-inference\]/,
   );
-  assert.match(content, /container-smoke:[\s\S]*?if:\s*github\.event_name == 'push'/);
+  assert.doesNotMatch(content.slice(content.indexOf('  container-smoke:'), content.indexOf('  container-publish:')),
+    /if: github\.event_name == 'push'/);
   assert.match(content, /container-publish:[\s\S]*?if:\s*github\.event_name == 'push'/);
+});
+
+test('real offline subtitle container inference gates application publication', async () => {
+  const content = await workflow();
+  const start = content.indexOf('  subtitle-inference:');
+  const end = content.indexOf('  container-publish:');
+  assert.ok(start >= 0 && start < end, 'real subtitle inference job must exist');
+  const inference = content.slice(start, end);
+  assert.match(inference, /tools\/subtitle_container_smoke\.sh/);
+  assert.match(inference, /docker build[^\n]*worker\/subtitles/);
+  assert.match(inference, /name: subtitle-inference-diagnostics/);
+  assert.match(content.slice(end), /needs: \[backend, acceptance, container-smoke, subtitle-inference\]/);
+});
+
+test('application publication pins and verifies the worker from the same revision', async () => {
+  const content = await workflow();
+  const publish = content.slice(content.indexOf('  container-publish:'));
+  assert.match(publish, /WORKER_IMAGE: ghcr\.io\/dragosniamtu\/reach-commander\n/);
+  assert.match(publish, /:subtitles-candidate-/);
+  assert.match(publish, /worker_arguments\+=\(--tag "\$WORKER_IMAGE:subtitles-/);
+  assert.match(publish, /id: worker_build/);
+  assert.match(publish, /context: worker\/subtitles/);
+  assert.match(publish, /io\.reachcommander\.subtitle-worker-image=\$\{\{ env\.WORKER_IMAGE \}\}@\$\{\{ steps\.worker_build\.outputs\.digest \}\}/);
+  assert.match(publish, /Verify selected application worker/);
+  assert.match(publish, /tools\/verify_worker_publication\.py/);
+  assert.match(publish, /tools\/subtitle_installed_smoke\.py/);
+  assert.ok(publish.indexOf('id: worker_build') < publish.indexOf('id: build'));
+  assert.ok(publish.indexOf('Verify selected application worker') < publish.indexOf('Promote verified image tags'));
+  assert.ok(publish.indexOf('Verify installed subtitle lifecycle before promotion') < publish.indexOf('Promote verified image tags'));
 });
 
 test('write permissions are scoped only to the publication job', async () => {

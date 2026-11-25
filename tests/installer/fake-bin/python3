@@ -18,7 +18,7 @@ if command -v cygpath >/dev/null 2>&1; then
     fi
     converted_arguments+=("$argument")
     case "$argument" in
-      --output | --request | --template | --env | --sources)
+      --output | --request | --template | --env | --sources | --root | --config-root)
         convert_next=1
         ;;
     esac

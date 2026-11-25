@@ -188,7 +188,38 @@ rc_acquire_lock() {
 }
 
 rc_compose() {
-  docker compose --project-directory "$RC_INSTALL_ROOT" "$@"
+  local enabled='false'
+  case "${1:-}" in
+    up | stop | restart)
+      if [[ "${*: -1}" == 'reachcommander' ]]; then
+        enabled="$(rc_subtitles_enabled)" || return 1
+      fi
+      ;;
+  esac
+  if [[ "$enabled" == 'true' ]]; then
+    docker compose --project-directory "$RC_INSTALL_ROOT" "$@" subtitle-worker
+  else
+    docker compose --project-directory "$RC_INSTALL_ROOT" "$@"
+  fi
+}
+
+rc_subtitles() {
+  local helper="$RC_INSTALL_ROOT/bin/subtitle_management.py"
+  if [[ ! -f "$helper" || -L "$helper" ]]; then
+    # Recovery to a bundle predating subtitles remains supported when disabled.
+    if [[ ! -e "$RC_INSTALL_ROOT/state/subtitles-enabled" && ! -e "$RC_INSTALL_ROOT/subtitles" && ! -L "$RC_INSTALL_ROOT/subtitles" ]]; then return 0; fi
+    rc_die 'subtitle manager is missing or unsafe; refresh the verified installer'
+    return 1
+  fi
+  PYTHONDONTWRITEBYTECODE=1 python3 "$helper" "$@"
+}
+
+rc_subtitles_enabled() {
+  if [[ ! -e "$RC_INSTALL_ROOT/state/subtitles-enabled" && ! -L "$RC_INSTALL_ROOT/state/subtitles-enabled" ]]; then
+    printf 'false\n'
+    return 0
+  fi
+  rc_subtitles enabled
 }
 
 rc_pull_digest() {
@@ -303,6 +334,7 @@ rc_wait_healthy() {
     fi
     case "$status" in
       healthy)
+        if [[ "$container" == 'reachcommander' ]]; then rc_subtitles verify || return 1; fi
         return 0
         ;;
       unhealthy | missing)

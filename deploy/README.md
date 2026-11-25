@@ -10,6 +10,7 @@ The published Ubuntu installer archive contains:
 - `lan_address.py`, the local RFC1918 display-address helper;
 - `reachcommander`, the fixed-path lifecycle command, including the structured `sudo reachcommander source add` fallback;
 - `source_management.py`, the durable validated source transaction helper;
+- `subtitle_management.py` and `compose.subtitles.yaml`, the optional local CPU subtitle manager and hardened runtime template;
 - `render_config.py`, the structured deployment renderer;
 - `compose.release.yaml`, the hardened published-image template;
 - `compose.updater.yaml`, the read-only `/run/reachcommander-updater` socket mount;
@@ -44,3 +45,21 @@ The protocol-v3 Ubuntu helper in the current installer bundle adds a bounded, sa
 Refresh an existing installation by rerunning a checksum-verified installer bundle. The checksum-verified installer upgrades the deployment to the protocol-v3 helper and unit while preserving authentication data, Data Protection keys, source configuration, durable operation state, protected traces, and mounted source contents. Old stuck update events cannot be reconstructed; trace capture starts with the next update. An application-container update cannot upgrade the root-owned helper, so future helper changes require another verified installer refresh.
 
 Apply recreates only the ReachCommander application container; Docker Engine is never restarted. For safe browser details use **Technical details**. For root-only diagnosis use `sudo reachcommander update-log`, follow an active trace with `sudo reachcommander update-log --follow`, inspect `sudo journalctl -u reachcommander-updater.service --since today`, and finish with `sudo reachcommander doctor`.
+
+## Optional local CPU subtitles
+
+The verified Ubuntu bundle installs the subtitle manager automatically without adding an installer prompt. Existing installations need one checksum-verified installer refresh; an application image update cannot install host tools. Refresh preserves application/authentication data, configured sources unless explicitly reconfigured, and retained subtitle models and mailbox. Subtitles remain disabled until the administrator opts in:
+
+```bash
+sudo reachcommander subtitles enable
+sudo reachcommander subtitles download-models
+sudo reachcommander subtitles status
+```
+
+Enable pulls the worker image pinned by the selected application image's `io.reachcommander.subtitle-worker-image` OCI label. Both images use the existing public `ghcr.io/dragosniamtu/reach-commander` package; worker discovery tags use `subtitles-*`, while installed configuration accepts only the fixed repository and immutable `@sha256:` digest. Browser requests cannot supply images or turn this integration on.
+
+The free local worker uses Whisper small/int8 on CPU, two threads, a two-CPU limit and 6GB memory limit. It has no network, runs as the configured non-root UID/GID, has a read-only root filesystem and read-only copies of exactly the API's source mappings. Only the API can install adjacent subtitle files, and it still requires a read-write source. `/opt/reachcommander/subtitles/mailbox` and `/opt/reachcommander/subtitles/models` are isolated from `/opt/reachcommander/data` and authentication. The separate explicit `download-models` operation temporarily stops the offline worker, runs a bounded disposable network-enabled container with only model storage mounted, downloads the pinned English and English-to-Romanian models, restarts the offline worker and checks model readiness. It never mounts the host media sources or authentication data.
+
+Start, stop, restart, source add/remove, installer reconfiguration and image updates maintain an enabled worker. Source and update transactions retain the matching worker overlay for rollback and verify the worker's image identity and health. A missing or invalid worker label rejects an enabled image update before deployment mutation. To deliberately use a release predating this integration, first run `sudo reachcommander subtitles disable`, then select that application version; running an old installer while subtitles remain enabled is unsupported. A failed enable/disable restores its previous deployment; after interruption, use `sudo reachcommander subtitles recover`, then `sudo reachcommander doctor`.
+
+Disable and uninstall retain the model cache and mailbox in `/opt/reachcommander/subtitles`; application-data backup does not copy this potentially large cache. Keep the same runtime UID/GID when refreshing a deployment with retained subtitle storage. Doctor and uninstall validate exact mailbox/model filenames, reject symlinks, hardlinks and nested mounts, and never recursively change permissions on these runtime-written files. Reinstalling reuses retained storage after explicit enable. See the [Ubuntu guide](../docs/deployment/ubuntu.md#optional-local-ai-subtitles) for the supported flow.

@@ -29,3 +29,7 @@ td { overflow: hidden; padding: 0 8px; vertical-align: middle; text-overflow: el
 .selected .muted { color: inherit; opacity: .84; }
 .attr-cell { font-size: 10px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.file-context-menu { display: flex; padding: 4px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface-3); box-shadow: var(--shadow); }
+.file-context-menu button { min-height: 32px; padding: 6px 12px; border: 0; color: var(--text-1); background: transparent; font: 12px var(--font-ui); cursor: pointer; }
+.file-context-menu button:hover, .file-context-menu button:focus { background: var(--selection); }
+.file-context-menu button[aria-disabled="true"] { color: var(--text-4); cursor: not-allowed; }

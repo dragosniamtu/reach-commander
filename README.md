@@ -426,6 +426,14 @@ Permanent deletion never silently replaces Trash. The UI and API require this ex
 
 Back up `/data` for authentication plus durable operation metadata, and back up each writable source's `.reachcommander-trash` when deleted files must remain recoverable. Uninstallers do not remove source-local Trash. Read-only sources may be copied from but cannot be moved, deleted, restored into, or used for MkDir. None of these controls replaces filesystem backups.
 
+## Local AI subtitle generation
+
+Choose **Generate Subtitles** from a video's or folder's context menu or the active-panel toolbar. Select English (the default), Romanian, or both. Folder jobs discover supported videos recursively, show durable per-file progress, support cancellation, and skip unchanged successful videos on rerun. Open **Subtitle jobs** to see results after closing the dialog or refreshing the page.
+
+The primary output is always the video's exact basename plus `.srt`; selecting both languages adds `.ro.srt` for Romanian. Existing associated SRT/ASS/SSA/VTT sidecars are preserved under unique `.bak` names before new files are published. Videos and embedded subtitles are never changed. Installation is journaled with rollback and restart recovery.
+
+This feature is opt-in and uses a separate CPU worker with FFmpeg, faster-whisper and local English-to-Romanian translation. It requires a writable configured source; the worker's media mounts remain read-only. Verified Ubuntu installations can enable it with `sudo reachcommander subtitles enable`, explicitly download free models with `sudo reachcommander subtitles download-models`, and check readiness with `sudo reachcommander subtitles status`. Existing installations need one verified installer refresh to add these host commands. See [setup, model downloads, permissions, usage and limitations](docs/ai-subtitles.md); custom source builds use [the Compose overlay](compose.subtitles.yaml).
+
 ## Subtitle synchronization
 
 Press `Enter` or double-click an MP4, MKV, or AVI file in a filesystem panel to open the blocking **Synchronize subtitles** workspace. ReachCommander automatically loads a same-name SRT from the same directory when present; the subtitle dropdown lists every non-symlink SRT beside that video for immediate selection. SRT is the only subtitle format in this release. Browser-ready H.264/AAC MP4 uses authenticated byte-range playback. MKV, AVI, or an incompatible MP4 is transcoded to temporary HLS by one bounded FFmpeg worker. The UI distinguishes **Waiting for preview worker** from active conversion, and Close remains available to cancel queued or running work.
@@ -551,6 +559,10 @@ GET /api/file-operations
 GET /api/file-operations/{operationId}
 POST /api/file-operations/{operationId}/cancel
 DELETE /api/file-operations/{operationId}
+POST /api/subtitle-jobs
+GET /api/subtitle-jobs
+GET /api/subtitle-jobs/{jobId}
+POST /api/subtitle-jobs/{jobId}/cancel
 POST /api/directories
 POST /api/trash/preview-delete
 POST /api/trash/delete
@@ -593,6 +605,12 @@ Backend:
 
 ```powershell
 dotnet test ReachCommander.slnx -c Release
+```
+
+Local subtitle worker contracts (mocked AI, no model downloads):
+
+```powershell
+python -m unittest discover -s worker/subtitles/tests -v
 ```
 
 Angular:

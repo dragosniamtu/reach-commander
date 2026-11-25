@@ -7,6 +7,8 @@ INSTALLER_SOURCE="$REPOSITORY_ROOT/deploy/install.sh"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
 # shellcheck source=fixtures/subtitle-data.sh
 source "$TEST_DIRECTORY/fixtures/subtitle-data.sh"
+# shellcheck source=fixtures/text-encoding-data.sh
+source "$TEST_DIRECTORY/fixtures/text-encoding-data.sh"
 
 if [[ ! -f "$INSTALLER_SOURCE" ]]; then
   printf 'not ok - deploy/install.sh must exist\n' >&2
@@ -394,6 +396,8 @@ chmod 0600 \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
 create_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data"
+create_text_encoding_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data"
+chmod 0755 "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/text-encodings"
 application_data_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
 
 run_installer $'n\n' "$TEST_ROOT/decline-with-operation-data.out"
@@ -403,7 +407,8 @@ assert_equal \
   "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" \
   "legitimate file-operation data preservation"
 assert_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" || fail 'installer changed subtitle state'
-pass "installer accepts exact durable, subtitle, and media-preview state without mutating it"
+assert_text_encoding_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" || fail 'installer changed text-encoding state'
+pass "installer accepts exact durable, subtitle, text-encoding, and media-preview state without mutating it"
 
 printf 'unexpected\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
@@ -467,6 +472,14 @@ case "$(uname -s)" in
       "600" \
       "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json")" \
       "reconfigured operation status mode"
+    assert_equal \
+      "700" \
+      "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/text-encodings")" \
+      "reconfigured text-encoding parent mode"
+    assert_equal \
+      "700" \
+      "$(stat -c '%a' "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/text-encodings/staging")" \
+      "reconfigured text-encoding staging mode"
     ;;
 esac
 assert_equal "keep one" "$(cat -- "$SOURCE_ONE/canary.txt")" "reconfiguration source canary"

@@ -104,6 +104,15 @@ internal sealed class UnixSourceManagementGateway(
                 "installer_upgrade_required",
                 "Source management requires the latest installer.");
         }
+        catch (SourceManagementUnavailableException)
+        {
+            // Capability discovery is also used by installations without a host
+            // helper. Return its normal disabled state, but probe again next time.
+            return new SourceManagementCapability(
+                false,
+                "unsupported_deployment",
+                "Source management is unavailable on this installation.");
+        }
     }
 
     public async Task<SourceManagementOperation> AddAsync(

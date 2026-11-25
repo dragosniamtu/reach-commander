@@ -33,7 +33,7 @@ chmod 0700 "$INSTALL_WORKDIR"
 trap 'rm -rf -- "$INSTALL_WORKDIR"' EXIT
 cd "$INSTALL_WORKDIR"
 
-REACHCOMMANDER_VERSION=v1.5.0
+REACHCOMMANDER_VERSION=v1.5.1
 REACHCOMMANDER_RELEASE_URL="https://github.com/dragosniamtu/reach-commander/releases/download/${REACHCOMMANDER_VERSION}"
 
 curl --fail --location --output reachcommander-installer.tar.gz \
@@ -356,6 +356,22 @@ Run `sudo reachcommander status` to see the saved channel and exact running imag
 The installer also deploys the root-owned `reachcommander-updater.service`. ReachCommander's backend checks the fixed `dragosniamtu/reach-commander` GitHub repository and matching GHCR package at startup and every six hours. After an unavailable check, the toolbar control remains enabled so an administrator can manually retry discovery; this sends only the same target-free Check request. When the trusted helper reports a different immutable digest, the control changes to **Update available** and a second selection opens the existing confirmation. Apply always requires administrator confirmation and is refused while durable file or archive operations are active. Exact version pins remain pinned and do not follow new releases.
 
 The application is never given Docker control. Its container mounts the restricted Unix socket directory `/run/reachcommander-updater` read-only and never mounts `/var/run/docker.sock`. Browser and API requests contain no channel, image, digest, executable, arguments, or target version. The root helper owns discovery, backup, Compose activation, health validation, rollback, and its durable result journal.
+
+Starting with v1.5.1, updater restarts preserve this directory so a running container continues to see the replacement socket. If the helper starts after the application, a later update check reconnects automatically. Existing installations need one verified installer refresh to update the systemd unit; an image-only update cannot change it.
+
+If an older installation shows **Unknown** while `reachcommander doctor` reports the host socket ready, check its visibility inside the application:
+
+```bash
+sudo docker exec reachcommander ls -ld /run/reachcommander-updater /run/reachcommander-updater/updater.sock
+```
+
+A missing socket and a directory link count of zero indicate that the container holds a deleted directory from an earlier helper restart. Once active file operations finish, refresh that mount with the existing deployment configuration:
+
+```bash
+sudo docker compose --project-directory /opt/reachcommander up -d --force-recreate reachcommander
+```
+
+Reload the page and retry the update check. Complete the verified installer refresh to prevent recurrence. The v1.5.1 installer also recognizes and preserves the application's `text-encodings/staging` records, which older installers incorrectly reported as unsafe data.
 
 The protocol-v3 helper in the current installer bundle adds a bounded, sanitized trace to the fixed logical stages for downloading the verified image, installing deployment state, restarting ReachCommander, verifying the selected container, checking health, handling timeouts, and recovering the previous version. Open **Technical details** to see elapsed time, last confirmed host activity, and ordered safe events. The section opens automatically after 60 seconds without a confirmed event or when a terminal result needs attention. **Download diagnostics** uses the protocol-v4 diagnostic action to save a five-entry ZIP on the administrator's device. The ZIP is generated in memory, retained nowhere on the server, and uploaded nowhere automatically. It contains fixed status/reason codes and the public trace only; raw host logs, credentials, tokens, source names or paths, filenames, addresses, hostnames, environment values, commands and output, digests, container identifiers, and file contents are excluded. Protocol-v1 through v3 status and apply requests remain compatible.
 

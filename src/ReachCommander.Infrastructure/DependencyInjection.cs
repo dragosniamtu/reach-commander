@@ -234,9 +234,9 @@ public static class DependencyInjection
         var systemUpdateOptions = configuration
             .GetSection(SystemUpdateOptions.SectionName)
             .Get<SystemUpdateOptions>() ?? new SystemUpdateOptions();
-        if (OperatingSystem.IsLinux() &&
-            systemUpdateOptions.Enabled &&
-            File.Exists(systemUpdateOptions.SocketPath))
+        // Socket availability is transient. The transport checks it on each request
+        // so a helper that starts later can recover without restarting the application.
+        if (OperatingSystem.IsLinux() && systemUpdateOptions.Enabled)
         {
             services.AddSingleton<ISystemUpdaterTransport, UnixSystemUpdaterTransport>();
             services.AddSingleton<ISystemUpdaterGateway, SystemUpdaterGateway>();

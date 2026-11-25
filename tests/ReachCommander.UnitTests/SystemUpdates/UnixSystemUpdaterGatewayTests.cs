@@ -1,14 +1,121 @@
 using System.Text.Json;
 using System.Net.Sockets;
 using System.Text;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using ReachCommander.Application.SourceManagement;
 using ReachCommander.Application.SystemUpdates;
+using ReachCommander.Infrastructure;
 using ReachCommander.Infrastructure.SystemUpdates;
 
 namespace ReachCommander.UnitTests.SystemUpdates;
 
 public sealed class UnixSystemUpdaterGatewayTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Configured_gateway_recovers_when_helper_starts_after_application_registration(
+        bool sourceManagement)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var socketPath = Path.Combine(Path.GetTempPath(), $"rc-late-{Guid.NewGuid():N}.sock");
+        using var provider = CreateConfiguredProvider(socketPath, enabled: true);
+        var updates = provider.GetRequiredService<ISystemUpdaterGateway>();
+        var sources = provider.GetRequiredService<ISourceManagementGateway>();
+        async Task<bool> CheckSupportedAsync(CancellationToken token) => sourceManagement
+            ? (await sources.GetStatusAsync(token)).Supported
+            : (await updates.CheckAsync(token)).Supported;
+        try
+        {
+            Assert.False(await CheckSupportedAsync(default));
+        }
+        catch (SystemUpdaterUnavailableException)
+        {
+            // A missing helper is transient; the same gateway must recover below.
+        }
+
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task? server = null;
+        try
+        {
+            listener.Bind(new UnixDomainSocketEndPoint(socketPath));
+            listener.Listen(1);
+            server = Task.Run(async () =>
+            {
+                using var connection = await listener.AcceptAsync(timeout.Token);
+                using var stream = new NetworkStream(connection);
+                using var reader = new StreamReader(stream, leaveOpen: true);
+                using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+                var request = await reader.ReadLineAsync(timeout.Token);
+                using var document = JsonDocument.Parse(Assert.IsType<string>(request));
+                Assert.Equal(sourceManagement ? "status" : "check",
+                    document.RootElement.GetProperty("action").GetString());
+                var response = sourceManagement
+                    ? """{"protocolVersion":6,"requestId":"11111111-1111-1111-1111-111111111111","action":"status","payload":{"supported":true,"reasonCode":"supported","detail":"Source management is available."}}"""
+                    : Response("available");
+                await writer.WriteLineAsync(response.AsMemory(), timeout.Token);
+                await writer.FlushAsync(timeout.Token);
+            }, timeout.Token);
+
+            Assert.True(await CheckSupportedAsync(timeout.Token));
+            await server;
+        }
+        finally
+        {
+            await timeout.CancelAsync();
+            if (server is not null)
+            {
+                try { await server; }
+                catch (OperationCanceledException) { }
+            }
+
+            listener.Close();
+            File.Delete(socketPath);
+        }
+    }
+
+    [Fact]
+    public async Task Explicitly_disabled_updates_remain_unavailable()
+    {
+        var socketPath = Path.Combine(Path.GetTempPath(), $"rc-disabled-{Guid.NewGuid():N}.sock");
+        // Even an existing endpoint must not override the administrator's setting.
+        await File.WriteAllTextAsync(socketPath, string.Empty);
+        try
+        {
+            using var provider = CreateConfiguredProvider(socketPath, enabled: false);
+
+            var result = await provider.GetRequiredService<ISystemUpdaterGateway>().CheckAsync(default);
+
+            Assert.False(result.Supported);
+        }
+        finally
+        {
+            File.Delete(socketPath);
+        }
+    }
+
+    private static ServiceProvider CreateConfiguredProvider(string socketPath, bool enabled)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["SystemUpdates:Enabled"] = enabled.ToString(),
+            ["SystemUpdates:SocketPath"] = socketPath,
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddReachCommanderInfrastructure(configuration);
+        services.AddSingleton<ISystemUpdateRequestIdGenerator, FixedRequestId>();
+        services.AddSingleton<ISourceManagementRequestIdGenerator, FixedRequestId>();
+        return services.BuildServiceProvider();
+    }
+
     [Fact]
     public async Task Gateway_sends_only_version_id_and_fixed_action()
     {
@@ -500,7 +607,7 @@ public sealed class UnixSystemUpdaterGatewayTests
         _ => "update_failed",
     };
 
-    private sealed class FixedRequestId : ISystemUpdateRequestIdGenerator
+    private sealed class FixedRequestId : ISystemUpdateRequestIdGenerator, ISourceManagementRequestIdGenerator
     {
         public Guid NewId() => Guid.Parse("11111111-1111-1111-1111-111111111111");
     }

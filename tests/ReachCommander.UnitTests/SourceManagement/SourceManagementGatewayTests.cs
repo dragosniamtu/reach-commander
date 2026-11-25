@@ -280,6 +280,51 @@ public sealed class SourceManagementGatewayTests
         Assert.DoesNotContain("private", sourceException.PublicDetail, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Capability_is_unavailable_until_the_helper_recovers()
+    {
+        var transport = new RecoveringTransport();
+        var gateway = new UnixSourceManagementGateway(
+            transport,
+            new FixedRequestIdGenerator(RequestId));
+
+        var unavailable = await gateway.GetStatusAsync(default);
+
+        Assert.False(unavailable.Supported);
+        Assert.Equal("unsupported_deployment", unavailable.ReasonCode);
+        Assert.Equal("Source management is unavailable on this installation.", unavailable.Detail);
+
+        transport.Available = true;
+        var recovered = await gateway.GetStatusAsync(default);
+
+        Assert.True(recovered.Supported);
+        Assert.Equal("supported", recovered.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Operation_lookup_still_fails_when_the_helper_is_unavailable()
+    {
+        var gateway = new UnixSourceManagementGateway(
+            new FailingTransport(requestMayHaveBeenAccepted: false),
+            new FixedRequestIdGenerator(RequestId));
+
+        await Assert.ThrowsAsync<SourceManagementUnavailableException>(() =>
+            gateway.GetOperationAsync(OperationId, default));
+    }
+
+    private sealed class RecoveringTransport : ISystemUpdaterTransport
+    {
+        public bool Available { get; set; }
+
+        public Task<string> ExchangeAsync(string request, CancellationToken cancellationToken) =>
+            Available
+                ? Task.FromResult(CapabilityResponse(true, "supported"))
+                : throw new SystemUpdaterUnavailableException("private transport failure");
+
+        public Task<string> ExchangeAsync(string request, int maximumResponseBytes,
+            CancellationToken cancellationToken) => ExchangeAsync(request, cancellationToken);
+    }
+
     private static UnixSourceManagementGateway Gateway(string response) => new(
         new StubTransport(response),
         new FixedRequestIdGenerator(RequestId));

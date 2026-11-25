@@ -10,11 +10,11 @@ create_subtitle_fixture() {
   local data_root="$1" relative
   mkdir -p -- "$data_root/subtitle-generation/jobs" \
     "$data_root/subtitle-generation/receipts" "$data_root/subtitle-generation/transactions" || return 1
-  chmod 0700 -- "$data_root/subtitle-generation" "$data_root/subtitle-generation/jobs" \
+  chmod 0700 "$data_root/subtitle-generation" "$data_root/subtitle-generation/jobs" \
     "$data_root/subtitle-generation/receipts" "$data_root/subtitle-generation/transactions" || return 1
   for relative in "${SUBTITLE_FIXTURE_FILES[@]}"; do
     printf '{"subtitleStateCanary":true}\n' >"$data_root/$relative"
-    chmod 0600 -- "$data_root/$relative" || return 1
+    chmod 0600 "$data_root/$relative" || return 1
   done
 }
 

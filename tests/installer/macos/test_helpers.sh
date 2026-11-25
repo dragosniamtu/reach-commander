@@ -116,6 +116,22 @@ assert_fails "nested sources must fail" \
   rc_add_source nested Nested "$SOURCE_ONE/Nested" ro
 pass "duplicate and nested sources are rejected"
 
+# Exercise the shared fixture with BSD chmod's operand behavior on every host.
+(
+  # shellcheck source=../fixtures/subtitle-data.sh
+  source "$TEST_DIRECTORY/../fixtures/subtitle-data.sh"
+  chmod() {
+    local argument
+    for argument in "$@"; do
+      [[ "$argument" != '--' ]] || { printf 'chmod: --: No such file or directory\n' >&2; return 1; }
+    done
+    command chmod "$@"
+  }
+  create_subtitle_fixture "$TEST_ROOT/subtitle fixture/data" &&
+    assert_subtitle_fixture "$TEST_ROOT/subtitle fixture/data"
+) || fail "shared subtitle fixture must support BSD chmod"
+pass "shared subtitle fixture uses portable chmod operands"
+
 if ! command -v plutil >/dev/null 2>&1; then
   skip "typed JSON preserves source policy and pane defaults" "macOS plutil is unavailable"
   skip "broad source masks installer-owned state" "macOS plutil is unavailable"

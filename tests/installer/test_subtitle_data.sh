@@ -34,6 +34,7 @@ load_function "$REPOSITORY_ROOT/deploy/install.sh" validate_application_data_tre
 load_function "$REPOSITORY_ROOT/deploy/install.sh" prepare_application_data
 load_function "$REPOSITORY_ROOT/deploy/reachcommander" application_data_tree_is_safe
 load_function "$REPOSITORY_ROOT/deploy/reachcommander" validate_uninstall_tree
+load_function "$REPOSITORY_ROOT/deploy/lib/common.sh" rc_subtitles
 load_function "$REPOSITORY_ROOT/deploy/reachcommander" backup_application_file
 load_function "$REPOSITORY_ROOT/deploy/reachcommander" backup_application_data
 load_function "$REPOSITORY_ROOT/deploy/reachcommander" remove_application_data

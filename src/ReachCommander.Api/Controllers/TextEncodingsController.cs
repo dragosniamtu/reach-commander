@@ -34,7 +34,7 @@ public sealed class TextEncodingsController(ITextEncodingService service) : Cont
     }
 
     [HttpGet("operations/{operationId:guid}")]
-    [EnableRateLimiting(AuthenticationConfiguration.TextEncodingPolicy)]
+    [EnableRateLimiting(AuthenticationConfiguration.TextEncodingStatusPolicy)]
     [ProducesResponseType<TextEncodingOperationDto>(StatusCodes.Status200OK)]
     public async Task<ActionResult<TextEncodingOperationDto>> GetOperation(
         Guid operationId,

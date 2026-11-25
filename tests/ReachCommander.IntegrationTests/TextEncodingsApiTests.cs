@@ -144,6 +144,55 @@ public sealed class TextEncodingsApiTests(ReachCommanderApiFactory factory)
     }
 
     [Fact]
+    public async Task Status_polling_does_not_exhaust_the_conversion_command_budget()
+    {
+        await using var isolatedFactory = new ReachCommanderApiFactory();
+        var directory = CreateCaseDirectory(isolatedFactory);
+        File.WriteAllText(Path.Combine(directory.PhysicalPath, "episode.srt"), "subtitle");
+        using var client = isolatedFactory.CreateClient();
+        var plan = await PreviewSingleAsync(client, directory.LogicalPath, "episode.srt");
+        using var start = await client.PostAsync($"/api/text-encodings/{plan.PlanId}/execute", null);
+        Assert.Equal(HttpStatusCode.Accepted, start.StatusCode);
+        var operation = (await start.Content.ReadFromJsonAsync<OperationResponse>())!;
+
+        // The UI polls twice per second. Even a short conversion can exceed
+        // twenty status reads, which must not consume preview/execute permits.
+        for (var poll = 0; poll < 30; poll++)
+        {
+            using var status = await client.GetAsync($"/api/text-encodings/operations/{operation.OperationId}");
+            Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        }
+
+        // Preview and execute above used two command permits.
+        for (var command = 2; command < 21; command++)
+        {
+            using var preview = await client.PostAsJsonAsync("/api/text-encodings/preview", new
+            {
+                sourceId = "media",
+                filePaths = new[] { $"{directory.LogicalPath}/episode.srt" },
+                sourceEncoding = "auto",
+                outputEncoding = "utf8",
+            });
+            Assert.Equal(command < 20 ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests,
+                preview.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Status_polling_retains_a_bounded_per_ip_budget()
+    {
+        await using var isolatedFactory = new ReachCommanderApiFactory();
+        using var client = isolatedFactory.CreateClient();
+        var operationId = Guid.NewGuid();
+        for (var poll = 0; poll <= 300; poll++)
+        {
+            using var status = await client.GetAsync($"/api/text-encodings/operations/{operationId}");
+            Assert.Equal(poll < 300 ? HttpStatusCode.NotFound : HttpStatusCode.TooManyRequests,
+                status.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Text_encoding_policy_limits_requests_per_ip()
     {
         await using var isolatedFactory = new ReachCommanderApiFactory();
@@ -195,7 +244,8 @@ public sealed class TextEncodingsApiTests(ReachCommanderApiFactory factory)
         var current = operation;
         while (current.State is "queued" or "running" or "cancelRequested")
         {
-            await Task.Delay(25, timeout.Token);
+            // Match the browser's polling cadence instead of hammering the API.
+            await Task.Delay(500, timeout.Token);
             current = (await client.GetFromJsonAsync<OperationResponse>(
                 $"/api/text-encodings/operations/{current.OperationId}",
                 timeout.Token))!;

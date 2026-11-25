@@ -324,6 +324,68 @@ class RendererTestCase(unittest.TestCase):
         renderer = self.require_renderer()
         self.assertEqual("'Media''s #1'", renderer.yaml_scalar("Media's #1"))
 
+    def test_render_installed_preserves_saved_settings_with_new_template(self) -> None:
+        renderer = self.require_renderer()
+        payload = self.valid_payload()
+        payload.update(port=8999, uid=1234, gid=2345, cpuLimit="1.25")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "installed"
+            staged = root / "staged"
+            renderer.render_deployment(self.load_payload(payload), TEMPLATE_PATH, installed)
+            (installed / "compose.yaml").write_text("old compose template\n")
+            result = subprocess.run(
+                [sys.executable, str(MODULE_PATH), "render-installed",
+                 "--root", str(installed), "--template", str(TEMPLATE_PATH),
+                 "--output", str(staged)], capture_output=True, text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            for relative in (".env", "config/sources.json", "state/source-mounts.json"):
+                self.assertEqual((installed / relative).read_bytes(),
+                                 (staged / relative).read_bytes())
+            self.assertIn("Authentication__AllowInsecureHttp", (staged / "compose.yaml").read_text())
+            self.assertEqual("old compose template\n", (installed / "compose.yaml").read_text())
+
+    def test_render_installed_rejects_inconsistent_saved_sources_before_writes(self) -> None:
+        renderer = self.require_renderer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "installed"
+            staged = root / "staged"
+            renderer.render_deployment(renderer.load_request(FIXTURE_PATH), TEMPLATE_PATH, installed)
+            mounts_path = installed / "state/source-mounts.json"
+            mounts = json.loads(mounts_path.read_text())
+            mounts["sources"][0]["access"] = "rw"
+            mounts_path.write_text(json.dumps(mounts))
+            result = subprocess.run(
+                [sys.executable, str(MODULE_PATH), "render-installed",
+                 "--root", str(installed), "--template", str(TEMPLATE_PATH),
+                 "--output", str(staged)], capture_output=True, text=True,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("inconsistent metadata", result.stderr)
+            self.assertFalse(staged.exists())
+
+    def test_render_installed_rejects_a_source_that_now_resolves_elsewhere(self) -> None:
+        renderer = self.require_renderer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "installed"
+            staged = root / "staged"
+            renderer.render_deployment(renderer.load_request(FIXTURE_PATH), TEMPLATE_PATH, installed)
+            realpath = renderer.os.path.realpath
+            def redirected(value):
+                return "/srv/redirected" if value == "/srv/Family Media" else realpath(value)
+            with mock.patch.object(renderer.os.path, "realpath", side_effect=redirected):
+                with mock.patch.object(renderer.os, "write") as stderr:
+                    result = renderer.main([
+                        "render-installed", "--root", str(installed),
+                        "--template", str(TEMPLATE_PATH), "--output", str(staged),
+                    ])
+            self.assertEqual(2, result)
+            self.assertIn(b"saved path no longer resolves to itself", stderr.call_args.args[1])
+            self.assertFalse(staged.exists())
+
     def test_set_image_changes_only_the_validated_image_key(self) -> None:
         renderer = self.require_renderer()
         with tempfile.TemporaryDirectory() as directory:

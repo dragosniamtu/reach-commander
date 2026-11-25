@@ -118,6 +118,7 @@ assert_equal() {
 run_installer() {
   local input="$1"
   local output="$2"
+  shift 2
   if [[
     ! -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" &&
     ! -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml" &&
@@ -127,7 +128,7 @@ run_installer() {
     rm -rf -- "$REACHCOMMANDER_TEST_UPDATER_RUNTIME_DIRECTORY"
   fi
   set +e
-  printf '%s\n' "$input" | bash "$BUNDLE/install.sh" >"$output" 2>&1
+  printf '%s\n' "$input" | bash "$BUNDLE/install.sh" "$@" >"$output" 2>&1
   last_status=$?
   set -e
 }
@@ -191,6 +192,15 @@ run_installer '' "$TEST_ROOT/invalid-bundle-version.out"
 [[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail "invalid bundle VERSION wrote deployment"
 printf 'v1.4.0\n' >"$BUNDLE/VERSION"
 pass "installer requires one stable semantic bundle VERSION"
+
+run_installer '' "$TEST_ROOT/keep-config-fresh.out" --keep-config
+(( last_status != 0 )) || fail 'keep-config must reject a fresh installation'
+grep -q 'requires a complete existing installation' "$TEST_ROOT/keep-config-fresh.out" || fail 'missing-installation guidance missing'
+[[ ! -e "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" ]] || fail 'keep-config created a fresh installation'
+run_installer '' "$TEST_ROOT/unknown-option.out" --keep-confg
+(( last_status != 0 )) || fail 'unknown installer options must fail'
+grep -q 'Usage: install.sh' "$TEST_ROOT/unknown-option.out" || fail 'unknown option usage missing'
+pass 'keep-config requires an existing installation and unknown options are rejected'
 
 collision_input="$(printf '%s\n' \
   '' '' '' '' \
@@ -441,6 +451,76 @@ run_installer $'n\n' "$TEST_ROOT/decline.out"
 assert_equal "$deployment_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT" -type f ! -name command.lock -print0 | sort -z | xargs -0 sha256sum)" "declined deployment"
 assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" "declined command"
 pass "existing deployment is never overwritten without confirmation"
+
+# Model an image-only upgrade: the host command and subtitle helper are still old.
+cp -- "$REPOSITORY_ROOT/deploy/reachcommander" "$BUNDLE/reachcommander"
+rm -f -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/subtitle_management.py" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/compose.subtitles.yaml" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/lib/compose.updater.yaml" \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/subtitles-enabled"
+cp -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" "$TEST_ROOT/original.env"
+sed -i 's/REACHCOMMANDER_PORT=8092/REACHCOMMANDER_PORT=8999/; s/REACHCOMMANDER_UID=1000/REACHCOMMANDER_UID=1234/; s/REACHCOMMANDER_GID=1000/REACHCOMMANDER_GID=2345/; s/REACHCOMMANDER_CPU_LIMIT=3.0/REACHCOMMANDER_CPU_LIMIT=1.25/' \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
+saved_settings="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json" "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-mounts.json")"
+: >"$FAKE_DOCKER_LOG"
+unset SUDO_UID SUDO_GID
+export REACHCOMMANDER_TEST_LOGICAL_CPUS=invalid
+run_installer '' "$TEST_ROOT/keep-config.out" --keep-config
+export SUDO_UID=1000 SUDO_GID=1000 REACHCOMMANDER_TEST_LOGICAL_CPUS=8
+if (( last_status != 0 )); then cat -- "$TEST_ROOT/keep-config.out" >&2; fi
+assert_equal "0" "$last_status" "keep-config migration status"
+cmp -s "$BUNDLE/reachcommander" "$REACHCOMMANDER_TEST_COMMAND_PATH" || fail 'keep-config did not upgrade the old management command'
+[[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/bin/subtitle_management.py" ]] || fail 'keep-config did not install subtitle support'
+assert_equal "$saved_settings" "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" "$REACHCOMMANDER_TEST_INSTALL_ROOT/config/sources.json" "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-mounts.json")" 'preserved custom settings'
+assert_equal "$application_data_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" 'keep-config application data'
+grep -q 'RuntimeDirectoryPreserve=yes' "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH" || fail 'socket preservation fix missing'
+tr '\0' '\n' <"$FAKE_DOCKER_LOG" | grep -qx -- '--force-recreate' || fail 'keep-config must refresh the socket bind mount'
+! grep -q 'Reconfigure it?' "$TEST_ROOT/keep-config.out" || fail 'keep-config prompted for reconfiguration'
+pass 'keep-config upgrades legacy host tools noninteractively and preserves custom settings and application data'
+
+deployment_before="$(active_deployment_fingerprint)"
+command_before="$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")"
+unit_before="$(sha256sum "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")"
+printf 'unhealthy\nhealthy\n' >"$TEST_ROOT/keep-health-sequence"
+: >"$FAKE_DOCKER_LOG"
+export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/keep-health-sequence"
+run_installer '' "$TEST_ROOT/keep-config-unhealthy.out" --keep-config
+unset FAKE_DOCKER_HEALTH_FILE
+assert_equal '2' "$last_status" 'keep-config unhealthy status'
+assert_equal "$deployment_before" "$(active_deployment_fingerprint)" 'keep-config rollback deployment'
+assert_equal "$command_before" "$(sha256sum "$REACHCOMMANDER_TEST_COMMAND_PATH")" 'keep-config rollback command'
+assert_equal "$unit_before" "$(sha256sum "$REACHCOMMANDER_TEST_SYSTEMD_UNIT_PATH")" 'keep-config rollback unit'
+assert_equal '2' "$(tr '\0' '\n' <"$FAKE_DOCKER_LOG" | grep -xc -- '--force-recreate')" 'upgrade and rollback both remount updater socket'
+pass 'keep-config restores the previous deployment when startup fails'
+
+cp -- "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-mounts.json" "$TEST_ROOT/saved-mounts.json"
+printf '{"sources":[]}\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-mounts.json"
+deployment_before="$(active_deployment_fingerprint)"
+run_installer '' "$TEST_ROOT/keep-config-invalid.out" --keep-config
+(( last_status != 0 )) || fail 'keep-config must reject inconsistent saved settings'
+assert_equal "$deployment_before" "$(active_deployment_fingerprint)" 'invalid keep-config leaves deployment untouched'
+cp -- "$TEST_ROOT/saved-mounts.json" "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/source-mounts.json"
+pass 'keep-config rejects inconsistent configuration without modifying deployment'
+
+export FAKE_SETPRIV_DENY_PREFIX="$SOURCE_ONE"
+run_installer '' "$TEST_ROOT/keep-config-inaccessible.out" --keep-config
+unset FAKE_SETPRIV_DENY_PREFIX
+(( last_status != 0 )) || fail 'keep-config must recheck source access'
+pass 'keep-config revalidates access to saved sources'
+
+sed -i 's/REACHCOMMANDER_ACCESS_MODE=secure-https/REACHCOMMANDER_ACCESS_MODE=trusted-lan-http/; s/REACHCOMMANDER_BIND_ADDRESS=127.0.0.1/REACHCOMMANDER_BIND_ADDRESS=0.0.0.0/; s/REACHCOMMANDER_ALLOW_INSECURE_HTTP=false/REACHCOMMANDER_ALLOW_INSECURE_HTTP=true/' \
+  "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
+printf 'edge\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel"
+export FAKE_DOCKER_VERSION_LABEL=v1.4.1-beta.1
+saved_settings="$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel")"
+run_installer '' "$TEST_ROOT/keep-config-lan-edge.out" --keep-config
+assert_equal '0' "$last_status" 'keep-config LAN edge status'
+assert_equal "$saved_settings" "$(sha256sum "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel")" 'preserved LAN settings and channel'
+grep -q 'http://<server-lan-ip>:8999' "$TEST_ROOT/keep-config-lan-edge.out" || fail 'saved port missing from completion URL'
+printf 'stable\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/channel"
+export FAKE_DOCKER_VERSION_LABEL=v1.4.0
+pass 'keep-config retains LAN mode, port and selected update channel'
+cp -- "$TEST_ROOT/original.env" "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
 
 reconfigure_success_input=$'y\n'"$(source_prompt_input 'Renamed Media' 'RO' 'Renamed Movies' 'RW' 'renamed-media' 'renamed-movies')"
 case "$(uname -s)" in
@@ -730,6 +810,44 @@ grep -q '^REACHCOMMANDER_ACCESS_MODE=secure-https$' "$REACHCOMMANDER_TEST_INSTAL
 grep -q '^REACHCOMMANDER_ALLOW_INSECURE_HTTP=false$' "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" || fail "rollback did not restore secure cookie policy"
 unset FAKE_DOCKER_HEALTH_FILE
 pass "unhealthy LAN reconfiguration restores the secure deployment and durable state"
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    skip 'keep-config retains enabled subtitle models and rolls back an unhealthy worker' 'Python cannot execute shell Docker fixtures on Windows'
+    ;;
+  *)
+    # Run the real Python lifecycle manager with distinct app/worker image identities.
+    sed -i "s/REACHCOMMANDER_UID=1000/REACHCOMMANDER_UID=$(id -u)/; s/REACHCOMMANDER_GID=1000/REACHCOMMANDER_GID=$(id -g)/" \
+      "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env"
+    FAKE_DOCKER_WORKER_DIGEST="ghcr.io/dragosniamtu/reach-commander@sha256:$(printf 'b%.0s' {1..64})"
+    export FAKE_DOCKER_WORKER_DIGEST
+    printf 'true\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/state/subtitles-enabled"
+    mkdir -p "$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles/models/whisper-small" \
+      "$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles/mailbox/requests" \
+      "$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles/mailbox/results"
+    printf 'retained model\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles/models/whisper-small/model.bin"
+    printf 'retained receipt\n' >"$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles/mailbox/results/0123456789abcdef0123456789abcdef.json"
+    python3 "$BUNDLE/subtitle_management.py" sync --root "$REACHCOMMANDER_TEST_INSTALL_ROOT"
+    subtitle_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles" -type f -print0 | sort -z | xargs -0 sha256sum)"
+    run_installer '' "$TEST_ROOT/keep-config-enabled.out" --keep-config
+    if (( last_status != 0 )); then cat -- "$TEST_ROOT/keep-config-enabled.out" >&2; fi
+    assert_equal '0' "$last_status" 'enabled subtitles keep-config status'
+    assert_equal 'true' "$(cat "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/subtitles-enabled")" 'enabled state retained'
+    grep -Fq "$FAKE_DOCKER_WORKER_DIGEST" "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.override.yaml" || fail 'pinned worker missing'
+    assert_equal "$subtitle_before" "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/subtitles" -type f -print0 | sort -z | xargs -0 sha256sum)" 'models and mailbox retained'
+    deployment_before="$(active_deployment_fingerprint)"
+    printf 'healthy\nunhealthy\nhealthy\nhealthy\n' >"$TEST_ROOT/worker-health-sequence"
+    export FAKE_DOCKER_HEALTH_FILE="$TEST_ROOT/worker-health-sequence"
+    : >"$FAKE_DOCKER_LOG"
+    run_installer '' "$TEST_ROOT/keep-config-worker-failure.out" --keep-config
+    unset FAKE_DOCKER_HEALTH_FILE
+    assert_equal '2' "$last_status" 'unhealthy worker keep-config status'
+    assert_equal "$deployment_before" "$(active_deployment_fingerprint)" 'enabled worker rollback preserves deployment, overlay, models and mailbox'
+    assert_equal '2' "$(tr '\0' '\n' <"$FAKE_DOCKER_LOG" | grep -xc 'subtitle-worker')" 'upgrade and rollback recreate the enabled worker'
+    unset FAKE_DOCKER_WORKER_DIGEST
+    pass 'keep-config retains enabled subtitle models and rolls back an unhealthy worker'
+    ;;
+esac
 
 rm -rf -- "$REACHCOMMANDER_TEST_INSTALL_ROOT" "$REACHCOMMANDER_TEST_COMMAND_PATH"
 mkdir -p "$(dirname -- "$REACHCOMMANDER_TEST_COMMAND_PATH")"

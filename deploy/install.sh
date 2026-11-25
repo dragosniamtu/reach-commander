@@ -33,6 +33,21 @@ UPDATER_SOCKET_PATH=''
 ACCESS_MODE=''
 BIND_ADDRESS=''
 CPU_LIMIT=''
+KEEP_CONFIG=false
+
+case "$#:${1:-}" in
+  0:) ;;
+  1:--keep-config) KEEP_CONFIG=true ;;
+  1:--help | 1:-h)
+    printf 'Usage: install.sh [--keep-config]\n'
+    printf '  --keep-config  Upgrade an existing installation using its saved settings.\n'
+    exit 0
+    ;;
+  *)
+    printf 'Usage: install.sh [--keep-config]\n' >&2
+    exit 1
+    ;;
+esac
 
 if [[ ! -f "$COMMON_LIBRARY" ]]; then
   printf 'ReachCommander: installer bundle is missing lib/common.sh\n' >&2
@@ -857,7 +872,7 @@ rollback_reconfiguration_transaction() {
     return 1
   fi
   if [[ "$restart_previous" == 'true' ]]; then
-    if ! rc_compose up -d reachcommander || ! rc_wait_healthy reachcommander 60; then
+    if ! rc_compose up -d --force-recreate reachcommander || ! rc_wait_healthy reachcommander 60; then
       rc_die 'reconfiguration rollback could not restore the previous healthy service'
       return 1
     fi
@@ -979,7 +994,6 @@ trap 'handle_install_signal 130' INT
 trap 'handle_install_signal 143' TERM
 
 preflight
-detect_cpu_limit
 rc_init_paths
 init_updater_paths
 rc_assert_safe_install_root
@@ -995,10 +1009,24 @@ verify_docker_compose
 
 if [[ -f "$RC_INSTALL_ROOT/.env" || -f "$RC_INSTALL_ROOT/compose.yaml" ]]; then
   HAD_EXISTING=true
-  prompt_value 'A ReachCommander deployment exists. Reconfigure it? (y/N)' 'n'
-  if [[ ! "$REPLY_VALUE" =~ ^[Yy]$ ]]; then
-    printf 'ReachCommander deployment left unchanged.\n'
-    exit 0
+  if [[ "$KEEP_CONFIG" == 'false' ]]; then
+    prompt_value 'A ReachCommander deployment exists. Reconfigure it? (y/N)' 'n'
+    if [[ ! "$REPLY_VALUE" =~ ^[Yy]$ ]]; then
+      printf 'ReachCommander deployment left unchanged.\n'
+      exit 0
+    fi
+  fi
+fi
+if [[ "$KEEP_CONFIG" == 'true' ]]; then
+  for required_file in "${LEGACY_DEPLOYMENT_FILES[@]}"; do
+    if [[ ! -f "$RC_INSTALL_ROOT/$required_file" || -L "$RC_INSTALL_ROOT/$required_file" ]]; then
+      rc_die '--keep-config requires a complete existing installation'
+      exit 1
+    fi
+  done
+  if [[ ! -f "$RC_COMMAND_PATH" || -L "$RC_COMMAND_PATH" ]]; then
+    rc_die '--keep-config requires the installed management command'
+    exit 1
   fi
 fi
 INSTALL_CHANNEL='stable'
@@ -1023,63 +1051,66 @@ if [[ "$HAD_EXISTING" == 'false' && -e "$UPDATER_UNIT_PATH" ]]; then
   exit 1
 fi
 
-invoking_ids="$(rc_invoking_ids)"
-default_uid="${invoking_ids%%:*}"
-default_gid="${invoking_ids##*:}"
+if [[ "$KEEP_CONFIG" == 'false' ]]; then
+  detect_cpu_limit
+  invoking_ids="$(rc_invoking_ids)"
+  default_uid="${invoking_ids%%:*}"
+  default_gid="${invoking_ids##*:}"
 
-printf 'Network access mode:\n'
-printf '  1. Secure HTTPS reverse proxy (recommended)\n'
-printf '  2. Direct HTTP on trusted LAN\n'
-prompt_value 'Select network access mode' '1'
-case "$REPLY_VALUE" in
-  1)
-    ACCESS_MODE='secure-https'
-    BIND_ADDRESS='127.0.0.1'
-    ;;
-  2)
-    ACCESS_MODE='trusted-lan-http'
-    BIND_ADDRESS='0.0.0.0'
-    printf 'WARNING: trusted LAN HTTP listens on every host interface.\n' >&2
-    printf 'Credentials, cookies, filenames, and file contents are not encrypted in transit.\n' >&2
-    printf 'Do not expose this port through router forwarding or a public interface.\n' >&2
-    ;;
-  *)
-    rc_die 'network access mode must be 1 or 2'
-    exit 1
-    ;;
-esac
-prompt_value 'Host port' '8092'
-PORT="$REPLY_VALUE"
-rc_validate_port "$PORT"
-prompt_value 'Container runtime UID' "$default_uid"
-RUNTIME_UID="$REPLY_VALUE"
-validate_runtime_id "$RUNTIME_UID" 'runtime UID'
-prompt_value 'Container runtime GID' "$default_gid"
-RUNTIME_GID="$REPLY_VALUE"
-validate_runtime_id "$RUNTIME_GID" 'runtime GID'
+  printf 'Network access mode:\n'
+  printf '  1. Secure HTTPS reverse proxy (recommended)\n'
+  printf '  2. Direct HTTP on trusted LAN\n'
+  prompt_value 'Select network access mode' '1'
+  case "$REPLY_VALUE" in
+    1)
+      ACCESS_MODE='secure-https'
+      BIND_ADDRESS='127.0.0.1'
+      ;;
+    2)
+      ACCESS_MODE='trusted-lan-http'
+      BIND_ADDRESS='0.0.0.0'
+      printf 'WARNING: trusted LAN HTTP listens on every host interface.\n' >&2
+      printf 'Credentials, cookies, filenames, and file contents are not encrypted in transit.\n' >&2
+      printf 'Do not expose this port through router forwarding or a public interface.\n' >&2
+      ;;
+    *)
+      rc_die 'network access mode must be 1 or 2'
+      exit 1
+      ;;
+  esac
+  prompt_value 'Host port' '8092'
+  PORT="$REPLY_VALUE"
+  rc_validate_port "$PORT"
+  prompt_value 'Container runtime UID' "$default_uid"
+  RUNTIME_UID="$REPLY_VALUE"
+  validate_runtime_id "$RUNTIME_UID" 'runtime UID'
+  prompt_value 'Container runtime GID' "$default_gid"
+  RUNTIME_GID="$REPLY_VALUE"
+  validate_runtime_id "$RUNTIME_GID" 'runtime GID'
 
-declare -a SOURCE_IDS SOURCE_NAMES SOURCE_PATHS SOURCE_ACCESS
-collect_sources
+  declare -a SOURCE_IDS SOURCE_NAMES SOURCE_PATHS SOURCE_ACCESS
+  collect_sources
 
-prompt_value 'Default left source ID' "${SOURCE_IDS[0]}"
-DEFAULT_LEFT="$REPLY_VALUE"
-validate_default_source "$DEFAULT_LEFT" 'default left source'
-prompt_value 'Default right source ID' "${SOURCE_IDS[0]}"
-DEFAULT_RIGHT="$REPLY_VALUE"
-validate_default_source "$DEFAULT_RIGHT" 'default right source'
+  prompt_value 'Default left source ID' "${SOURCE_IDS[0]}"
+  DEFAULT_LEFT="$REPLY_VALUE"
+  validate_default_source "$DEFAULT_LEFT" 'default left source'
+  prompt_value 'Default right source ID' "${SOURCE_IDS[0]}"
+  DEFAULT_RIGHT="$REPLY_VALUE"
+  validate_default_source "$DEFAULT_RIGHT" 'default right source'
 
-printf 'ReachCommander includes its own administrator login; proxy authentication is optional.\n'
-if [[ "$ACCESS_MODE" == 'secure-https' ]]; then
-  prompt_value "Type 'I have HTTPS' to confirm encrypted transport" ''
-  if [[ "$REPLY_VALUE" != 'I have HTTPS' ]]; then
-    rc_die 'HTTPS acknowledgement did not match'
-    exit 1
-  fi
-else
-  prompt_value "Type 'I understand LAN HTTP is unencrypted' to continue" ''
-  if [[ "$REPLY_VALUE" != 'I understand LAN HTTP is unencrypted' ]]; then
-    rc_die 'trusted LAN HTTP acknowledgement did not match'
-    exit 1
+  printf 'ReachCommander includes its own administrator login; proxy authentication is optional.\n'
+  if [[ "$ACCESS_MODE" == 'secure-https' ]]; then
+    prompt_value "Type 'I have HTTPS' to confirm encrypted transport" ''
+    if [[ "$REPLY_VALUE" != 'I have HTTPS' ]]; then
+      rc_die 'HTTPS acknowledgement did not match'
+      exit 1
+    fi
+  else
+    prompt_value "Type 'I understand LAN HTTP is unencrypted' to continue" ''
+    if [[ "$REPLY_VALUE" != 'I understand LAN HTTP is unencrypted' ]]; then
+      rc_die 'trusted LAN HTTP acknowledgement did not match'
+      exit 1
+    fi
   fi
 fi
 
@@ -1089,11 +1120,41 @@ WORK_ROOT="$(mktemp -d "$install_parent/.reachcommander-install.XXXXXX")"
 REQUEST_PATH="$WORK_ROOT/request.json"
 STAGE_ROOT="$WORK_ROOT/deployment"
 
-write_request "$REQUEST_PATH" "$RC_IMAGE_REPOSITORY:$INSTALL_CHANNEL"
-python3 "$RENDERER" render \
-  --request "$REQUEST_PATH" \
-  --template "$COMPOSE_TEMPLATE" \
-  --output "$STAGE_ROOT"
+if [[ "$KEEP_CONFIG" == 'true' ]]; then
+  python3 "$RENDERER" render-installed \
+    --root "$RC_INSTALL_ROOT" --template "$COMPOSE_TEMPLATE" --output "$STAGE_ROOT"
+  # Read only fixed, validated scalar fields; never execute the saved environment.
+  while IFS='=' read -r key value; do
+    case "$key" in
+      REACHCOMMANDER_ACCESS_MODE) ACCESS_MODE="$value" ;;
+      REACHCOMMANDER_PORT) PORT="$value" ;;
+      REACHCOMMANDER_UID) RUNTIME_UID="$value" ;;
+      REACHCOMMANDER_GID) RUNTIME_GID="$value" ;;
+    esac
+  done <"$STAGE_ROOT/.env"
+  # Materialize output first so a failed reader cannot be hidden by a shell loop.
+  python3 - "$STAGE_ROOT/state/source-mounts.json" >"$WORK_ROOT/source-policies" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding='utf-8') as stream:
+    for source in json.load(stream)['sources']:
+        os.write(1, source['hostPath'].encode('utf-8') + b'\0' + source['access'].encode('ascii') + b'\0')
+PY
+  while IFS= read -r -d '' source_path && IFS= read -r -d '' source_access; do
+    canonical_source="$(rc_canonical_source "$source_path")"
+    reject_installer_path_overlap "$canonical_source"
+    check_source_access "$canonical_source" "$source_access" "$RUNTIME_UID" "$RUNTIME_GID"
+  done <"$WORK_ROOT/source-policies"
+  printf 'Upgrading ReachCommander using the saved configuration.\n'
+else
+  write_request "$REQUEST_PATH" "$RC_IMAGE_REPOSITORY:$INSTALL_CHANNEL"
+  python3 "$RENDERER" render \
+    --request "$REQUEST_PATH" \
+    --template "$COMPOSE_TEMPLATE" \
+    --output "$STAGE_ROOT"
+fi
 install -m 0600 -- "$UPDATER_COMPOSE_TEMPLATE" "$STAGE_ROOT/compose.override.yaml"
 docker compose --project-directory "$STAGE_ROOT" config --quiet
 
@@ -1168,7 +1229,7 @@ if ! install_updater_service; then
 fi
 INSTALL_COMMITTED=true
 
-if ! rc_compose up -d reachcommander || ! rc_wait_healthy reachcommander 60; then
+if ! rc_compose up -d --force-recreate reachcommander || ! rc_wait_healthy reachcommander 60; then
   failure_status=0
   if [[ "$HAD_EXISTING" == 'false' ]]; then
     INSTALL_TRANSACTION_ACTIVE=false

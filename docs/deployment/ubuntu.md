@@ -33,7 +33,7 @@ chmod 0700 "$INSTALL_WORKDIR"
 trap 'rm -rf -- "$INSTALL_WORKDIR"' EXIT
 cd "$INSTALL_WORKDIR"
 
-REACHCOMMANDER_VERSION=v1.5.2
+REACHCOMMANDER_VERSION=v1.5.3
 REACHCOMMANDER_RELEASE_URL="https://github.com/dragosniamtu/reach-commander/releases/download/${REACHCOMMANDER_VERSION}"
 
 curl --fail --location --output reachcommander-installer.tar.gz \
@@ -85,6 +85,28 @@ sudo ./install.sh
 ```
 
 The version-pinned flow is recommended for a server because it is repeatable and auditable.
+
+### Upgrade host tools without reconfiguration
+
+Starting with v1.5.3, an existing installation can use `--keep-config`. Download and verify the installer as shown above, then replace the final installer command with:
+
+```bash
+sudo ./install.sh --keep-config
+```
+
+Wait for active file and subtitle operations to finish first. This upgrades the host management command and updater service, and resolves the application image from your saved update channel. It keeps your network mode, port, runtime UID/GID, CPU limit, source names, IDs, paths, permissions and default panes. It retains the administrator account, application data, subtitle enablement and downloaded models. The app briefly restarts; failed startup restores the previous deployment through the installer transaction.
+
+The option requires a complete existing installation and rejects invalid saved settings rather than prompting for replacements. Run the installer without this option when you intend to change settings. An application-only `reachcommander update` does not refresh host tools.
+
+If `reachcommander subtitles enable` only prints usage without a `subtitles` command, complete this host upgrade, then enable the free CPU worker and download its models:
+
+```bash
+sudo reachcommander subtitles enable &&
+sudo reachcommander subtitles download-models &&
+sudo reachcommander subtitles status
+```
+
+After setup succeeds, reload ReachCommander and select **Recheck availability** in **Generate Subtitles**.
 
 ## Installer choices
 

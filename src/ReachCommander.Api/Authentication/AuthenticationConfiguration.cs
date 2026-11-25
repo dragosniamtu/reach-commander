@@ -21,6 +21,7 @@ public static class AuthenticationConfiguration
     public const string MediaPreviewPolicy = "media-preview";
     public const string MediaPreviewAssetPolicy = "media-preview-assets";
     public const string TextEncodingPolicy = "text-encoding";
+    public const string TextEncodingStatusPolicy = "text-encoding-status";
     public const string SubtitleGenerationPolicy = "subtitle-generation";
     public const string AntiforgeryHeaderName = "X-ReachCommander-CSRF";
 
@@ -139,6 +140,8 @@ public static class AuthenticationConfiguration
                 FixedWindowPartition(context, permitLimit: 600));
             options.AddPolicy(TextEncodingPolicy, context =>
                 FixedWindowPartition(context, permitLimit: 20));
+            options.AddPolicy(TextEncodingStatusPolicy, context =>
+                FixedWindowPartition(context, permitLimit: 300));
             options.AddPolicy(SubtitleGenerationPolicy, context =>
                 FixedWindowPartition(context, permitLimit: 6));
         });

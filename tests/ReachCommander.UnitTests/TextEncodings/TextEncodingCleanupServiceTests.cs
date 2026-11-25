@@ -7,6 +7,42 @@ namespace ReachCommander.UnitTests.TextEncodings;
 
 public sealed class TextEncodingCleanupServiceTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Registry_initialization_restricts_parent_and_staging_directory_modes(bool registerManifest)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var fixture = new TextEncodingTestFixture();
+        var registry = Registry(fixture);
+        var parentDirectory = Path.GetDirectoryName(registry.RegistryDirectory)!;
+        Directory.CreateDirectory(registry.RegistryDirectory);
+        const UnixFileMode privateDirectoryMode =
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        var legacyDirectoryMode = privateDirectoryMode |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+        File.SetUnixFileMode(parentDirectory, legacyDirectoryMode);
+        File.SetUnixFileMode(registry.RegistryDirectory, legacyDirectoryMode);
+
+        if (registerManifest)
+        {
+            await registry.RegisterAsync(
+                "media", "/TV", ".reachcommander-operation-encoding-abc-000.partial", CancellationToken.None);
+        }
+        else
+        {
+            Assert.Empty(registry.ReadAll());
+        }
+
+        Assert.Equal(privateDirectoryMode, File.GetUnixFileMode(parentDirectory));
+        Assert.Equal(privateDirectoryMode, File.GetUnixFileMode(registry.RegistryDirectory));
+    }
+
     [Fact]
     public async Task Registry_writes_atomic_logical_only_manifest_and_can_remove_it()
     {

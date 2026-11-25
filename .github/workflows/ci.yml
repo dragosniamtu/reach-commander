@@ -106,6 +106,9 @@ jobs:
       - name: Verify updater systemd unit
         run: systemd-analyze verify deploy/systemd/reachcommander-updater.service
 
+      - name: Verify updater connectivity across real systemd restarts
+        run: sudo python3 tools/updater_socket_smoke.py
+
       - name: Test CI diagnostic reporter
         run: python3 -m unittest tests/ci/test_report_trx.py tests/ci/test_run_with_annotations.py -v
 
@@ -117,6 +120,9 @@ jobs:
 
       - name: Test subtitle state validation and retention
         run: python3 tools/run_with_annotations.py "Subtitle state validation failed" bash tests/installer/test_subtitle_data.sh
+
+      - name: Test text encoding state validation and retention
+        run: python3 tools/run_with_annotations.py "Text encoding state validation failed" bash tests/installer/test_text_encoding_data.sh
 
       - name: Test installed subtitle lifecycle
         run: |
@@ -147,8 +153,10 @@ jobs:
             tests/installer/test_install.sh \
             tests/installer/test_command.sh \
             tests/installer/test_subtitle_data.sh \
+            tests/installer/test_text_encoding_data.sh \
             tests/installer/test_subtitle_lifecycle.sh \
             tests/installer/fixtures/subtitle-data.sh \
+            tests/installer/fixtures/text-encoding-data.sh \
             tools/subtitle_container_smoke.sh \
             tests/installer/test_package.sh \
             tests/installer/fake-bin/systemctl \

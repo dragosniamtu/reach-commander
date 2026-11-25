@@ -139,9 +139,17 @@ svg {
     display: none;
   }
   .toolbar {
-    gap: 3px;
+    gap: 2px;
   }
-  button {
-    width: 29px;
+  .action-wrapper {
+    flex: 0 1 29px;
+    min-width: 24px;
+  }
+  .action-wrapper button {
+    width: 100%;
+    min-width: 0;
+  }
+  .search-box {
+    flex: 1 0 5rem;
   }
 }

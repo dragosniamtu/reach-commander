@@ -156,6 +156,33 @@ test("collapses brand copy before topbar controls compete for space", async ({ p
   await expect(brandCopy).toBeHidden();
 });
 
+test("keeps every toolbar control inside a narrow allocated column", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const toolbar = page.getByRole("toolbar", { name: "Active panel tools" });
+  const search = page.getByRole("searchbox", { name: "Search active panel" });
+  // Linux system fonts leave about 294px here; constrain the allocated column
+  // directly so this regression is reproducible with any platform's fonts.
+  for (const width of [450, 336, 310, 294]) {
+    await page.locator("app-active-panel-toolbar").evaluate((element, pixels) => {
+      (element as HTMLElement).style.width = `${pixels}px`;
+    }, width);
+    await search.fill("*.txt");
+    const bounds = await toolbar.boundingBox();
+    for (const control of await toolbar.getByRole("button").all()) {
+      const controlBounds = await control.boundingBox();
+      expect(controlBounds!.width).toBeGreaterThanOrEqual(24);
+      expect(controlBounds!.x).toBeGreaterThanOrEqual(bounds!.x);
+      expect(controlBounds!.x + controlBounds!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+    }
+    expect((await search.boundingBox())!.width).toBeGreaterThanOrEqual(20);
+    await page.getByTestId("toolbar-clear-search").click();
+    await expect(search).toHaveValue("");
+  }
+  await page.getByTestId("toolbar-subtitle-jobs").click();
+  await expect(page.getByRole("dialog", { name: "Subtitle jobs" })).toBeVisible();
+});
+
 test("keeps the toolbar hierarchy clear at desktop widths", async ({
   page,
 }, testInfo) => {

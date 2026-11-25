@@ -1,4 +1,5 @@
 import { DatePipe } from '@angular/common';
+import { CdkMenuModule } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { PanelState } from '../../../core/state/commander.models';
 import { FileSizePipe } from '../../../shared/pipes/file-size.pipe';
@@ -15,7 +16,7 @@ export interface PointerSelection {
 
 @Component({
   selector: 'app-file-table',
-  imports: [DatePipe, FileSizePipe],
+  imports: [DatePipe, FileSizePipe, CdkMenuModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './file-table.component.html',
   styleUrl: './file-table.component.scss',
@@ -25,6 +26,9 @@ export class FileTableComponent {
   readonly sortRequested = output<PanelState['sortColumn']>();
   readonly rowSelected = output<PointerSelection>();
   readonly rowOpened = output<FileTableRow>();
+  readonly subtitleDisabledReason = input<string | null>('Select or focus one video or folder.');
+  readonly subtitleReadinessMessage = input<string | null>(null);
+  readonly subtitlesRequested = output<FileTableRow>();
   readonly rows = computed(() => buildVisibleRows(this.panel()));
 
   ariaSort(column: PanelState['sortColumn']): 'ascending' | 'descending' | 'none' {
@@ -35,6 +39,11 @@ export class FileTableComponent {
     (event.currentTarget as HTMLElement | null)?.focus();
     const mode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
     this.rowSelected.emit({ rowIndex, mode });
+  }
+
+  selectContextRow(rowIndex: number, row: FileTableRow, event: MouseEvent): void {
+    (event.currentTarget as HTMLElement | null)?.focus();
+    if (!this.isSelected(row)) this.rowSelected.emit({ rowIndex, mode: 'replace' });
   }
 
   open(row: FileTableRow, event: MouseEvent): void {

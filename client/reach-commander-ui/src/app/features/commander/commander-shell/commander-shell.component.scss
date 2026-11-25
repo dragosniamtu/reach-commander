@@ -212,7 +212,21 @@
   .app-shell {
     height: auto;
     min-height: 100dvh;
-    grid-template-rows: 50px minmax(900px, 1fr) 31px 41px;
+    grid-template-rows: 88px minmax(900px, 1fr) 31px 41px;
+  }
+  .topbar {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: 44px 44px;
+    column-gap: 9px;
+    row-gap: 0;
+  }
+  .topbar > app-active-panel-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .top-actions {
+    grid-column: 2;
+    grid-row: 1;
   }
   .panes {
     grid-template-columns: 1fr;

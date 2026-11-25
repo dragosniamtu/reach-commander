@@ -31,6 +31,7 @@ import { SourceManagementStore } from '../../../core/state/source-management.sto
 import { MediaPreviewStore } from '../../../core/state/media-preview.store';
 import { TextEncodingState, TextEncodingStore } from '../../../core/state/text-encoding-store';
 import { CommanderShellComponent } from './commander-shell.component';
+import { SubtitleGenerationStore } from '../../subtitles/subtitle-generation.store';
 
 describe('CommanderShellComponent system metrics integration', () => {
   let fixture: ComponentFixture<CommanderShellComponent>;
@@ -133,6 +134,13 @@ describe('CommanderShellComponent system metrics integration', () => {
     setOutputEncoding: vi.fn(),
     setCompletionHandler: vi.fn(),
   };
+  const subtitles = {
+    loadCapabilities: vi.fn(() => Promise.resolve()), readinessMessage: signal<string | null>(null),
+    dialog: signal<'closed' | 'configure' | 'jobs'>('closed'),
+    activeCount: signal(0), context: signal(null),
+    restore: vi.fn(() => Promise.resolve()), open: vi.fn(), openHistory: vi.fn(),
+    close: vi.fn(() => subtitles.dialog.set('closed')), reset: vi.fn(), setCompletionHandler: vi.fn(),
+  };
   const fileOperations = {
     context: signal(null), destination: signal('/'), dialog: signal<'closed' | 'confirm' | 'progress'>('closed'),
     presentation: signal<'modal' | 'background'>('modal'), preview: signal(null),
@@ -234,6 +242,7 @@ describe('CommanderShellComponent system metrics integration', () => {
     singleRename.state.set(closedSingleRenameState());
     archiveExtraction.state.set(closedArchiveExtractionState());
     textEncoding.state.set(closedTextEncodingState());
+    subtitles.dialog.set('closed');
     fileOperations.dialog.set('closed');
     fileOperations.presentation.set('modal');
     fileOperations.tasks.set([]);
@@ -272,6 +281,7 @@ describe('CommanderShellComponent system metrics integration', () => {
         { provide: SingleRenameStore, useValue: singleRename },
         { provide: ArchiveExtractionStore, useValue: archiveExtraction },
         { provide: TextEncodingStore, useValue: textEncoding },
+        { provide: SubtitleGenerationStore, useValue: subtitles },
         { provide: FileOperationStore, useValue: fileOperations },
         { provide: TrashStore, useValue: trash },
         { provide: PwaService, useValue: pwa },
@@ -286,6 +296,37 @@ describe('CommanderShellComponent system metrics integration', () => {
   });
 
   afterEach(() => document.documentElement.removeAttribute('data-theme'));
+
+  it('restores subtitle history and opens generation for the selected video', async () => {
+    store.sources.set([{ id: 'media', name: 'Media', isAvailable: true, isReadOnly: false,
+      totalBytes: null, usedBytes: null, freeBytes: null, defaultLeft: true, defaultRight: true }]);
+    store.leftPanel.set({ ...panel(),
+      tabs: [{ id: 'tab', label: 'Media', location: { kind: 'filesystem', sourceId: 'media', path: '/' } }],
+      activeTabId: 'tab', entries: [{ name: 'Movie.mkv', relativePath: '/Movie.mkv', type: 'file',
+        size: 1, modifiedAt: null, extension: 'mkv', isReadOnly: false, isSymbolicLink: false,
+        attributes: '', archiveFormatHint: null, archiveRole: null }],
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const button = fixture.nativeElement.querySelector('[data-testid="toolbar-subtitles"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(subtitles.open).toHaveBeenCalledWith({ panelSide: 'left', sourceId: 'media', sourceName: 'Media', path: '/Movie.mkv' });
+    expect(subtitles.restore).toHaveBeenCalledOnce();
+  });
+
+  it('blocks commander shortcuts while subtitle history is open and restores opener focus', async () => {
+    const opener = fixture.nativeElement.querySelector('[data-testid="toolbar-subtitle-jobs"]') as HTMLButtonElement;
+    opener.click();
+    expect(subtitles.openHistory).toHaveBeenCalledOnce();
+    subtitles.dialog.set('jobs');
+    fixture.componentInstance.execute({ type: 'move-cursor', amount: 1 });
+    expect(store.moveCursor).not.toHaveBeenCalled();
+    fixture.componentInstance.execute({ type: 'escape' });
+    await Promise.resolve();
+    expect(subtitles.close).toHaveBeenCalled();
+    expect(document.activeElement).toBe(opener);
+  });
 
   it('places the widget last, opens details, and starts only one polling lifecycle', () => {
     const actions = fixture.nativeElement.querySelector('.top-actions');
@@ -1154,6 +1195,17 @@ describe('CommanderShellComponent system metrics integration', () => {
     await vi.waitFor(() => expect(settled).toBe(true));
 
     resolveCapability();
+    await initialization;
+  });
+
+  it('does not block file management while subtitle history is unavailable', async () => {
+    let resolveHistory!: () => void;
+    subtitles.restore.mockReturnValueOnce(new Promise<void>((resolve) => { resolveHistory = resolve; }));
+    let settled = false;
+    const initialization = fixture.componentInstance.retryInitialization().then(() => { settled = true; });
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect(fixture.componentInstance.initializationError()).toBeNull();
+    resolveHistory();
     await initialization;
   });
 });

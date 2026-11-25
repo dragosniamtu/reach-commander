@@ -23,6 +23,7 @@ import {
 import {
   CommanderPanelComponent,
   MediaPreviewRequest,
+  SubtitleGenerationRequest,
 } from '../commander-panel/commander-panel.component';
 import { SourceRemovalRequest } from '../source-selector/source-selector.component';
 import { CommandBarComponent } from '../command-bar/command-bar.component';
@@ -68,6 +69,9 @@ import { MediaPreviewDialogComponent } from '../../media-preview/media-preview-d
 import { TextEncodingStore } from '../../../core/state/text-encoding-store';
 import { captureTextEncodingContext } from '../../../core/state/text-encoding.models';
 import { TextEncodingDialogComponent } from '../../text-encoding/text-encoding-dialog.component';
+import { SubtitleGenerationStore } from '../../subtitles/subtitle-generation.store';
+import { captureSubtitleContext } from '../../subtitles/subtitle-generation.models';
+import { SubtitleGenerationDialogComponent } from '../../subtitles/subtitle-generation-dialog.component';
 
 export interface CreateDirectoryDialogContext {
   readonly sourceId: string;
@@ -102,6 +106,7 @@ export interface CreateDirectoryDialogContext {
     SourceManagementDialogComponent,
     MediaPreviewDialogComponent,
     TextEncodingDialogComponent,
+    SubtitleGenerationDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './commander-shell.component.html',
@@ -120,6 +125,7 @@ export class CommanderShellComponent implements OnInit {
   readonly sourceManagement = inject(SourceManagementStore);
   readonly mediaPreview = inject(MediaPreviewStore);
   readonly textEncoding = inject(TextEncodingStore);
+  readonly subtitles = inject(SubtitleGenerationStore);
   readonly pwa = inject(PwaService);
   readonly theme = inject(ThemeService);
   readonly commandStatus = signal<string | null>(null);
@@ -135,6 +141,7 @@ export class CommanderShellComponent implements OnInit {
   readonly systemUpdateDialogStatus = signal<SystemUpdateStatusDto | null>(null);
   readonly sourceManagementOpener = signal<HTMLElement | null>(null);
   readonly textEncodingOpener = signal<HTMLElement | null>(null);
+  readonly subtitleOpener = signal<HTMLElement | null>(null);
   readonly systemUpdateOverlayStatus = computed(() => {
     const status = this.systemUpdate.status();
     return this.systemUpdate.overlayVisible() && status &&
@@ -168,6 +175,8 @@ export class CommanderShellComponent implements OnInit {
     const panel = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
     return captureTextEncodingContext(side, panel, this.store.sources());
   });
+  readonly subtitleContext = computed(() =>
+    captureSubtitleContext(this.store.activePanel(), this.activeState(), this.store.sources()));
   readonly toolbarContext = computed<ActivePanelToolbarContext>(() => ({
     side: this.store.activePanel(),
     sourceName: this.activeSource()?.name ?? 'Source',
@@ -256,6 +265,7 @@ export class CommanderShellComponent implements OnInit {
       this.keyboard.stop();
       this.metricsStore.stop();
       this.systemUpdate.reset();
+      this.subtitles.reset();
     });
     const unregisterProtectedState = this.protectedState.register(() => {
       this.store.reset();
@@ -276,6 +286,7 @@ export class CommanderShellComponent implements OnInit {
       this.systemUpdateDialogStatus.set(null);
       this.sourceManagementOpener.set(null);
       this.textEncodingOpener.set(null);
+      this.subtitleOpener.set(null);
     });
     this.destroyRef.onDestroy(unregisterProtectedState);
     this.archiveExtraction.setCompletionHandler((source, destination) => {
@@ -283,6 +294,9 @@ export class CommanderShellComponent implements OnInit {
     });
     this.textEncoding.setCompletionHandler((context) => {
       void this.store.refresh(context.panelSide);
+    });
+    this.subtitles.setCompletionHandler(() => {
+      void Promise.all([this.store.refresh('left'), this.store.refresh('right')]);
     });
     this.fileOperations.setTerminalHandler((status, context) => {
       void this.refreshOperationPanels(status, context);
@@ -304,6 +318,8 @@ export class CommanderShellComponent implements OnInit {
   async retryInitialization(): Promise<void> {
     this.initializationError.set(null);
     void this.sourceManagement.start().catch(() => undefined);
+    void this.subtitles.loadCapabilities();
+    void this.subtitles.restore();
     try {
       await this.store.initialize();
       await this.fileOperations.restoreTasks();
@@ -324,6 +340,10 @@ export class CommanderShellComponent implements OnInit {
   }
 
   execute(command: CommanderCommand): void {
+    if (this.subtitles.dialog() !== 'closed') {
+      if (command.type === 'escape') this.closeSubtitles();
+      return;
+    }
     if (this.sourceManagement.dialogOpen()) {
       return;
     }
@@ -622,6 +642,40 @@ export class CommanderShellComponent implements OnInit {
     const side = this.multiRename.state().context?.panelSide ?? this.store.activePanel();
     this.multiRename.close();
     queueMicrotask(() => (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+  }
+
+  openSubtitles(opener: HTMLElement | null, side = this.store.activePanel()): void {
+    const panel = side === 'left' ? this.store.leftPanel() : this.store.rightPanel();
+    const result = captureSubtitleContext(side, panel, this.store.sources());
+    if (!result.context) {
+      this.commandStatus.set(result.error);
+      return;
+    }
+    this.menuOpen.set(false);
+    this.commandStatus.set(null);
+    this.subtitleOpener.set(opener);
+    this.subtitles.open(result.context);
+  }
+
+  openPanelSubtitles(request: SubtitleGenerationRequest): void {
+    this.store.activatePanel(request.side);
+    this.openSubtitles(request.opener, request.side);
+  }
+
+  openSubtitleHistory(opener: HTMLElement): void {
+    this.menuOpen.set(false);
+    this.subtitleOpener.set(opener);
+    this.subtitles.openHistory();
+  }
+
+  closeSubtitles(): void {
+    const opener = this.subtitleOpener();
+    const side = this.subtitles.context()?.panelSide ?? this.store.activePanel();
+    this.subtitles.close();
+    this.subtitleOpener.set(null);
+    queueMicrotask(() => opener?.isConnected
+      ? opener.focus()
+      : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
   }
 
   openTextEncoding(opener: HTMLElement): void {

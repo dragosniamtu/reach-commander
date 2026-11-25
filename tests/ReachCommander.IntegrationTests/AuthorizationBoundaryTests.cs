@@ -58,6 +58,10 @@ public sealed class AuthorizationBoundaryTests
             (HttpMethod.Get, $"/api/text-encodings/operations/{identifier}", false),
             (HttpMethod.Post, $"/api/text-encodings/operations/{identifier}/cancel", false),
             (HttpMethod.Get, "/api/not-a-real-route", false),
+            (HttpMethod.Get, "/api/subtitle-jobs", false),
+            (HttpMethod.Get, $"/api/subtitle-jobs/{identifier}", false),
+            (HttpMethod.Post, "/api/subtitle-jobs", true),
+            (HttpMethod.Post, $"/api/subtitle-jobs/{identifier}/cancel", false),
         };
 
         foreach (var specification in requests)
@@ -126,5 +130,8 @@ public sealed class AuthorizationBoundaryTests
                 outputEncoding = "utf8",
             });
         Assert.Equal(HttpStatusCode.BadRequest, encodingResponse.StatusCode);
+        var subtitleResponse = await client.PostAsJsonAsync("/api/subtitle-jobs",
+            new { sourceId = "media", path = "/Movies/Gladiator II.mkv" });
+        Assert.Equal(HttpStatusCode.BadRequest, subtitleResponse.StatusCode);
     }
 }

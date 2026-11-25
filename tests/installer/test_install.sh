@@ -5,6 +5,8 @@ TEST_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$TEST_DIRECTORY/../.." && pwd)"
 INSTALLER_SOURCE="$REPOSITORY_ROOT/deploy/install.sh"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
+# shellcheck source=fixtures/subtitle-data.sh
+source "$TEST_DIRECTORY/fixtures/subtitle-data.sh"
 
 if [[ ! -f "$INSTALLER_SOURCE" ]]; then
   printf 'not ok - deploy/install.sh must exist\n' >&2
@@ -22,6 +24,8 @@ cp -- "$REPOSITORY_ROOT/deploy/source_management.py" "$BUNDLE/source_management.
 cp -- "$REPOSITORY_ROOT/deploy/compose.release.yaml" "$BUNDLE/compose.release.yaml"
 cp -- "$REPOSITORY_ROOT/deploy/lib/common.sh" "$BUNDLE/lib/common.sh"
 for updater_source in \
+  subtitle_management.py \
+  compose.subtitles.yaml \
   compose.updater.yaml \
   support_bundle.py \
   support_bundle_cli.py \
@@ -277,6 +281,7 @@ for required_file in \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \
   bin/render_config.py bin/source_management.py bin/support_bundle_cli.py bin/update_trace_cli.py bin/updater_service.py \
+  bin/subtitle_management.py lib/compose.subtitles.yaml lib/compose.updater.yaml state/subtitles-enabled \
   lib/common.sh lib/compose.release.yaml lib/support_bundle.py lib/updater_protocol.py lib/updater_trace.py; do
   [[ -f "$REACHCOMMANDER_TEST_INSTALL_ROOT/$required_file" ]] || fail "missing installed $required_file"
 done
@@ -388,6 +393,7 @@ chmod 0600 \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/operations/fedcba9876543210fedcba9876543210.json" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8" \
   "$REACHCOMMANDER_TEST_INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
+create_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data"
 application_data_before="$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)"
 
 run_installer $'n\n' "$TEST_ROOT/decline-with-operation-data.out"
@@ -396,7 +402,8 @@ assert_equal \
   "$application_data_before" \
   "$(find "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" -type f -print0 | sort -z | xargs -0 sha256sum)" \
   "legitimate file-operation data preservation"
-pass "installer accepts exact durable and media-preview state without mutating it"
+assert_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" || fail 'installer changed subtitle state'
+pass "installer accepts exact durable, subtitle, and media-preview state without mutating it"
 
 printf 'unexpected\n' \
   >"$REACHCOMMANDER_TEST_INSTALL_ROOT/data/file-operations/plans/not-an-operation.json"
@@ -481,6 +488,7 @@ export FAKE_SYSTEMCTL_START_EXIT=0
 pass "failed updater service startup restores the previous deployment and unit"
 
 for legacy_file in \
+  bin/subtitle_management.py lib/compose.subtitles.yaml lib/compose.updater.yaml state/subtitles-enabled \
   compose.override.yaml \
   state/current-version \
   state/previous-version \
@@ -500,6 +508,7 @@ if (( last_status != 0 )); then
 fi
 assert_equal "0" "$last_status" "legacy updater migration status"
 for migrated_file in \
+  bin/subtitle_management.py lib/compose.subtitles.yaml lib/compose.updater.yaml state/subtitles-enabled \
   compose.override.yaml \
   state/current-version \
   state/previous-version \
@@ -622,6 +631,7 @@ mkdir -p \
   "$recovery_backup/command" \
   "$recovery_backup/systemd"
 for recovery_file in \
+  bin/subtitle_management.py lib/compose.subtitles.yaml lib/compose.updater.yaml state/subtitles-enabled \
   .env compose.yaml compose.override.yaml config/sources.json state/source-mounts.json \
   state/channel state/current-image state/previous-image \
   state/current-version state/previous-version \

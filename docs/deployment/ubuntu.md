@@ -33,7 +33,7 @@ chmod 0700 "$INSTALL_WORKDIR"
 trap 'rm -rf -- "$INSTALL_WORKDIR"' EXIT
 cd "$INSTALL_WORKDIR"
 
-REACHCOMMANDER_VERSION=v1.0.0
+REACHCOMMANDER_VERSION=v1.5.0
 REACHCOMMANDER_RELEASE_URL="https://github.com/dragosniamtu/reach-commander/releases/download/${REACHCOMMANDER_VERSION}"
 
 curl --fail --location --output reachcommander-installer.tar.gz \
@@ -392,9 +392,41 @@ After that selection, the command requires the exact confirmation `uninstall Rea
 
 Keep a verified backup until you have confirmed that you no longer need the account, cookie keys, file-operation history, generated source mapping, or pinned image record.
 
+## Optional local AI subtitles
+
+Ubuntu can run a separate, free local CPU worker for English subtitles and optional English-to-Romanian translation. It uses Whisper **small/int8**, two threads, a **2 CPU / 6GB** runtime limit, and no paid API. Allow room for the application and operating system in addition to the worker's memory limit. Model preparation requires internet access; normal subtitle generation is offline.
+
+For an existing installation, rerun the current **checksum-verified Ubuntu installer** once using the flow above. Keep the existing runtime UID/GID and source choices during reconfiguration. This installs the root-owned manager without an additional installer question and retains authentication, durable application state and subtitle storage. An image-only update cannot install this helper. Subtitles are disabled by default:
+
+```bash
+sudo reachcommander subtitles enable
+sudo reachcommander subtitles download-models
+sudo reachcommander subtitles status
+sudo reachcommander doctor
+```
+
+`enable` derives the immutable worker image from the selected trusted application's `io.reachcommander.subtitle-worker-image` label, pulls it and starts the restricted worker. The worker uses `subtitles-*` release tags in the existing public `ghcr.io/dragosniamtu/reach-commander` package; installation accepts only that fixed repository with a lowercase SHA-256 digest. There is no browser-controlled image reference. Enabling alone does not download models, and the application reports model availability until setup completes.
+
+`download-models` is the explicit network-enabled setup step. It stops the offline worker, downloads the pinned small model and local English-to-Romanian model in a separate temporary container, restarts the offline worker and checks readiness. The setup container mounts only `/opt/reachcommander/subtitles/models`. It cannot read media sources, the subtitle mailbox or account data. An interrupted or failed download can be retried with the same command. `status` reports worker health and whether the English and Romanian models are ready.
+
+The running worker has no network, no Docker socket, no root privileges and a read-only container filesystem. It receives read-only copies of the exact configured media-source mappings. Its model cache and mailbox live under `/opt/reachcommander/subtitles`, outside the application's `/opt/reachcommander/data` authentication tree. Only the API writes completed `.en.srt` and optional `.ro.srt` files beside the selected video. The source must already permit writes; enabling subtitles never changes source permissions. In the application, select a video in a writable source and choose **Generate AI subtitles**. Existing neighboring subtitle files are preserved.
+
+`start`, `stop`, `restart`, source add/remove, reconfiguration and updates maintain an enabled worker. Source changes stop the worker before publishing the new read-only allowlist, then recreate it and verify health. Updates resolve the worker paired with the candidate application, retain the old overlay for rollback, and check both running image identities and health. Docker Engine is not restarted. Existing application and source data remain in place.
+
+```bash
+sudo reachcommander subtitles disable
+```
+
+Disable stops the worker and removes the API's subtitle integration while retaining the model cache and mailbox. **Before rolling back to an older application release that has no valid worker label, disable subtitles first.** Enabled updates to such releases fail before changing deployment state. Running an older installer over an enabled subtitle deployment is unsupported; disable first, and retain a verified backup. A failed enable/disable restores the previous overlay and enable state. After a process interruption, run `sudo reachcommander subtitles recover`, followed by `sudo reachcommander doctor`, before another deployment change.
+
+Uninstall also retains `/opt/reachcommander/subtitles`, including when application data is backed up and removed. The application-data backup does not include the potentially large model cache or mailbox; back those up separately if needed. Reinstall and enable to reuse the retained storage. The manager validates exact expected entries, ownership and permissions; it refuses symlinks, hardlinks, nested mounts and arbitrary files. Keep the original runtime UID/GID instead of recursively changing ownership of model or media trees.
+
 ## Troubleshooting
 
 - **Package pull is denied:** confirm the GHCR package exists and its package visibility is Public; repository visibility alone may not be enough.
+- **Subtitle generation is unavailable:** run `sudo reachcommander subtitles status`. Refresh the verified installer if the command is absent, enable the worker, then run `sudo reachcommander subtitles download-models` explicitly. A healthy worker can still report unavailable models while setup is incomplete.
+- **An enabled update rejects the worker image label:** the selected application does not declare a compatible immutable worker. Use a supported release, or disable subtitles before deliberately selecting an older release. Do not edit the digest or substitute arbitrary worker images.
+- **A subtitle operation was interrupted:** preserve `/opt/reachcommander/state/subtitle-transaction.json`, run `sudo reachcommander subtitles recover`, and rerun `sudo reachcommander doctor`. Do not manually delete the recovery marker.
 - **The service is healthy locally but unavailable remotely:** keep ReachCommander on loopback and check the reverse proxy listener, certificate, firewall, and optional proxy-authentication policy.
 - **A source is unavailable:** verify the saved host path still exists, has not become a symlink, and is traversable by the configured UID/GID.
 - **Writes are denied:** the source must be explicitly read-write in application policy, mounted read-write, and writable by the configured UID/GID. Do not weaken unrelated parent directories.

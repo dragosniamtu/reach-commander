@@ -43,12 +43,14 @@ trap 'exit 143' TERM
 required_sources=(
   "$REPOSITORY_ROOT/LICENSE"
   "$SCRIPT_DIRECTORY/compose.release.yaml"
+  "$SCRIPT_DIRECTORY/compose.subtitles.yaml"
   "$SCRIPT_DIRECTORY/compose.updater.yaml"
   "$SCRIPT_DIRECTORY/install.sh"
   "$SCRIPT_DIRECTORY/lan_address.py"
   "$SCRIPT_DIRECTORY/reachcommander"
   "$SCRIPT_DIRECTORY/render_config.py"
   "$SCRIPT_DIRECTORY/source_management.py"
+  "$SCRIPT_DIRECTORY/subtitle_management.py"
   "$SCRIPT_DIRECTORY/support_bundle.py"
   "$SCRIPT_DIRECTORY/support_bundle_cli.py"
   "$SCRIPT_DIRECTORY/update_trace_cli.py"
@@ -70,12 +72,14 @@ install -m 0644 -- "$REPOSITORY_ROOT/LICENSE" "$PACKAGE_ROOT/LICENSE"
 printf '%s\n' "$VERSION" >"$PACKAGE_ROOT/VERSION"
 chmod 0644 -- "$PACKAGE_ROOT/VERSION"
 install -m 0644 -- "$SCRIPT_DIRECTORY/compose.release.yaml" "$PACKAGE_ROOT/compose.release.yaml"
+install -m 0644 -- "$SCRIPT_DIRECTORY/compose.subtitles.yaml" "$PACKAGE_ROOT/compose.subtitles.yaml"
 install -m 0644 -- "$SCRIPT_DIRECTORY/compose.updater.yaml" "$PACKAGE_ROOT/compose.updater.yaml"
 install -m 0755 -- "$SCRIPT_DIRECTORY/install.sh" "$PACKAGE_ROOT/install.sh"
 install -m 0644 -- "$SCRIPT_DIRECTORY/lan_address.py" "$PACKAGE_ROOT/lan_address.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/reachcommander" "$PACKAGE_ROOT/reachcommander"
 install -m 0644 -- "$SCRIPT_DIRECTORY/render_config.py" "$PACKAGE_ROOT/render_config.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/source_management.py" "$PACKAGE_ROOT/source_management.py"
+install -m 0644 -- "$SCRIPT_DIRECTORY/subtitle_management.py" "$PACKAGE_ROOT/subtitle_management.py"
 install -m 0644 -- "$SCRIPT_DIRECTORY/support_bundle.py" "$PACKAGE_ROOT/support_bundle.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/support_bundle_cli.py" "$PACKAGE_ROOT/support_bundle_cli.py"
 install -m 0755 -- "$SCRIPT_DIRECTORY/update_trace_cli.py" "$PACKAGE_ROOT/update_trace_cli.py"
@@ -89,10 +93,12 @@ chmod 0644 -- \
   "$PACKAGE_ROOT/LICENSE" \
   "$PACKAGE_ROOT/VERSION" \
   "$PACKAGE_ROOT/compose.release.yaml" \
+  "$PACKAGE_ROOT/compose.subtitles.yaml" \
   "$PACKAGE_ROOT/compose.updater.yaml" \
   "$PACKAGE_ROOT/lan_address.py" \
   "$PACKAGE_ROOT/render_config.py" \
   "$PACKAGE_ROOT/source_management.py" \
+  "$PACKAGE_ROOT/subtitle_management.py" \
   "$PACKAGE_ROOT/support_bundle.py" \
   "$PACKAGE_ROOT/updater_protocol.py" \
   "$PACKAGE_ROOT/updater_trace.py" \
@@ -117,6 +123,7 @@ tar "${tar_options[@]}" --mode=0755 -cf "$TAR_TEMPORARY" reachcommander-installe
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/LICENSE
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/VERSION
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.release.yaml
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.subtitles.yaml
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/compose.updater.yaml
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/install.sh
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/lan_address.py
@@ -125,6 +132,7 @@ tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installe
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/reachcommander
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/render_config.py
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/source_management.py
+tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/subtitle_management.py
 tar "${tar_options[@]}" --mode=0644 -rf "$TAR_TEMPORARY" reachcommander-installer/support_bundle.py
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/support_bundle_cli.py
 tar "${tar_options[@]}" --mode=0755 -rf "$TAR_TEMPORARY" reachcommander-installer/update_trace_cli.py

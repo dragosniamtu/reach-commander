@@ -1,0 +1,181 @@
+<div class="subtitle-backdrop" data-testid="subtitle-generation-dialog">
+  <dialog
+    #dialog
+    class="subtitle-dialog theme-dialog-shell"
+    aria-modal="true"
+    aria-labelledby="subtitle-title"
+    tabindex="-1"
+    cdkTrapFocus
+    [cdkTrapFocusAutoCapture]="true"
+    (cancel)="nativeCancel($event)"
+  >
+    <header class="theme-dialog-titlebar">
+      <h2 id="subtitle-title">
+        {{ store.dialog() === 'configure' ? 'Generate Subtitles' : 'Subtitle jobs' }}
+      </h2>
+      <button type="button" aria-label="Close subtitles" (click)="closeRequested.emit()">×</button>
+    </header>
+    <div class="dialog-body">
+      @if (store.readinessMessage(); as message) {
+        <section class="readiness" role="status" aria-live="polite">
+          <p>{{ message }}</p>
+          <button
+            type="button"
+            data-testid="subtitle-recheck"
+            [disabled]="store.capabilitiesLoading() || store.submitting()"
+            (click)="store.loadCapabilities()"
+          >
+            {{ store.capabilitiesLoading() ? 'Checking…' : 'Recheck availability' }}
+          </button>
+        </section>
+      }
+      @if (store.dialog() === 'configure') {
+        <p class="path">
+          <strong>{{ store.context()?.sourceName }}</strong
+          ><code>{{ store.context()?.path }}</code>
+        </p>
+        <fieldset [disabled]="store.submitting()">
+          <legend>Subtitle languages</legend>
+          <label
+            ><input
+              id="subtitle-english"
+              type="checkbox"
+              [checked]="store.english()"
+              [disabled]="!store.englishAvailable() && !store.english()"
+              (change)="setLanguage('english', $event)"
+            />
+            English</label
+          >
+          <label
+            ><input
+              id="subtitle-romanian"
+              type="checkbox"
+              [checked]="store.romanian()"
+              [disabled]="!store.romanianAvailable() && !store.romanian()"
+              (change)="setLanguage('romanian', $event)"
+            />
+            Romanian</label
+          >
+        </fieldset>
+        @if (!store.english() && !store.romanian()) {
+          <p class="error" role="alert">Select at least one language.</p>
+        }
+        <p class="hint">
+          Save subtitles beside each video. Folders include subfolders; successfully processed
+          videos are skipped.
+        </p>
+      } @else {
+        @if (store.loading() && !store.jobs().length) {
+          <p role="status">Loading subtitle jobs…</p>
+        }
+        @if (!store.loading() && !store.jobs().length) {
+          <p>No subtitle jobs yet. Select a video or folder to get started.</p>
+        }
+        @if (store.jobs().length) {
+          <label class="job-picker"
+            >Job
+            <select
+              aria-label="Subtitle job"
+              [value]="store.selectedJob()?.jobId"
+              (change)="store.selectedJobId.set($any($event.target).value)"
+            >
+              @for (job of store.jobs(); track job.jobId) {
+                <option [value]="job.jobId">
+                  {{ job.createdAt | date: 'MMM d, HH:mm' }} · {{ job.path }} ·
+                  {{ label(job.phase) }}
+                </option>
+              }
+            </select>
+          </label>
+        }
+        @if (store.selectedJob(); as job) {
+          <section class="progress-state" aria-label="Subtitle progress" aria-live="polite">
+            <p>
+              <strong>{{ label(job.phase) }}</strong> · {{ job.english ? 'English' : ''
+              }}{{ job.english && job.romanian ? ' + ' : '' }}{{ job.romanian ? 'Romanian' : '' }}
+            </p>
+            @if (job.currentPath) {
+              <code class="path">{{ job.currentPath }}</code>
+              <p>
+                {{ job.stage ? label(job.stage) : 'Processing' }}
+                @if (job.currentPercent !== null) {
+                  · {{ job.currentPercent }}%
+                }
+              </p>
+              <progress
+                max="100"
+                [attr.value]="job.currentPercent"
+                aria-label="Current video progress"
+              ></progress>
+            }
+            <p>{{ summary().finished }} of {{ summary().total }} files processed</p>
+            @if (summary().total > 0) {
+              <progress
+                [max]="summary().total"
+                [value]="summary().finished"
+                aria-label="Overall subtitle progress"
+              ></progress>
+            }
+            <p>
+              {{ summary().completed }} completed · {{ summary().skipped }} skipped ·
+              {{ summary().failed }} failed
+              @if (summary().cancelled) {
+                · {{ summary().cancelled }} cancelled
+              }
+            </p>
+          </section>
+          @if (job.error) {
+            <p class="error" role="alert">{{ job.error }}</p>
+          }
+          @if (job.files.length) {
+            <ul class="file-results" aria-label="Subtitle file results">
+              @for (file of job.files; track file.path) {
+                <li>
+                  <code>{{ file.path }}</code
+                  ><span [class.error]="file.phase === 'failed'">{{ label(file.phase) }}</span>
+                  @if (file.error) {
+                    <p class="error">{{ file.error }}</p>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        }
+      }
+      @if (store.error(); as error) {
+        <p class="error" role="alert">{{ error }}</p>
+      }
+    </div>
+    <footer>
+      @if (store.dialog() === 'configure') {
+        <button type="button" (click)="closeRequested.emit()">Cancel</button>
+        <button
+          type="button"
+          class="primary"
+          data-testid="subtitle-generate"
+          [disabled]="!store.canGenerate()"
+          (click)="store.generate()"
+        >
+          {{ store.submitting() ? 'Starting…' : 'Generate' }}
+        </button>
+      } @else {
+        <span class="hint">Jobs continue when this window is closed.</span>
+        @if (store.selectedJob(); as job) {
+          @if (store.canCancel(job)) {
+            <button
+              type="button"
+              data-testid="subtitle-cancel-job"
+              (click)="store.cancel(job.jobId)"
+            >
+              Cancel job
+            </button>
+          }
+        }
+        <button type="button" [disabled]="store.loading()" (click)="store.restore()">
+          {{ store.loading() ? 'Refreshing…' : 'Refresh jobs' }}
+        </button>
+        <button type="button" (click)="closeRequested.emit()">Close</button>
+      }
+    </footer>
+  </dialog>
+</div>

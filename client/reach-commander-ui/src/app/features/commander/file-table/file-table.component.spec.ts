@@ -37,6 +37,27 @@ describe('FileTableComponent', () => {
     expect(selected).toHaveBeenCalledWith({ rowIndex: 0, mode: 'toggle' });
   });
 
+  it('opens a subtitle context action and respects unavailable selections', () => {
+    const generated = vi.fn();
+    fixture.componentInstance.subtitlesRequested.subscribe(generated);
+    fixture.componentRef.setInput('subtitleDisabledReason', null);
+    fixture.detectChanges();
+    const row = fixture.nativeElement.querySelector('tbody tr');
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    fixture.detectChanges();
+    const menu = document.querySelector('[data-testid="context-subtitles"]') as HTMLButtonElement;
+    expect(menu).not.toBeNull();
+    expect(menu.textContent).toContain('Generate Subtitles');
+    menu.click();
+    expect(generated).toHaveBeenCalledOnce();
+
+    fixture.componentRef.setInput('subtitleDisabledReason', 'Choose a writable video or folder.');
+    fixture.detectChanges();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    fixture.detectChanges();
+    expect(document.querySelector('[data-testid="context-subtitles"]')?.getAttribute('aria-disabled')).toBe('true');
+  });
+
   it('distinguishes openable archives, secondary volumes, and nested archive files accessibly', () => {
     fixture.componentRef.setInput('panel', panel({
       entries: [

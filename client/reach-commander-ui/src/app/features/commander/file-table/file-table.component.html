@@ -21,6 +21,9 @@
           tabindex="-1"
           (click)="select(rowIndex, $event)"
           (dblclick)="open(row, $event)"
+          [cdkContextMenuTriggerFor]="rowMenu"
+          [cdkContextMenuTriggerData]="{ row: row }"
+          (contextmenu)="selectContextRow(rowIndex, row, $event)"
         >
           <td class="name-cell">
             <span class="name-content">
@@ -48,3 +51,11 @@
     </tbody>
   </table>
 </div>
+<ng-template #rowMenu let-row="row">
+  <div cdkMenu class="file-context-menu" aria-label="File actions">
+    <button type="button" cdkMenuItem data-testid="context-subtitles"
+      [cdkMenuItemDisabled]="subtitleDisabledReason() !== null || row.isParent"
+      [title]="row.isParent ? 'Select a video or folder.' : subtitleDisabledReason() ?? subtitleReadinessMessage() ?? 'Generate Subtitles'"
+      (cdkMenuItemTriggered)="subtitlesRequested.emit(row)">Generate Subtitles</button>
+  </div>
+</ng-template>

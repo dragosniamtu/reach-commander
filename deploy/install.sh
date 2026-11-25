@@ -7,6 +7,8 @@ SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIBRARY="$SCRIPT_DIRECTORY/lib/common.sh"
 RENDERER="$SCRIPT_DIRECTORY/render_config.py"
 SOURCE_MANAGEMENT="$SCRIPT_DIRECTORY/source_management.py"
+SUBTITLE_MANAGEMENT="$SCRIPT_DIRECTORY/subtitle_management.py"
+SUBTITLE_COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.subtitles.yaml"
 LAN_ADDRESS_HELPER="$SCRIPT_DIRECTORY/lan_address.py"
 COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.release.yaml"
 UPDATER_COMPOSE_TEMPLATE="$SCRIPT_DIRECTORY/compose.updater.yaml"
@@ -102,6 +104,8 @@ require_bundle() {
   for bundle_file in \
     "$RENDERER" \
     "$SOURCE_MANAGEMENT" \
+    "$SUBTITLE_MANAGEMENT" \
+    "$SUBTITLE_COMPOSE_TEMPLATE" \
     "$LAN_ADDRESS_HELPER" \
     "$COMPOSE_TEMPLATE" \
     "$UPDATER_COMPOSE_TEMPLATE" \
@@ -285,7 +289,8 @@ validate_application_data_tree() {
     fi
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
-      auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations)
+      auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations | \
+      subtitle-generation | subtitle-generation/jobs | subtitle-generation/receipts | subtitle-generation/transactions)
         [[ -d "$path" ]] || invalid=1
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
@@ -293,6 +298,10 @@ validate_application_data_tree() {
         ;;
       *)
         if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$path" ]] || invalid=1
+        elif [[ "$relative_path" =~ ^subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
+          "$relative_path" =~ ^subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
+          "$relative_path" =~ ^subtitle-generation/transactions/[0-9A-F]{64}-[0-9a-f]{32}\.json$ ]]; then
           [[ -f "$path" ]] || invalid=1
         elif [[ "$relative_path" =~ ^media-previews/[0-9a-f]{32}$ ]]; then
           [[ -d "$path" ]] || invalid=1
@@ -352,7 +361,9 @@ prepare_application_data() {
     mkdir -p -- "$RC_INSTALL_ROOT/$directory" || return 1
     chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
   done
-  for directory in data/file-operations data/file-operations/plans data/file-operations/operations; do
+  for directory in data/file-operations data/file-operations/plans data/file-operations/operations \
+    data/subtitle-generation data/subtitle-generation/jobs data/subtitle-generation/receipts \
+    data/subtitle-generation/transactions; do
     if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then
       chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
     fi
@@ -539,6 +550,10 @@ LEGACY_DEPLOYMENT_FILES=(
 )
 
 UPDATER_DEPLOYMENT_FILES=(
+  'bin/subtitle_management.py'
+  'lib/compose.subtitles.yaml'
+  'lib/compose.updater.yaml'
+  'state/subtitles-enabled'
   'compose.override.yaml'
   'state/current-version'
   'state/previous-version'
@@ -878,6 +893,10 @@ recover_incomplete_reconfiguration() {
 }
 
 reject_incomplete_source_transaction() {
+  if [[ -e "$RC_INSTALL_ROOT/state/subtitle-transaction.json" || -L "$RC_INSTALL_ROOT/state/subtitle-transaction.json" ]]; then
+    rc_die 'recover the incomplete subtitle transaction before reconfiguring'
+    return 1
+  fi
   local transaction_root="$RC_INSTALL_ROOT/backups/.source-transaction"
   if [[ -e "$transaction_root" || -L "$transaction_root" ]]; then
     rc_die 'an incomplete source transaction must be recovered before reconfiguration; retry the original source add first'
@@ -1084,6 +1103,16 @@ python3 "$RENDERER" set-image --env "$STAGE_ROOT/.env" --image "$RESOLVED_IMAGE"
 mkdir -p -- "$STAGE_ROOT/bin" "$STAGE_ROOT/lib"
 install -m 0755 -- "$RENDERER" "$STAGE_ROOT/bin/render_config.py"
 install -m 0755 -- "$SOURCE_MANAGEMENT" "$STAGE_ROOT/bin/source_management.py"
+install -m 0755 -- "$SUBTITLE_MANAGEMENT" "$STAGE_ROOT/bin/subtitle_management.py"
+install -m 0600 -- "$SUBTITLE_COMPOSE_TEMPLATE" "$STAGE_ROOT/lib/compose.subtitles.yaml"
+install -m 0600 -- "$UPDATER_COMPOSE_TEMPLATE" "$STAGE_ROOT/lib/compose.updater.yaml"
+subtitle_enabled="$(python3 "$SUBTITLE_MANAGEMENT" enabled --root "$RC_INSTALL_ROOT")"
+rc_atomic_write "$STAGE_ROOT/state/subtitles-enabled" "$subtitle_enabled"$'\n'
+python3 "$SUBTITLE_MANAGEMENT" storage-check --root "$RC_INSTALL_ROOT" --config-root "$STAGE_ROOT"
+if [[ "$subtitle_enabled" == 'true' ]]; then
+  python3 "$SUBTITLE_MANAGEMENT" preflight --root "$RC_INSTALL_ROOT" --image "$RESOLVED_IMAGE"
+  python3 "$SUBTITLE_MANAGEMENT" sync --root "$STAGE_ROOT"
+fi
 install -m 0755 -- "$SUPPORT_BUNDLE_CLI" "$STAGE_ROOT/bin/support_bundle_cli.py"
 install -m 0755 -- "$UPDATE_TRACE_CLI" "$STAGE_ROOT/bin/update_trace_cli.py"
 install -m 0755 -- "$UPDATER_SERVICE" "$STAGE_ROOT/bin/updater_service.py"
@@ -1105,7 +1134,7 @@ else
   INSTALL_TRANSACTION_ACTIVE=true
 fi
 
-if ! install_staged_deployment "$STAGE_ROOT" || ! prepare_application_data; then
+if ! install_staged_deployment "$STAGE_ROOT" || ! prepare_application_data || ! rc_subtitles prepare; then
   if [[ "$HAD_EXISTING" == 'true' ]]; then
     if rollback_reconfiguration_transaction true; then
       rc_die 'reconfiguration write failed; the previous deployment was restored'

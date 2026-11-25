@@ -46,6 +46,7 @@ Usage:
   reachcommander restart
   reachcommander doctor
   reachcommander source add
+  reachcommander subtitles enable|disable|status|download-models|recover
   reachcommander update [stable|edge|vX.Y.Z]
   reachcommander uninstall
 EOF
@@ -76,6 +77,10 @@ validate_invocation() {
       ;;
     source)
       (( argument_count == 2 )) && [[ "${2:-}" == 'add' ]] || return 64
+      ;;
+    subtitles)
+      (( argument_count == 2 )) || return 64
+      case "${2:-}" in enable | disable | status | download-models | recover) ;; *) return 64 ;; esac
       ;;
     *)
       return 64
@@ -472,6 +477,8 @@ finally:
 
 command_start() {
   rc_acquire_lock
+  rc_subtitles sync
+  rc_subtitles prepare
   rc_compose up -d reachcommander
   rc_wait_healthy reachcommander 60
 }
@@ -483,7 +490,13 @@ command_stop() {
 
 command_restart() {
   rc_acquire_lock
-  rc_compose restart reachcommander
+  rc_subtitles sync
+  rc_subtitles prepare
+  if [[ "$(rc_subtitles_enabled)" == 'true' ]]; then
+    rc_compose up -d --force-recreate reachcommander
+  else
+    rc_compose restart reachcommander
+  fi
   rc_wait_healthy reachcommander 60
 }
 
@@ -514,6 +527,7 @@ atomic_copy_file() {
 
 UPDATE_BACKUP_FILES=(
   '.env'
+  'compose.override.yaml'
   'config/sources.json'
   'state/source-mounts.json'
   'state/channel'
@@ -610,6 +624,10 @@ verify_update_state() {
   local previous_image=''
   local current_version
   local previous_version=''
+  if [[ -e "$RC_INSTALL_ROOT/state/subtitle-transaction.json" || -L "$RC_INSTALL_ROOT/state/subtitle-transaction.json" ]]; then
+    rc_die 'an incomplete subtitle transaction must be recovered before updating'
+    return 1
+  fi
   if [[ -e "$RC_INSTALL_ROOT/backups/.source-transaction" || -L "$RC_INSTALL_ROOT/backups/.source-transaction" ]]; then
     rc_die 'an incomplete source transaction must be recovered before updating'
     return 1
@@ -751,6 +769,7 @@ wait_for_update_health() {
     fi
     case "$status" in
       healthy)
+        rc_subtitles verify || return 1
         return 0
         ;;
       unhealthy | missing)
@@ -813,6 +832,7 @@ command_update() {
   if ! resolved_version="$(rc_image_display_version "$resolved_image" "$requested_channel")"; then
     return 1
   fi
+  rc_subtitles preflight --image "$resolved_image" || return 1
 
   report_update_stage installing
   report_update_event backupStarted started
@@ -839,7 +859,7 @@ command_update() {
 
   report_update_stage restarting
   report_update_event candidateRestartStarted started
-  if rc_compose up -d reachcommander; then
+  if rc_subtitles sync && rc_compose up -d reachcommander; then
     report_update_event candidateRestartCompleted succeeded
     if verify_running_image "$resolved_image"; then
       report_update_event candidateImageVerified succeeded
@@ -933,7 +953,8 @@ application_data_tree_is_safe() {
     fi
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
-      auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations)
+      auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations | \
+      subtitle-generation | subtitle-generation/jobs | subtitle-generation/receipts | subtitle-generation/transactions)
         [[ -d "$path" ]] || return 1
         ;;
       auth/account.json | auth/bootstrap.json | auth/auth.lock | keys/key-*.xml)
@@ -941,6 +962,10 @@ application_data_tree_is_safe() {
         ;;
       *)
         if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
+          [[ -f "$path" ]] || return 1
+        elif [[ "$relative_path" =~ ^subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
+          "$relative_path" =~ ^subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
+          "$relative_path" =~ ^subtitle-generation/transactions/[0-9A-F]{64}-[0-9a-f]{32}\.json$ ]]; then
           [[ -f "$path" ]] || return 1
         elif [[ "$relative_path" =~ ^media-previews/[0-9a-f]{32}$ ]]; then
           [[ -d "$path" ]] || return 1
@@ -965,6 +990,10 @@ application_data_tree_is_safe() {
 }
 
 UNINSTALL_FILES=(
+  'bin/subtitle_management.py'
+  'lib/compose.subtitles.yaml'
+  'lib/compose.updater.yaml'
+  'state/subtitles-enabled'
   '.env'
   'compose.yaml'
   'compose.override.yaml'
@@ -1006,6 +1035,11 @@ validate_uninstall_tree() {
   local path
   local relative_path
   local invalid=0
+  if [[ -e "$RC_INSTALL_ROOT/state/subtitle-transaction.json" || -L "$RC_INSTALL_ROOT/state/subtitle-transaction.json" ]]; then
+    rc_die 'recover the incomplete subtitle transaction before uninstalling'
+    return 1
+  fi
+  rc_subtitles storage-check || return 1
   if [[ -L "$RC_INSTALL_ROOT" || -L "$RC_COMMAND_PATH" || -L "$RC_BACKUP_ROOT" ]]; then
     rc_die 'uninstall paths must not be symlinks'
     return 1
@@ -1027,8 +1061,10 @@ validate_uninstall_tree() {
     case "$relative_path" in
       config|state|state/update-traces|bin|lib|backups|data|data/auth|data/keys|\
       data/file-operations|data/file-operations/plans|data/file-operations/operations|\
+      data/subtitle-generation|data/subtitle-generation/jobs|data/subtitle-generation/receipts|data/subtitle-generation/transactions|\
       data/media-previews|\
       .env|compose.yaml|compose.override.yaml|\
+      bin/subtitle_management.py|lib/compose.subtitles.yaml|lib/compose.updater.yaml|state/subtitles-enabled|\
       config/sources.json|\
       state/source-mounts.json|\
       state/channel|\
@@ -1062,6 +1098,11 @@ validate_uninstall_tree() {
         if [[ "$relative_path" =~ ^data/file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]] &&
           [[ -f "$path" ]]; then
           :
+        elif [[ "$relative_path" =~ ^data/subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
+          "$relative_path" =~ ^data/subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
+          "$relative_path" =~ ^data/subtitle-generation/transactions/[0-9A-F]{64}-[0-9a-f]{32}\.json$ ]] &&
+          [[ -f "$path" ]]; then
+          :
         elif [[ "$relative_path" =~ ^data/media-previews/[0-9a-f]{32}$ ]] &&
           [[ -d "$path" ]]; then
           :
@@ -1077,7 +1118,7 @@ validate_uninstall_tree() {
         fi
         ;;
     esac
-  done < <(find "$RC_INSTALL_ROOT" -mindepth 1 -print0)
+  done < <(find "$RC_INSTALL_ROOT" -mindepth 1 -path "$RC_INSTALL_ROOT/subtitles" -prune -o -mindepth 1 -print0)
   if (( invalid != 0 )); then
     rc_die 'install root contains an unexpected or symlinked entry'
     return 1
@@ -1259,6 +1300,10 @@ remove_application_data() {
     file-operations/plans \
     file-operations/operations \
     file-operations \
+    subtitle-generation/jobs \
+    subtitle-generation/receipts \
+    subtitle-generation/transactions \
+    subtitle-generation \
     media-previews \
     auth \
     keys; do
@@ -1418,7 +1463,7 @@ command_uninstall() {
     fi
     return 1
   fi
-  if [[ "$application_action" == 'backup' ]] && ! rmdir -- "$RC_INSTALL_ROOT"; then
+  if [[ "$application_action" == 'backup' && ! -d "$RC_INSTALL_ROOT/subtitles" ]] && ! rmdir -- "$RC_INSTALL_ROOT"; then
     rc_die "install root removal was incomplete; verified backup is at $backup_destination"
     return 1
   fi
@@ -1434,6 +1479,9 @@ command_uninstall() {
     printf 'ReachCommander was uninstalled. Verified backup: %s\n' "$backup_destination"
   else
     printf 'ReachCommander was uninstalled. Application data retained at: %s\n' "$RC_INSTALL_ROOT/data"
+  fi
+  if [[ -d "$RC_INSTALL_ROOT/subtitles" ]]; then
+    printf 'Subtitle models and mailbox retained at: %s\n' "$RC_INSTALL_ROOT/subtitles"
   fi
 }
 
@@ -1596,6 +1644,12 @@ doctor_application_data() {
   if [[ -d "$RC_INSTALL_ROOT/data/media-previews" ]]; then
     data_directories+=(data/media-previews)
   fi
+  for relative_path in data/subtitle-generation data/subtitle-generation/jobs \
+    data/subtitle-generation/receipts data/subtitle-generation/transactions; do
+    if [[ -d "$RC_INSTALL_ROOT/$relative_path" ]]; then
+      data_directories+=("$relative_path")
+    fi
+  done
 
   for relative_path in "${data_directories[@]}"; do
     path="$RC_INSTALL_ROOT/$relative_path"
@@ -1681,6 +1735,11 @@ command_doctor() {
   fi
 
   doctor_required_files
+  if rc_subtitles status >/dev/null 2>&1; then
+    doctor_pass 'Subtitle deployment state and enabled worker are healthy'
+  else
+    doctor_fail 'Subtitle deployment needs attention; run reachcommander subtitles status or recover'
+  fi
 
   local trace_detail=''
   if trace_detail="$(run_update_trace_cli --doctor 2>/dev/null)"; then
@@ -1821,6 +1880,11 @@ command_doctor() {
 }
 
 case "$1" in
+  subtitles)
+    rc_acquire_lock
+    [[ -f "$RC_INSTALL_ROOT/bin/subtitle_management.py" ]] || { rc_die 'refresh the verified installer to install the subtitle manager'; exit 1; }
+    rc_subtitles "$2"
+    ;;
   status)
     command_status
     ;;

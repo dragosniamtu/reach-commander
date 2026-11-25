@@ -35,6 +35,11 @@ export class ActivePanelToolbarComponent {
   readonly sourceManagementPending = input(false);
   readonly sourceManagementDisabledReason = input<string | null>(null);
   readonly sourceManagementRetryAvailable = input(false);
+  readonly subtitleDisabledReason = input<string | null>('Select or focus one video or folder.');
+  readonly subtitleReadinessMessage = input<string | null>(null);
+  readonly activeSubtitleJobs = input(0);
+  readonly subtitlesRequested = output<HTMLElement>();
+  readonly subtitleHistoryRequested = output<HTMLElement>();
   readonly renameRequested = output<void>();
   readonly encodingRequested = output<HTMLElement>();
   readonly filesSelected = output<readonly File[]>();

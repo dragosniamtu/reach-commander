@@ -19,6 +19,7 @@ from typing import Callable, Iterable
 
 if __package__:
     from . import render_config as renderer
+    from .subtitle_management import SubtitleManager
     from .updater_protocol import (
         MAX_SOURCE_MANAGEMENT_MESSAGE_BYTES,
         ProtocolError,
@@ -26,6 +27,7 @@ if __package__:
     )
 else:
     import render_config as renderer
+    from subtitle_management import SubtitleManager
 
     _INSTALL_LIB = Path(__file__).resolve().parent.parent / "lib"
     sys.path.insert(0, str(_INSTALL_LIB))
@@ -53,6 +55,7 @@ _TRANSACTION_FILES = (
     "config/sources.json",
     "state/source-mounts.json",
     "compose.yaml",
+    "compose.override.yaml",
 )
 _JOURNAL_MAX_BYTES = 4_096
 _PHASE_REASON_CODES = {
@@ -537,7 +540,7 @@ class SourceTransaction:
             _safe_status(path, kind="directory", mode=mode, owner=self._owner)
         for path, mode in file_modes.items():
             _safe_status(path, kind="file", mode=mode, owner=self._owner)
-        for marker in ("install-transaction", "update-transaction"):
+        for marker in ("install-transaction", "update-transaction", "subtitle-transaction.json"):
             if (self.root / "state" / marker).exists() or (
                 self.root / "state" / marker
             ).is_symlink():
@@ -714,6 +717,7 @@ class SourceTransaction:
             )
             shutil.copyfile(self.root / "compose.override.yaml", stage_root / "compose.override.yaml")
             (stage_root / "compose.override.yaml").chmod(0o600)
+            SubtitleManager(self.root, run=self._run).sync(output=stage_root, request=updated)
             self._run(
                 [
                     "docker",
@@ -728,6 +732,9 @@ class SourceTransaction:
             self._journal("publishing", source_id, display_name)
             self._revalidate_source_identities(source_identities)
             publication_started = True
+            if SubtitleManager(self.root, run=self._run).enabled():
+                self._run(['docker', 'compose', '--project-directory', str(self.root),
+                           'stop', 'subtitle-worker'], 45)
             self._publish(stage_root)
             self._journal("published", source_id, display_name)
             self._interrupt("published")
@@ -979,6 +986,7 @@ class SourceTransaction:
                 "up",
                 "-d",
                 "reachcommander",
+                *(["subtitle-worker"] if SubtitleManager(self.root, run=self._run).enabled() else []),
             ],
             90,
         )
@@ -1004,6 +1012,7 @@ class SourceTransaction:
                 15,
             ).strip()
             if health == "healthy":
+                SubtitleManager(self.root, run=self._run).verify()
                 return
             if health not in {"starting", "created", "restarting"}:
                 raise SourceManagementFailure()

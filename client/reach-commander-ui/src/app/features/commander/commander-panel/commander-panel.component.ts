@@ -10,6 +10,7 @@ import {
 import { SourceDto } from '../../../core/api/api.models';
 import { CommanderStore } from '../../../core/state/commander-store';
 import { MediaPreviewContext } from '../../../core/state/media-preview.models';
+import { captureSubtitleContext } from '../../subtitles/subtitle-generation.models';
 import {
   locationDisplayPath,
   locationSourceId,
@@ -35,6 +36,11 @@ export interface MediaPreviewRequest {
   readonly opener: HTMLElement | null;
 }
 
+export interface SubtitleGenerationRequest {
+  readonly side: PanelSide;
+  readonly opener: HTMLElement | null;
+}
+
 @Component({
   selector: 'app-commander-panel',
   imports: [SourceSelectorComponent, DirectoryTabsComponent, PathBarComponent, FileTableComponent],
@@ -51,6 +57,9 @@ export class CommanderPanelComponent {
   readonly sourceRemovalPending = input(false);
   readonly sourceRemovalRequested = output<SourceRemovalRequest>();
   readonly mediaPreviewRequested = output<MediaPreviewRequest>();
+  readonly subtitlesRequested = output<SubtitleGenerationRequest>();
+  readonly subtitleReadinessMessage = input<string | null>(null);
+  readonly subtitleContext = computed(() => captureSubtitleContext(this.side(), this.panel(), this.sources()));
   readonly activeTab = computed(() =>
     this.panel().tabs.find((tab) => tab.id === this.panel().activeTabId),
   );
@@ -113,6 +122,12 @@ export class CommanderPanelComponent {
     }
     await this.store.openEntry(this.side(), row);
     this.focusPanel();
+  }
+
+  requestSubtitles(row: FileTableRow): void {
+    if (this.subtitleContext().context) {
+      this.subtitlesRequested.emit({ side: this.side(), opener: this.openerFor(row.relativePath) });
+    }
   }
 
   openerFor(relativePath: string): HTMLElement | null {

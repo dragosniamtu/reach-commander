@@ -5,6 +5,8 @@ TEST_DIRECTORY="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPOSITORY_ROOT="$(cd -P -- "$TEST_DIRECTORY/../../.." && pwd -P)"
 INSTALLER="$REPOSITORY_ROOT/deploy/macos/install.sh"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
+# shellcheck source=../fixtures/subtitle-data.sh
+source "$TEST_DIRECTORY/../fixtures/subtitle-data.sh"
 TEST_PARENT="$(cd -P -- "${REACHCOMMANDER_TEST_TMPDIR:-${HOME:?}}" && pwd -P)"
 TEST_ROOT="$(mktemp -d "$TEST_PARENT/reachcommander-macos-test.XXXXXX")"
 
@@ -218,6 +220,7 @@ ACCOUNT_FILE="$REACHCOMMANDER_TEST_INSTALL_ROOT/data/auth/account.json"
 KEY_FILE="$REACHCOMMANDER_TEST_INSTALL_ROOT/data/keys/key-test.xml"
 printf 'account-canary\n' >"$ACCOUNT_FILE"
 printf 'key-canary\n' >"$KEY_FILE"
+create_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data"
 GENERATED_BEFORE_EXIT="$(source_hashes; hash_files "$REACHCOMMANDER_TEST_INSTALL_ROOT/.env" "$REACHCOMMANDER_TEST_INSTALL_ROOT/compose.yaml")"
 run_installer '3' "$TEST_ROOT/exit.out"
 assert_equal 0 "$last_status" "existing-deployment exit"
@@ -238,7 +241,8 @@ assert_equal "$DIGEST_B" "$(sed -n '1p' "$REACHCOMMANDER_TEST_INSTALL_ROOT/state
 assert_equal "$DIGEST_A" "$(sed -n '1p' "$REACHCOMMANDER_TEST_INSTALL_ROOT/state/previous-image")" "previous digest"
 assert_equal 'account-canary' "$(sed -n '1p' "$ACCOUNT_FILE")" "account persistence"
 assert_equal 'key-canary' "$(sed -n '1p' "$KEY_FILE")" "key persistence"
-pass "healthy update advances digest without touching authentication"
+assert_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" || fail 'update changed subtitle state'
+pass "healthy update advances digest without touching authentication or subtitle state"
 
 printf 'unhealthy\nhealthy\n' >"$TEST_ROOT/update-health-sequence"
 export FAKE_DOCKER_HEALTH_SEQUENCE_FILE="$TEST_ROOT/update-health-sequence"
@@ -261,7 +265,8 @@ assert_equal 'Renamed Media' \
   "reconfigured source name"
 assert_equal 'account-canary' "$(sed -n '1p' "$ACCOUNT_FILE")" "reconfiguration account persistence"
 assert_equal 'key-canary' "$(sed -n '1p' "$KEY_FILE")" "reconfiguration key persistence"
-pass "reconfiguration preserves authentication and keys"
+assert_subtitle_fixture "$REACHCOMMANDER_TEST_INSTALL_ROOT/data" || fail 'reconfiguration changed subtitle state'
+pass "reconfiguration preserves authentication, keys, and subtitle state"
 
 set_install_root lan
 export FAKE_LSOF_OCCUPIED_PORTS=8080

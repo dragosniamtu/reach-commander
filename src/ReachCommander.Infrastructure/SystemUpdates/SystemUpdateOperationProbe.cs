@@ -3,6 +3,7 @@ using ReachCommander.Application.FileOperations;
 using ReachCommander.Application.SourceManagement;
 using ReachCommander.Infrastructure.Archives.Extraction;
 using ReachCommander.Infrastructure.TextEncodings;
+using ReachCommander.Application.SubtitleGeneration;
 
 namespace ReachCommander.Infrastructure.SystemUpdates;
 
@@ -14,7 +15,8 @@ internal interface ISystemUpdateOperationProbe
 internal sealed class SystemUpdateOperationProbe(
     IFileOperationService fileOperations,
     ArchiveExtractionOperationStore? archiveOperations = null,
-    TextEncodingOperationStore? textEncodings = null) :
+    TextEncodingOperationStore? textEncodings = null,
+    ISubtitleGenerationService? subtitleJobs = null) :
     ISystemUpdateOperationProbe,
     ISourceManagementOperationEligibility
 {
@@ -29,6 +31,10 @@ internal sealed class SystemUpdateOperationProbe(
         {
             return true;
         }
+
+        if (subtitleJobs is not null && (await subtitleJobs.ListAsync(cancellationToken)).Any(job =>
+                job.Phase is SubtitleJobPhase.Queued or SubtitleJobPhase.Discovering or SubtitleJobPhase.Running or SubtitleJobPhase.Cancelling))
+            return true;
 
         return archiveOperations?.HasActiveOperations() == true ||
             textEncodings?.HasActiveOperations() == true;

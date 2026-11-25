@@ -123,6 +123,32 @@
     }
   </span>
 
+  <span class="action-wrapper" role="group"
+    [attr.tabindex]="subtitleDisabledReason() ? 0 : null"
+    [attr.aria-describedby]="subtitleDisabledReason() ? 'subtitle-disabled-reason' : null"
+    [title]="subtitleDisabledReason() ?? subtitleReadinessMessage() ?? 'Generate Subtitles for the selected video or folder'">
+    <button #subtitleButton type="button" data-testid="toolbar-subtitles"
+      [attr.aria-describedby]="!subtitleDisabledReason() && subtitleReadinessMessage() ? 'subtitle-readiness' : null"
+      [disabled]="subtitleDisabledReason() !== null" (click)="subtitlesRequested.emit(subtitleButton)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
+        <path d="M3 4h14v12H3zM5 10h4m2 0h4M5 13h6m2 0h2" vector-effect="non-scaling-stroke" />
+      </svg>
+      <span class="action-text">Generate Subtitles</span>
+    </button>
+    @if (subtitleDisabledReason()) { <span id="subtitle-disabled-reason" class="sr-only">{{ subtitleDisabledReason() }}</span> }
+    @if (!subtitleDisabledReason() && subtitleReadinessMessage()) { <span id="subtitle-readiness" class="sr-only">{{ subtitleReadinessMessage() }}</span> }
+  </span>
+  <span class="action-wrapper" role="group" [title]="'Subtitle jobs' + (activeSubtitleJobs() ? ' · ' + activeSubtitleJobs() + ' active' : '')">
+    <button #subtitleHistoryButton type="button" data-testid="toolbar-subtitle-jobs"
+      [attr.aria-label]="'Subtitle jobs' + (activeSubtitleJobs() ? ', ' + activeSubtitleJobs() + ' active' : '')"
+      (click)="subtitleHistoryRequested.emit(subtitleHistoryButton)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
+        <path d="M4 6h12M4 10h8M4 14h6m3-1 2 2 3-4" vector-effect="non-scaling-stroke" />
+      </svg>
+      <span class="action-text">Subtitle jobs{{ activeSubtitleJobs() ? ' (' + activeSubtitleJobs() + ')' : '' }}</span>
+    </button>
+  </span>
+
   @let uploadReason = uploadDisabledReason();
   <span
     class="action-wrapper"

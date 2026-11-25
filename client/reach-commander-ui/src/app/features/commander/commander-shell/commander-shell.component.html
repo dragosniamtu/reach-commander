@@ -10,6 +10,11 @@
       (filterChanged)="setActiveFilter($event)"
       (renameRequested)="openMultiRename()"
       (encodingRequested)="openTextEncoding($event)"
+      [subtitleDisabledReason]="subtitleContext().error"
+      [subtitleReadinessMessage]="subtitles.readinessMessage()"
+      [activeSubtitleJobs]="subtitles.activeCount()"
+      (subtitlesRequested)="openSubtitles($event)"
+      (subtitleHistoryRequested)="openSubtitleHistory($event)"
       (extractRequested)="openArchiveExtraction()"
       (trashRequested)="openTrash()"
       (filesSelected)="reviewUpload($event)"
@@ -138,6 +143,10 @@
     <app-media-preview-dialog />
   }
 
+  @if (subtitles.dialog() !== 'closed') {
+    <app-subtitle-generation-dialog (closeRequested)="closeSubtitles()" />
+  }
+
   @if (fileOperations.dialog() === 'confirm') {
     <app-copy-move-dialog (closed)="restoreFileOperationFocus()" />
   }
@@ -175,6 +184,8 @@
       [sourceRemovalPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
       (sourceRemovalRequested)="openSourceRemoval($event)"
       (mediaPreviewRequested)="openMediaPreview($event)"
+      (subtitlesRequested)="openPanelSubtitles($event)"
+      [subtitleReadinessMessage]="subtitles.readinessMessage()"
     />
     <div class="divider" aria-hidden="true"><span></span></div>
     <app-commander-panel
@@ -187,6 +198,8 @@
       [sourceRemovalPending]="sourceManagement.capabilityPending() || sourceManagement.pending()"
       (sourceRemovalRequested)="openSourceRemoval($event)"
       (mediaPreviewRequested)="openMediaPreview($event)"
+      (subtitlesRequested)="openPanelSubtitles($event)"
+      [subtitleReadinessMessage]="subtitles.readinessMessage()"
     />
   </section>
 

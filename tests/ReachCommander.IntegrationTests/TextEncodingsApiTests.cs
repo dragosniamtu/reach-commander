@@ -149,6 +149,7 @@ public sealed class TextEncodingsApiTests(ReachCommanderApiFactory factory)
         await using var isolatedFactory = new ReachCommanderApiFactory();
         var directory = CreateCaseDirectory(isolatedFactory);
         File.WriteAllText(Path.Combine(directory.PhysicalPath, "episode.srt"), "subtitle");
+        File.WriteAllText(Path.Combine(directory.PhysicalPath, "budget.srt"), "subtitle");
         using var client = isolatedFactory.CreateClient();
         var plan = await PreviewSingleAsync(client, directory.LogicalPath, "episode.srt");
         using var start = await client.PostAsync($"/api/text-encodings/{plan.PlanId}/execute", null);
@@ -164,12 +165,13 @@ public sealed class TextEncodingsApiTests(ReachCommanderApiFactory factory)
         }
 
         // Preview and execute above used two command permits.
+        // Use a separate file because conversion can still be publishing episode.srt.
         for (var command = 2; command < 21; command++)
         {
             using var preview = await client.PostAsJsonAsync("/api/text-encodings/preview", new
             {
                 sourceId = "media",
-                filePaths = new[] { $"{directory.LogicalPath}/episode.srt" },
+                filePaths = new[] { $"{directory.LogicalPath}/budget.srt" },
                 sourceEncoding = "auto",
                 outputEncoding = "utf8",
             });

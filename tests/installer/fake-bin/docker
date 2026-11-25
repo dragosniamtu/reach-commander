@@ -54,6 +54,9 @@ case "${1:-}" in
       *org.opencontainers.image.revision*)
         printf '%s\n' "${FAKE_DOCKER_REVISION_LABEL:-}"
         ;;
+      *io.reachcommander.subtitle-worker-image*)
+        printf '%s\n' "${FAKE_DOCKER_WORKER_DIGEST:-}"
+        ;;
       *)
         printf '%s\n' "${FAKE_DOCKER_DIGESTS:-}"
         ;;
@@ -62,6 +65,10 @@ case "${1:-}" in
     ;;
   inspect)
     if [[ "${3:-}" == '{{.Image}}' ]]; then
+      if [[ "${4:-}" == 'reachcommander-subtitles' && -n "${FAKE_DOCKER_WORKER_DIGEST:-}" ]]; then
+        printf '%s\n' "${FAKE_DOCKER_WORKER_DIGEST##*@}"
+        exit 0
+      fi
       if [[ -n "${FAKE_DOCKER_RUNNING_IMAGE_ID_FILE:-}" && -s "$FAKE_DOCKER_RUNNING_IMAGE_ID_FILE" ]]; then
         read_sequence_value "$FAKE_DOCKER_RUNNING_IMAGE_ID_FILE"
       elif [[ -n "${FAKE_DOCKER_RUNNING_IMAGE_ID:-}" ]]; then

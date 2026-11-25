@@ -741,6 +741,11 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--template", required=True, type=pathlib.Path)
     render.add_argument("--output", required=True, type=pathlib.Path)
 
+    installed = subparsers.add_parser("render-installed")
+    installed.add_argument("--root", required=True, type=pathlib.Path)
+    installed.add_argument("--template", required=True, type=pathlib.Path)
+    installed.add_argument("--output", required=True, type=pathlib.Path)
+
     set_image = subparsers.add_parser("set-image")
     set_image.add_argument("--env", required=True, type=pathlib.Path)
     set_image.add_argument("--image", required=True)
@@ -779,6 +784,16 @@ def main(arguments: list[str] | None = None) -> int:
             )
         elif args.command == "render":
             render_deployment(load_request(args.request), args.template, args.output)
+        elif args.command == "render-installed":
+            mounts_path = args.root / "state/source-mounts.json"
+            request = load_installed_request(
+                args.root / ".env", args.root / "config/sources.json", mounts_path
+            )
+            mounts = _load_json(mounts_path, "source mounts")
+            if any(source.host_path != saved["hostPath"]
+                   for source, saved in zip(request.sources, mounts["sources"])):
+                raise ValueError("sources.hostPath: saved path no longer resolves to itself")
+            render_deployment(request, args.template, args.output)
         elif args.command == "set-image":
             set_env_image(args.env, args.image)
         elif args.command == "validate-env":

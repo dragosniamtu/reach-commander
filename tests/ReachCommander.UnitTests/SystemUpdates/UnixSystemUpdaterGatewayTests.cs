@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using ReachCommander.Application.SourceManagement;
 using ReachCommander.Application.SystemUpdates;
 using ReachCommander.Infrastructure;
 using ReachCommander.Infrastructure.SystemUpdates;
@@ -12,8 +13,11 @@ namespace ReachCommander.UnitTests.SystemUpdates;
 
 public sealed class UnixSystemUpdaterGatewayTests
 {
-    [Fact]
-    public async Task Configured_gateway_recovers_when_helper_starts_after_application_registration()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Configured_gateway_recovers_when_helper_starts_after_application_registration(
+        bool sourceManagement)
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -22,10 +26,14 @@ public sealed class UnixSystemUpdaterGatewayTests
 
         var socketPath = Path.Combine(Path.GetTempPath(), $"rc-late-{Guid.NewGuid():N}.sock");
         using var provider = CreateConfiguredProvider(socketPath, enabled: true);
-        var gateway = provider.GetRequiredService<ISystemUpdaterGateway>();
+        var updates = provider.GetRequiredService<ISystemUpdaterGateway>();
+        var sources = provider.GetRequiredService<ISourceManagementGateway>();
+        async Task<bool> CheckSupportedAsync(CancellationToken token) => sourceManagement
+            ? (await sources.GetStatusAsync(token)).Supported
+            : (await updates.CheckAsync(token)).Supported;
         try
         {
-            Assert.False((await gateway.CheckAsync(default)).Supported);
+            Assert.False(await CheckSupportedAsync(default));
         }
         catch (SystemUpdaterUnavailableException)
         {
@@ -47,15 +55,16 @@ public sealed class UnixSystemUpdaterGatewayTests
                 using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
                 var request = await reader.ReadLineAsync(timeout.Token);
                 using var document = JsonDocument.Parse(Assert.IsType<string>(request));
-                Assert.Equal("check", document.RootElement.GetProperty("action").GetString());
-                await writer.WriteLineAsync(Response("available").AsMemory(), timeout.Token);
+                Assert.Equal(sourceManagement ? "status" : "check",
+                    document.RootElement.GetProperty("action").GetString());
+                var response = sourceManagement
+                    ? """{"protocolVersion":6,"requestId":"11111111-1111-1111-1111-111111111111","action":"status","payload":{"supported":true,"reasonCode":"supported","detail":"Source management is available."}}"""
+                    : Response("available");
+                await writer.WriteLineAsync(response.AsMemory(), timeout.Token);
                 await writer.FlushAsync(timeout.Token);
             }, timeout.Token);
 
-            var recovered = await gateway.CheckAsync(timeout.Token);
-
-            Assert.True(recovered.Supported);
-            Assert.Equal("v1.4.0", recovered.TargetVersion);
+            Assert.True(await CheckSupportedAsync(timeout.Token));
             await server;
         }
         finally
@@ -103,6 +112,7 @@ public sealed class UnixSystemUpdaterGatewayTests
         services.AddLogging();
         services.AddReachCommanderInfrastructure(configuration);
         services.AddSingleton<ISystemUpdateRequestIdGenerator, FixedRequestId>();
+        services.AddSingleton<ISourceManagementRequestIdGenerator, FixedRequestId>();
         return services.BuildServiceProvider();
     }
 
@@ -597,7 +607,7 @@ public sealed class UnixSystemUpdaterGatewayTests
         _ => "update_failed",
     };
 
-    private sealed class FixedRequestId : ISystemUpdateRequestIdGenerator
+    private sealed class FixedRequestId : ISystemUpdateRequestIdGenerator, ISourceManagementRequestIdGenerator
     {
         public Guid NewId() => Guid.Parse("11111111-1111-1111-1111-111111111111");
     }

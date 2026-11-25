@@ -76,11 +76,20 @@ public sealed class UnixSystemUpdaterGatewayTests
     public async Task Explicitly_disabled_updates_remain_unavailable()
     {
         var socketPath = Path.Combine(Path.GetTempPath(), $"rc-disabled-{Guid.NewGuid():N}.sock");
-        using var provider = CreateConfiguredProvider(socketPath, enabled: false);
+        // Even an existing endpoint must not override the administrator's setting.
+        await File.WriteAllTextAsync(socketPath, string.Empty);
+        try
+        {
+            using var provider = CreateConfiguredProvider(socketPath, enabled: false);
 
-        var result = await provider.GetRequiredService<ISystemUpdaterGateway>().CheckAsync(default);
+            var result = await provider.GetRequiredService<ISystemUpdaterGateway>().CheckAsync(default);
 
-        Assert.False(result.Supported);
+            Assert.False(result.Supported);
+        }
+        finally
+        {
+            File.Delete(socketPath);
+        }
     }
 
     private static ServiceProvider CreateConfiguredProvider(string socketPath, bool enabled)

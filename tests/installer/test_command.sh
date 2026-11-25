@@ -18,6 +18,8 @@ UPDATER_UNIT="$REPOSITORY_ROOT/deploy/systemd/reachcommander-updater.service"
 FAKE_BIN="$TEST_DIRECTORY/fake-bin"
 # shellcheck source=fixtures/subtitle-data.sh
 source "$TEST_DIRECTORY/fixtures/subtitle-data.sh"
+# shellcheck source=fixtures/text-encoding-data.sh
+source "$TEST_DIRECTORY/fixtures/text-encoding-data.sh"
 
 if [[ ! -f "$COMMAND_SOURCE" ]]; then
   printf 'not ok - deploy/reachcommander must exist\n' >&2
@@ -152,6 +154,7 @@ chmod 0600 \
   "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/index.m3u8" \
   "$INSTALL_ROOT/data/media-previews/0123456789abcdef0123456789abcdef/segment-000000.ts"
 create_subtitle_fixture "$INSTALL_ROOT/data"
+create_text_encoding_fixture "$INSTALL_ROOT/data"
 if (( EUID == 0 )); then
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$INSTALL_ROOT/data"
 fi
@@ -861,6 +864,8 @@ for container_path in \
   /data/file-operations \
   /data/file-operations/plans \
   /data/file-operations/operations \
+  /data/text-encodings \
+  /data/text-encodings/staging \
   /data/media-previews; do
   printf '%s\n' "${doctor_args[@]}" | grep -Fxq "$container_path" ||
     fail "doctor did not probe fixed container path: $container_path"
@@ -1431,6 +1436,7 @@ for application_file in \
   esac
 done
 assert_subtitle_fixture "$backup_destination/application-data" || fail 'backup changed subtitle state'
+assert_text_encoding_fixture "$backup_destination/application-data" || fail 'backup changed text-encoding state'
 cmp -s \
   "$TEST_ROOT/account-valid.json" \
   "$backup_destination/application-data/auth/account.json" ||
@@ -1507,6 +1513,7 @@ chmod 0600 \
   "$INSTALL_ROOT/data/file-operations/operations/"*.json
 
 create_subtitle_fixture "$INSTALL_ROOT/data"
+create_text_encoding_fixture "$INSTALL_ROOT/data"
 : >"$FAKE_DOCKER_LOG"
 run_command_with_input $'retain\nuninstall ReachCommander' uninstall
 assert_equal "0" "$last_status" "retain uninstall status"
@@ -1519,6 +1526,7 @@ assert_equal "0" "$last_status" "retain uninstall status"
   fail "retain uninstall removed file-operation state"
 [[ ! -e "$COMMAND_PATH" ]] || fail "retain uninstall kept management command"
 assert_subtitle_fixture "$INSTALL_ROOT/data" || fail 'retain uninstall changed subtitle state'
+assert_text_encoding_fixture "$INSTALL_ROOT/data" || fail 'retain uninstall changed text-encoding state'
 unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
   ! -path "$INSTALL_ROOT/data" \
   ! -path "$INSTALL_ROOT/data/auth" \
@@ -1538,6 +1546,12 @@ unexpected_retained="$(find "$INSTALL_ROOT" -mindepth 1 \
   ! -path "$INSTALL_ROOT/data/${SUBTITLE_FIXTURE_FILES[0]}" \
   ! -path "$INSTALL_ROOT/data/${SUBTITLE_FIXTURE_FILES[1]}" \
   ! -path "$INSTALL_ROOT/data/${SUBTITLE_FIXTURE_FILES[2]}" \
+  ! -path "$INSTALL_ROOT/data/text-encodings" \
+  ! -path "$INSTALL_ROOT/data/text-encodings/staging" \
+  ! -path "$INSTALL_ROOT/data/${TEXT_ENCODING_FIXTURE_FILES[0]}" \
+  ! -path "$INSTALL_ROOT/data/${TEXT_ENCODING_FIXTURE_FILES[1]}" \
+  ! -path "$INSTALL_ROOT/data/${TEXT_ENCODING_FIXTURE_FILES[2]}" \
+  ! -path "$INSTALL_ROOT/data/${TEXT_ENCODING_FIXTURE_FILES[3]}" \
   -print -quit)"
 [[ -z "$unexpected_retained" ]] || fail "retain uninstall left generated deployment state"
 [[ "$last_output" == *"Application data retained at: $INSTALL_ROOT/data"* ]] ||

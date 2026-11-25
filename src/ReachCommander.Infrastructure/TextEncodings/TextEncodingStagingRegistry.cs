@@ -168,6 +168,7 @@ internal sealed class TextEncodingStagingRegistry(
         Directory.CreateDirectory(RegistryDirectory);
         if (!OperatingSystem.IsWindows())
         {
+            File.SetUnixFileMode(Path.GetDirectoryName(RegistryDirectory)!, OwnerDirectoryMode);
             File.SetUnixFileMode(RegistryDirectory, OwnerDirectoryMode);
         }
     }

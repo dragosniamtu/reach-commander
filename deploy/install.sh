@@ -290,6 +290,7 @@ validate_application_data_tree() {
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
       auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations | \
+      text-encodings | text-encodings/staging | \
       subtitle-generation | subtitle-generation/jobs | subtitle-generation/receipts | subtitle-generation/transactions)
         [[ -d "$path" ]] || invalid=1
         ;;
@@ -299,6 +300,8 @@ validate_application_data_tree() {
       *)
         if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
           [[ -f "$path" ]] || invalid=1
+        elif [[ "$relative_path" =~ ^text-encodings/staging/([0-9a-f]{32}\.json(\.invalid(-[0-9a-f]{32})?)?|\.[0-9a-f]{32}-[0-9a-f]{32}\.tmp)$ ]]; then
+          [[ -f "$path" && "$(stat -c '%h' -- "$path")" == '1' ]] || invalid=1
         elif [[ "$relative_path" =~ ^subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
           "$relative_path" =~ ^subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
           "$relative_path" =~ ^subtitle-generation/transactions/[0-9A-F]{64}-[0-9a-f]{32}\.json$ ]]; then
@@ -362,6 +365,7 @@ prepare_application_data() {
     chmod 0700 -- "$RC_INSTALL_ROOT/$directory" || return 1
   done
   for directory in data/file-operations data/file-operations/plans data/file-operations/operations \
+    data/text-encodings data/text-encodings/staging \
     data/subtitle-generation data/subtitle-generation/jobs data/subtitle-generation/receipts \
     data/subtitle-generation/transactions; do
     if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then

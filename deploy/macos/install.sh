@@ -680,6 +680,7 @@ rc_validate_application_data_tree() {
       { rc_die 'application data contains a symbolic link'; return 1; }
     case "$relative" in
       auth | keys | file-operations | file-operations/plans | file-operations/operations | \
+      text-encodings | text-encodings/staging | \
       subtitle-generation | subtitle-generation/jobs | subtitle-generation/receipts | subtitle-generation/transactions)
         [[ -d "$entry" ]] ||
           { rc_die 'application data directory has an invalid type'; return 1; }
@@ -699,6 +700,15 @@ rc_validate_application_data_tree() {
         if [[ "$relative" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
           [[ -f "$entry" ]] ||
             { rc_die 'file-operation state has an invalid type'; return 1; }
+        else
+          rc_die 'application data contains an unexpected entry'
+          return 1
+        fi
+        ;;
+      text-encodings/staging/*)
+        if [[ "$relative" =~ ^text-encodings/staging/([0-9a-f]{32}\.json(\.invalid(-[0-9a-f]{32})?)?|\.[0-9a-f]{32}-[0-9a-f]{32}\.tmp)$ ]]; then
+          [[ -f "$entry" && "$(stat -c '%h' "$entry" 2>/dev/null || stat -f '%l' "$entry")" == '1' ]] ||
+            { rc_die 'text-encoding state has an invalid type or link count'; return 1; }
         else
           rc_die 'application data contains an unexpected entry'
           return 1
@@ -737,6 +747,7 @@ rc_prepare_application_data() {
     chmod 0700 "$RC_INSTALL_ROOT/$directory" || return 1
   done
   for directory in data/file-operations data/file-operations/plans data/file-operations/operations \
+    data/text-encodings data/text-encodings/staging \
     data/subtitle-generation data/subtitle-generation/jobs data/subtitle-generation/receipts \
     data/subtitle-generation/transactions; do
     if [[ -d "$RC_INSTALL_ROOT/$directory" ]]; then

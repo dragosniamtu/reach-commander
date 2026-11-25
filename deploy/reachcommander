@@ -954,6 +954,7 @@ application_data_tree_is_safe() {
     relative_path="${path#"$data_root"/}"
     case "$relative_path" in
       auth | keys | file-operations | media-previews | file-operations/plans | file-operations/operations | \
+      text-encodings | text-encodings/staging | \
       subtitle-generation | subtitle-generation/jobs | subtitle-generation/receipts | subtitle-generation/transactions)
         [[ -d "$path" ]] || return 1
         ;;
@@ -963,6 +964,8 @@ application_data_tree_is_safe() {
       *)
         if [[ "$relative_path" =~ ^file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]]; then
           [[ -f "$path" ]] || return 1
+        elif [[ "$relative_path" =~ ^text-encodings/staging/([0-9a-f]{32}\.json(\.invalid(-[0-9a-f]{32})?)?|\.[0-9a-f]{32}-[0-9a-f]{32}\.tmp)$ ]]; then
+          [[ -f "$path" && "$(stat -c '%h' -- "$path")" == '1' ]] || return 1
         elif [[ "$relative_path" =~ ^subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
           "$relative_path" =~ ^subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
           "$relative_path" =~ ^subtitle-generation/transactions/[0-9A-F]{64}-[0-9a-f]{32}\.json$ ]]; then
@@ -1061,6 +1064,7 @@ validate_uninstall_tree() {
     case "$relative_path" in
       config|state|state/update-traces|bin|lib|backups|data|data/auth|data/keys|\
       data/file-operations|data/file-operations/plans|data/file-operations/operations|\
+      data/text-encodings|data/text-encodings/staging|\
       data/subtitle-generation|data/subtitle-generation/jobs|data/subtitle-generation/receipts|data/subtitle-generation/transactions|\
       data/media-previews|\
       .env|compose.yaml|compose.override.yaml|\
@@ -1097,6 +1101,9 @@ validate_uninstall_tree() {
       *)
         if [[ "$relative_path" =~ ^data/file-operations/(plans|operations)/[0-9a-f]{32}\.json$ ]] &&
           [[ -f "$path" ]]; then
+          :
+        elif [[ "$relative_path" =~ ^data/text-encodings/staging/([0-9a-f]{32}\.json(\.invalid(-[0-9a-f]{32})?)?|\.[0-9a-f]{32}-[0-9a-f]{32}\.tmp)$ ]] &&
+          [[ -f "$path" && "$(stat -c '%h' -- "$path")" == '1' ]]; then
           :
         elif [[ "$relative_path" =~ ^data/subtitle-generation/jobs/[0-9a-f]{32}\.json$ ||
           "$relative_path" =~ ^data/subtitle-generation/receipts/[0-9A-F]{64}\.json$ ||
@@ -1300,6 +1307,8 @@ remove_application_data() {
     file-operations/plans \
     file-operations/operations \
     file-operations \
+    text-encodings/staging \
+    text-encodings \
     subtitle-generation/jobs \
     subtitle-generation/receipts \
     subtitle-generation/transactions \
@@ -1644,7 +1653,8 @@ doctor_application_data() {
   if [[ -d "$RC_INSTALL_ROOT/data/media-previews" ]]; then
     data_directories+=(data/media-previews)
   fi
-  for relative_path in data/subtitle-generation data/subtitle-generation/jobs \
+  for relative_path in data/text-encodings data/text-encodings/staging \
+    data/subtitle-generation data/subtitle-generation/jobs \
     data/subtitle-generation/receipts data/subtitle-generation/transactions; do
     if [[ -d "$RC_INSTALL_ROOT/$relative_path" ]]; then
       data_directories+=("$relative_path")

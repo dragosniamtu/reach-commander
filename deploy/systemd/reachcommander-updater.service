@@ -16,6 +16,8 @@ RestartSec=5s
 TimeoutStopSec=15s
 RuntimeDirectory=reachcommander-updater
 RuntimeDirectoryMode=0750
+# The application bind-mounts this directory; replacing it disconnects running containers.
+RuntimeDirectoryPreserve=yes
 Environment=PYTHONDONTWRITEBYTECODE=1
 NoNewPrivileges=yes
 PrivateTmp=yes

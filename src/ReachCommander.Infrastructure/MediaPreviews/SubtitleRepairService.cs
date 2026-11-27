@@ -165,18 +165,27 @@ internal sealed class SubtitleRepairService(
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        await _shutdown.CancelAsync();
+        Task cancellation;
+        // The host may stop a service after (or concurrently with) disposal.
+        // Serialize access to the source while still awaiting active repairs below.
+        lock (_shutdown)
+            cancellation = _disposed == 0 ? _shutdown.CancelAsync() : Task.CompletedTask;
+        await cancellation;
         await Task.WhenAll(_jobs.Values.Select(job => job.Completion)).WaitAsync(cancellationToken);
         await base.StopAsync(cancellationToken);
     }
 
     public override void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        sessions.SubtitleReplaced -= CancelReplacedSubtitle;
-        _shutdown.Cancel();
-        base.Dispose();
-        _shutdown.Dispose();
+        lock (_shutdown)
+        {
+            if (_disposed != 0) return;
+            _disposed = 1;
+            sessions.SubtitleReplaced -= CancelReplacedSubtitle;
+            _shutdown.Cancel();
+            base.Dispose();
+            _shutdown.Dispose();
+        }
     }
 
     private sealed class Work(StoredSubtitle subtitle, CancellationTokenSource cancellation)

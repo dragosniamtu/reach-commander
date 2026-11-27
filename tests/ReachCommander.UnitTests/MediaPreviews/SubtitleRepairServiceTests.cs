@@ -6,6 +6,31 @@ namespace ReachCommander.UnitTests.MediaPreviews;
 
 public sealed class SubtitleRepairServiceTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Shutdown_cancels_alignment_and_allows_stop_after_disposal(bool disposeBeforeStop)
+    {
+        using var fixture = new SubtitleSaveTests.Fixture();
+        var session = await fixture.OpenAsync();
+        var engine = new SyncEngine(block: true);
+        using var service = new SubtitleRepairService(fixture.Sessions, fixture.PathSecurity, engine,
+            Options.Create(new MediaPreviewOptions()));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await service.StartAsync(default(CancellationToken));
+        await service.StartAsync(session.SessionId, timeout.Token);
+        await engine.Started.Task.WaitAsync(timeout.Token);
+
+        if (disposeBeforeStop) service.Dispose();
+        await service.StopAsync(timeout.Token);
+        service.Dispose();
+        await service.StopAsync(timeout.Token);
+
+        Assert.True(engine.Cancelled.Task.IsCompletedSuccessfully);
+        Assert.False(service.HasActiveOperations);
+        Assert.Equal(fixture.OriginalBytes, File.ReadAllBytes(fixture.SubtitlePath));
+    }
+
     [Fact]
     public async Task Automatic_repair_only_proposes_timing_and_never_changes_original()
     {

@@ -122,19 +122,21 @@ class SubtitleManager:
     def storage_entry_allowed(self, relative, is_directory):
         if is_directory:
             if relative in ('subtitles', 'subtitles/mailbox', 'subtitles/mailbox/requests',
-                            'subtitles/mailbox/results', 'subtitles/models'):
+                            'subtitles/mailbox/results', 'subtitles/mailbox/repair-requests',
+                            'subtitles/mailbox/repair-results', 'subtitles/models'):
                 return True
             return any(relative == 'subtitles/models/' + model + suffix for model in MODEL_FILES
                        for suffix in ('', '/.cache', '/.cache/huggingface', '/.cache/huggingface/download'))
-        if relative in ('subtitles/mailbox/worker.lock', 'subtitles/mailbox/status.json'):
+        if relative in ('subtitles/mailbox/worker.lock', 'subtitles/mailbox/status.json',
+                        'subtitles/mailbox/repair-status.json'):
             return True
-        if re.fullmatch(r'subtitles/mailbox/\.status\.json\.[a-f0-9]{32}\.tmp', relative):
+        if re.fullmatch(r'subtitles/mailbox/\.(repair-)?status\.json\.[a-f0-9]{32}\.tmp', relative):
             return True
-        if re.fullmatch(r'subtitles/mailbox/(requests|results)/[a-f0-9]{32}\.(json|cancel)', relative):
+        if re.fullmatch(r'subtitles/mailbox/(repair-)?(requests|results)/[a-f0-9]{32}\.(json|cancel)', relative):
             return True
-        if re.fullmatch(r'subtitles/mailbox/(requests|results)/\.?[a-f0-9]{32}\.(json|cancel)\.[a-f0-9]{32}\.tmp', relative):
+        if re.fullmatch(r'subtitles/mailbox/(repair-)?(requests|results)/\.?[a-f0-9]{32}\.(json|cancel)\.[a-f0-9]{32}\.tmp', relative):
             return True
-        if re.fullmatch(r'subtitles/mailbox/(requests|results)/[a-f0-9]{32}\.(json|cancel)\.tmp-[a-f0-9]{32}', relative):
+        if re.fullmatch(r'subtitles/mailbox/(repair-)?(requests|results)/[a-f0-9]{32}\.(json|cancel)\.tmp-[a-f0-9]{32}', relative):
             return True
         for model, names in MODEL_FILES.items():
             prefix = 'subtitles/models/' + model + '/'
@@ -179,7 +181,8 @@ class SubtitleManager:
         self.validate_storage()
         request = self.request()
         for name in ('subtitles', 'subtitles/models', 'subtitles/mailbox',
-                     'subtitles/mailbox/requests', 'subtitles/mailbox/results'):
+                     'subtitles/mailbox/requests', 'subtitles/mailbox/results',
+                     'subtitles/mailbox/repair-requests', 'subtitles/mailbox/repair-results'):
             path = self.root / name
             if not path.exists():
                 path.mkdir(mode=0o700)

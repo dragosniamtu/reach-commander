@@ -13,7 +13,9 @@ import {
   signal,
 } from '@angular/core';
 import Hls from 'hls.js';
+import { TextEncodingKind } from '../../core/api/api.models';
 import { MediaPreviewStore } from '../../core/state/media-preview.store';
+import { encodingLabel, sourceEncodingOptions } from '../../core/state/text-encoding-options';
 
 @Component({
   selector: 'app-media-preview-dialog',
@@ -24,9 +26,19 @@ import { MediaPreviewStore } from '../../core/state/media-preview.store';
 })
 export class MediaPreviewDialogComponent implements AfterViewInit {
   readonly store = inject(MediaPreviewStore);
+  readonly sourceEncodings = sourceEncodingOptions;
+  readonly encodingLabel = encodingLabel;
+  readonly sourceEncoding = signal<TextEncodingKind>('auto');
+  readonly subtitlePath = computed(() =>
+    this.store.state().subtitleSelectionPath ?? this.store.state().session?.subtitlePath ?? '',
+  );
   readonly busy = computed(() => [
-    'opening', 'probing', 'queued', 'transcoding', 'selectingSubtitle', 'planning', 'saving',
+    'opening', 'probing', 'queued', 'transcoding', 'selectingSubtitle', 'planning', 'saving', 'refreshingSaved',
   ].includes(this.store.state().phase));
+  readonly subtitleControlsDisabled = computed(() =>
+    this.busy() || this.store.repairActive() ||
+    ['failed', 'savedRefreshFailed'].includes(this.store.state().phase),
+  );
   readonly closeBlocked = computed(() => this.store.state().phase === 'saving');
   readonly statusLabel = computed(() => {
     switch (this.store.state().phase) {
@@ -38,6 +50,8 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
       case 'planning': return 'Preparing save review';
       case 'review': return 'Review corrected subtitle';
       case 'saving': return 'Saving corrected subtitle';
+      case 'refreshingSaved': return 'Reloading saved subtitle';
+      case 'savedRefreshFailed': return 'Subtitle saved. Preview reload needed.';
       case 'saved': return 'Subtitle saved';
       case 'failed': return 'Preview failed';
       default: return 'Subtitle synchronization';
@@ -72,6 +86,9 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
       const mode = this.playbackMode();
       queueMicrotask(() => this.attachPlayback(url, mode));
     });
+    effect(() => {
+      if (this.store.state().phase === 'saved') this.sourceEncoding.set('auto');
+    });
   }
 
   ngAfterViewInit(): void {
@@ -96,9 +113,25 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
   }
 
   selectSubtitle(event: Event): void {
-    const path = (event.target as HTMLSelectElement | null)?.value.trim() ?? '';
-    if (path && path !== this.store.state().session?.subtitlePath) {
+    const path = (event.target as HTMLSelectElement).value;
+    if (path && path !== this.subtitlePath()) {
+      if (this.subtitlePath()) this.sourceEncoding.set('auto');
+      this.loadSubtitle(path);
+    }
+  }
+
+  selectSourceEncoding(event: Event): void {
+    this.sourceEncoding.set((event.target as HTMLSelectElement).value as TextEncodingKind);
+    const path = this.subtitlePath();
+    if (path) this.loadSubtitle(path);
+  }
+
+  private loadSubtitle(path: string): void {
+    const encoding = this.sourceEncoding();
+    if (encoding === 'auto') {
       void this.store.selectSubtitle(path);
+    } else {
+      void this.store.selectSubtitle(path, encoding);
     }
   }
 
@@ -160,9 +193,9 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
     if (this.closeBlocked()) {
       return;
     }
-    if (state.offsetMilliseconds !== 0 &&
+    if ((state.offsetMilliseconds !== 0 || state.timeScale !== 1) &&
         state.saveResult === null &&
-        !window.confirm('Discard the unsaved subtitle offset?')) {
+        !window.confirm('Discard the unsaved subtitle timing correction?')) {
       return;
     }
     void this.store.close();
@@ -181,7 +214,7 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
       this.requestClose();
       return;
     }
-    if (event.key === ' ' && !isTextControl(event.target)) {
+    if (event.key === ' ' && !isInteractiveControl(event.target)) {
       event.preventDefault();
       this.togglePlayback();
     }
@@ -257,8 +290,6 @@ export class MediaPreviewDialogComponent implements AfterViewInit {
   }
 }
 
-function isTextControl(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement;
+function isInteractiveControl(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest('button, input, textarea, select, video');
 }

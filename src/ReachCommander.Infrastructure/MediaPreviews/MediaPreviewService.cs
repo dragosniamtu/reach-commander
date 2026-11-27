@@ -4,6 +4,9 @@ using Microsoft.Extensions.Options;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.MediaPreviews;
 using ReachCommander.Infrastructure.Authentication;
+using ReachCommander.Application.TextEncodings;
+using ReachCommander.Infrastructure.TextEncodings;
+using System.Security.Cryptography;
 
 namespace ReachCommander.Infrastructure.MediaPreviews;
 
@@ -42,7 +45,13 @@ internal sealed partial class MediaPreviewService(
         EnsureAllowedVideo(video);
         EnsureNoSymbolicLinks(video);
         var videoFingerprint = CaptureFingerprint(video.PhysicalPath);
-        var subtitle = await FindSameNameSubtitleAsync(video, cancellationToken);
+        StoredSubtitle? subtitle = null;
+        string? subtitleError = null;
+        try { subtitle = await FindSameNameSubtitleAsync(video, cancellationToken); }
+        catch (MediaPreviewException error) when (error.Code is "subtitle_invalid" or "subtitle_encoding_unsupported" or "subtitle_too_large")
+        {
+            subtitleError = error.Code;
+        }
         var probe = await probeRunner.ProbeAsync(video.PhysicalPath, cancellationToken);
         var now = clock.GetUtcNow();
         var sessionId = Guid.NewGuid();
@@ -71,7 +80,8 @@ internal sealed partial class MediaPreviewService(
             outputDirectory,
             now,
             now,
-            new CancellationTokenSource());
+            new CancellationTokenSource(),
+            SubtitleErrorCode: subtitleError);
         sessions.Add(stored);
 
         if (playbackMode == MediaPlaybackMode.Hls && !queue.TryEnqueue(sessionId))
@@ -150,7 +160,9 @@ internal sealed partial class MediaPreviewService(
     public async ValueTask<MediaPreviewSession> SelectSubtitleAsync(
         Guid sessionId,
         string subtitlePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TextEncodingKind sourceEncoding = TextEncodingKind.Auto,
+        bool encodingReviewed = false)
     {
         var current = sessions.GetRequired(sessionId);
         EnsureVideoIsCurrent(current);
@@ -170,12 +182,17 @@ internal sealed partial class MediaPreviewService(
         }
 
         EnsureNoSymbolicLinks(requested);
-        var subtitle = await ReadSubtitleAsync(requested, cancellationToken);
+        var subtitle = await ReadSubtitleAsync(requested, cancellationToken, sourceEncoding, encodingReviewed);
+        if (encodingReviewed && (current.Subtitle is not { } reviewed ||
+            !SubtitleSavePlanner.PathsEqual(reviewed.PhysicalPath, subtitle.PhysicalPath) ||
+            reviewed.ContentHash != subtitle.ContentHash || reviewed.Encoding?.SourceEncoding != subtitle.Encoding?.SourceEncoding))
+            throw MediaPreviewException.SubtitleSavePlanStale();
         var updated = sessions.Update(
             sessionId,
             session => session with
             {
                 Subtitle = subtitle,
+                SubtitleErrorCode = null,
                 LastAccessedAt = clock.GetUtcNow(),
             });
         return Map(updated);
@@ -271,10 +288,12 @@ internal sealed partial class MediaPreviewService(
     public ValueTask<SubtitleSavePlan> PlanSubtitleSaveAsync(
         Guid sessionId,
         long offsetMilliseconds,
-        CancellationToken cancellationToken) => subtitleSavePlanner.PlanAsync(
+        CancellationToken cancellationToken,
+        double timeScale = 1) => subtitleSavePlanner.PlanAsync(
         sessionId,
         offsetMilliseconds,
-        cancellationToken);
+        cancellationToken,
+        timeScale);
 
     public ValueTask<SubtitleSaveResult> ExecuteSubtitleSaveAsync(
         Guid planId,
@@ -398,7 +417,9 @@ internal sealed partial class MediaPreviewService(
 
     private async ValueTask<StoredSubtitle> ReadSubtitleAsync(
         ResolvedSourcePath subtitle,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TextEncodingKind sourceEncoding = TextEncodingKind.Auto,
+        bool encodingReviewed = false)
     {
         var fingerprint = CaptureFingerprint(subtitle.PhysicalPath);
         if (fingerprint.Length > _options.MaximumSubtitleBytes)
@@ -406,15 +427,38 @@ internal sealed partial class MediaPreviewService(
             throw MediaPreviewException.SubtitleTooLarge();
         }
 
-        var bytes = await File.ReadAllBytesAsync(subtitle.PhysicalPath, cancellationToken);
-        var document = new SrtParser(
-            checked((int)_options.MaximumSubtitleBytes),
-            _options.MaximumSubtitleCues).Parse(bytes);
+        var bytes = await ReadBoundedSubtitleAsync(subtitle.PhysicalPath, _options.MaximumSubtitleBytes, cancellationToken);
+        TextEncodingAnalysis analysis;
+        try { analysis = TextEncodingCodec.Analyze(bytes, sourceEncoding, TextEncodingKind.Utf8); }
+        catch (TextEncodingException) { throw MediaPreviewException.SubtitleEncodingUnsupported(); }
+        var document = SrtDocument.Parse(analysis.Text, _options.MaximumSubtitleCues);
+        if (CaptureFingerprint(subtitle.PhysicalPath) != fingerprint)
+            throw MediaPreviewException.SubtitleSavePlanStale();
+        var legacy = analysis.SourceEncoding is not (TextEncodingKind.Utf8 or TextEncodingKind.Utf8Bom or
+            TextEncodingKind.Utf16LittleEndian or TextEncodingKind.Utf16BigEndian);
         return new StoredSubtitle(
             subtitle.LogicalPath,
             subtitle.PhysicalPath,
             fingerprint,
-            document);
+            document,
+            new SubtitleEncodingInfo(analysis.SourceEncoding, legacy && !encodingReviewed,
+                analysis.SourceEncoding != TextEncodingKind.Utf8, analysis.PreviewText),
+            Convert.ToHexString(SHA256.HashData(bytes)));
+    }
+
+    internal static async Task<byte[]> ReadBoundedSubtitleAsync(string path, long maximumBytes, CancellationToken token)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            32768, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var contents = new MemoryStream();
+        var buffer = new byte[32768];
+        int count;
+        while ((count = await stream.ReadAsync(buffer, token)) != 0)
+        {
+            if (contents.Length + count > maximumBytes) throw MediaPreviewException.SubtitleTooLarge();
+            contents.Write(buffer, 0, count);
+        }
+        return contents.ToArray();
     }
 
     private static void EnsureAllowedVideo(ResolvedSourcePath video)
@@ -455,7 +499,7 @@ internal sealed partial class MediaPreviewService(
         }
     }
 
-    private static MediaFileFingerprint CaptureFingerprint(string physicalPath)
+    internal static MediaFileFingerprint CaptureFingerprint(string physicalPath)
     {
         try
         {
@@ -577,7 +621,9 @@ internal sealed partial class MediaPreviewService(
         sessions.ExpiresAt(session),
         session.FailureCode,
         session.FailureDetail,
-        session.TranscodeActive);
+        session.TranscodeActive,
+        session.Subtitle?.Encoding,
+        session.SubtitleErrorCode);
 
     private void MarkTranscodeCompleted(Guid sessionId)
     {

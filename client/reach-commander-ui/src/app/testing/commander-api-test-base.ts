@@ -24,6 +24,9 @@ import {
   TrashPermanentDeleteRequestDto,
   CreateMediaPreviewRequestDto,
   MediaPreviewDto,
+  SubtitleRepairCapabilitiesDto,
+  SubtitleRepairStatusDto,
+  TextEncodingKind,
   SubtitleSavePlanDto,
   SubtitleSaveResultDto,
   TextEncodingOperationDto,
@@ -143,7 +146,25 @@ export abstract class CommanderApiTestBase extends CommanderApiPort {
   override selectMediaPreviewSubtitle(
     _sessionId: string,
     _subtitlePath: string,
+    _sourceEncoding?: TextEncodingKind,
+    _encodingReviewed?: boolean,
   ): Promise<MediaPreviewDto> {
+    return unsupported();
+  }
+
+  override getSubtitleRepairCapabilities(): Promise<SubtitleRepairCapabilitiesDto> {
+    return unsupported();
+  }
+
+  override startSubtitleRepair(_sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return unsupported();
+  }
+
+  override getSubtitleRepair(_sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return unsupported();
+  }
+
+  override cancelSubtitleRepair(_sessionId: string): Promise<SubtitleRepairStatusDto> {
     return unsupported();
   }
 
@@ -154,6 +175,7 @@ export abstract class CommanderApiTestBase extends CommanderApiPort {
   override planMediaPreviewSubtitleSave(
     _sessionId: string,
     _offsetMilliseconds: number,
+    _timeScale?: number,
   ): Promise<SubtitleSavePlanDto> {
     return unsupported();
   }

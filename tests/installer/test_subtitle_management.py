@@ -178,6 +178,39 @@ class SubtitleManagementTests(unittest.TestCase):
         with mock.patch.object(Path, 'lstat', removed):
             self.manager.validate_storage()
 
+    def test_repair_mailbox_survives_storage_validation_and_upgrade_preflight(self):
+        self.manager.prepare_storage()
+        identifier, temporary_id = 'a' * 32, 'b' * 32
+        names = ['repair-status.json', f'.repair-status.json.{temporary_id}.tmp']
+        for queue in ('repair-requests', 'repair-results'):
+            directory = self.root / 'subtitles/mailbox' / queue
+            self.assertTrue(directory.is_dir())
+            for suffix in ('json', 'cancel'):
+                names.extend((f'{queue}/{identifier}.{suffix}',
+                              f'{queue}/.{identifier}.{suffix}.{temporary_id}.tmp',
+                              f'{queue}/{identifier}.{suffix}.tmp-{temporary_id}'))
+        for name in names:
+            path = self.root / 'subtitles/mailbox' / name
+            path.write_text('{}')
+            path.chmod(0o600)
+            if os.name == 'posix' and os.geteuid() == 0:
+                os.chown(path, self.request.uid, self.request.gid)
+        self.manager.validate_storage()
+        self.manager.set_enabled(True)
+        self.manager.preflight(APP)
+        self.assertIn(['docker', 'pull', WORKER], self.calls)
+
+    def test_repair_mailbox_allowlist_rejects_unknown_names_and_nested_directories(self):
+        self.manager.prepare_storage()
+        for relative, directory in (
+                ('subtitles/mailbox/repair-requests/nested', True),
+                ('subtitles/mailbox/repair-results/arbitrary.json', False),
+                ('subtitles/mailbox/repair-status.json.extra', False),
+                ('subtitles/mailbox/.repair-status.json.invalid.tmp', False),
+                ('subtitles/mailbox/repair-requests/' + 'a' * 32 + '.wav', False)):
+            with self.subTest(relative=relative):
+                self.assertFalse(self.manager.storage_entry_allowed(relative, directory))
+
     @unittest.skipIf(os.name == 'nt', 'POSIX ownership required')
     def test_reconfigure_rejects_new_runtime_identity_before_deployment_publication(self):
         self.manager.prepare_storage()

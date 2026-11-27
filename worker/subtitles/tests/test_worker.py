@@ -104,6 +104,8 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(cues[0].text, "Hello")
             self.assertEqual(calls[-1]["task"], task)
             self.assertIsNone(calls[0].get("language"))
+            self.assertTrue(all(call.get("word_timestamps") is True for call in calls),
+                            "VAD-mapped segment ends must follow words, not the next speech chunk")
 
     def test_process_failure_does_not_touch_media_and_cleans_audio(self):
         original = self.media / "Film.srt"

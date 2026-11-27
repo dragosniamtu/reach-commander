@@ -27,6 +27,91 @@ describe('ActivePanelToolbarComponent', () => {
     expect(chip.getAttribute('aria-label')).toContain('/incoming');
   });
 
+  it('groups actions behind Menu and returns a persistent opener for dialogs', async () => {
+    fixture.detectChanges();
+    const trigger = button('application-menu-trigger');
+    expect(trigger).not.toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    trigger.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    const subtitles = button('toolbar-subtitles-menu');
+    const subtitleActions = fixture.nativeElement.querySelector('#subtitle-menu-actions') as HTMLElement;
+    expect(subtitleActions.hidden).toBe(true);
+    subtitles.click();
+    fixture.detectChanges();
+    expect(subtitles.getAttribute('aria-expanded')).toBe('true');
+    expect(subtitleActions.hidden).toBe(false);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(subtitleActions.contains(button('toolbar-subtitles'))).toBe(true);
+    expect(subtitleActions.contains(button('toolbar-repair-subtitles'))).toBe(true);
+    subtitles.click();
+    fixture.detectChanges();
+    expect(subtitleActions.hidden).toBe(true);
+    const requested = vi.fn();
+    fixture.componentInstance.encodingRequested.subscribe(requested);
+    button('toolbar-text-encoding').click();
+    fixture.detectChanges();
+    expect(requested).toHaveBeenCalledWith(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('navigates enabled menu controls without sending keys to file-panel shortcuts', async () => {
+    fixture.detectChanges();
+    const trigger = button('application-menu-trigger');
+    expect(trigger).not.toBeNull();
+    trigger.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const source = button('toolbar-add-source');
+    expect(document.activeElement).toBe(source);
+    const documentKey = vi.fn();
+    document.addEventListener('keydown', documentKey);
+    try {
+      source.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      expect(document.activeElement).toBe(button('toolbar-multi-rename'));
+      button('toolbar-multi-rename').dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape', bubbles: true,
+      }));
+      fixture.detectChanges();
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(trigger);
+      expect(documentKey).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', documentKey);
+    }
+  });
+
+  it('dismisses the menu on an outside pointer action', () => {
+    fixture.detectChanges();
+    const trigger = button('application-menu-trigger');
+    expect(trigger).not.toBeNull();
+    trigger.click();
+    fixture.detectChanges();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    fixture.detectChanges();
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps function-key shortcuts available when the closed Menu button has focus', () => {
+    fixture.detectChanges();
+    const trigger = button('application-menu-trigger');
+    trigger.focus();
+    const documentKey = vi.fn();
+    document.addEventListener('keydown', documentKey);
+    try {
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'F7', bubbles: true }));
+      expect(documentKey).toHaveBeenCalledOnce();
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(documentKey).toHaveBeenCalledTimes(2);
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(documentKey).toHaveBeenCalledTimes(2);
+    } finally {
+      document.removeEventListener('keydown', documentKey);
+    }
+  });
+
   it('exposes subtitle generation eligibility and always allows opening job history', () => {
     fixture.componentRef.setInput('subtitleDisabledReason', null);
     fixture.detectChanges();
@@ -36,8 +121,8 @@ describe('ActivePanelToolbarComponent', () => {
     fixture.componentInstance.subtitleHistoryRequested.subscribe(history);
     button('toolbar-subtitles').click();
     button('toolbar-subtitle-jobs').click();
-    expect(generated).toHaveBeenCalledWith(button('toolbar-subtitles'));
-    expect(history).toHaveBeenCalledWith(button('toolbar-subtitle-jobs'));
+    expect(generated).toHaveBeenCalledWith(button('application-menu-trigger'));
+    expect(history).toHaveBeenCalledWith(button('application-menu-trigger'));
     fixture.componentRef.setInput('subtitleDisabledReason', 'Media is read-only.');
     fixture.detectChanges();
     expect(button('toolbar-subtitles').disabled).toBe(true);
@@ -142,7 +227,7 @@ describe('ActivePanelToolbarComponent', () => {
     expect(rename.compareDocumentPosition(encoding) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     encoding.click();
-    expect(requested).toHaveBeenCalledWith(encoding);
+    expect(requested).toHaveBeenCalledWith(button('application-menu-trigger'));
   });
 
   it('disables encoding with the captured selection reason exposed as a tooltip', () => {

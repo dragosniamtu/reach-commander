@@ -17,7 +17,9 @@ public interface IMediaPreviewService
     ValueTask<MediaPreviewSession> SelectSubtitleAsync(
         Guid sessionId,
         string subtitlePath,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        TextEncodings.TextEncodingKind sourceEncoding = TextEncodings.TextEncodingKind.Auto,
+        bool encodingReviewed = false);
 
     ValueTask<MediaAsset> OpenDirectContentAsync(
         Guid sessionId,
@@ -35,7 +37,8 @@ public interface IMediaPreviewService
     ValueTask<SubtitleSavePlan> PlanSubtitleSaveAsync(
         Guid sessionId,
         long offsetMilliseconds,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        double timeScale = 1);
 
     ValueTask<SubtitleSaveResult> ExecuteSubtitleSaveAsync(
         Guid planId,

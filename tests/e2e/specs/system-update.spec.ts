@@ -1,3 +1,4 @@
+import { openApplicationMenu, selectTheme } from '../support/application-menu';
 import { expect, Page, Route, test } from "@playwright/test";
 import {
   SystemUpdateFixture,
@@ -108,6 +109,7 @@ test("system update can manually retry after an unavailable capability check", a
     detail: "System updates are unavailable on this installation.",
   }));
   await page.goto("/");
+  await openApplicationMenu(page);
   const trigger = page.getByTestId("system-update-trigger");
 
   await expect(trigger).toBeEnabled();
@@ -116,8 +118,10 @@ test("system update can manually retry after an unavailable capability check", a
   );
 
   routes.publish(available());
+  await openApplicationMenu(page);
   await trigger.click();
 
+  await openApplicationMenu(page);
   await expect(trigger).toHaveAccessibleName("Update available: v1.4.0");
   expect(routes.checkBodies).toEqual([null]);
 });
@@ -169,6 +173,7 @@ test("system update checks on demand, enables a discovered update, and recovers 
 }) => {
   const routes = await routeSystemUpdates(page, systemUpdateFixture());
   await page.goto("/");
+  await openApplicationMenu(page);
   const trigger = page.getByTestId("system-update-trigger");
   await expect(trigger).toBeEnabled();
   await expect(trigger).toHaveAccessibleName(
@@ -176,8 +181,11 @@ test("system update checks on demand, enables a discovered update, and recovers 
   );
 
   routes.publish(available());
+  await openApplicationMenu(page);
   await trigger.click();
+  await openApplicationMenu(page);
   await expect(trigger).toHaveAccessibleName("Update available: v1.4.0");
+  await openApplicationMenu(page);
   await trigger.click();
   routes.disconnectApplyThen(
     systemUpdateFixture({
@@ -227,6 +235,7 @@ test("system update advances through host-confirmed stages and activates the app
     }),
   );
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("system-update-trigger").click();
   await page.getByRole("button", { name: "Update ReachCommander" }).click();
 
@@ -296,6 +305,7 @@ test("system update grows a sanitized technical timeline while polling", async (
   const routes = await routeSystemUpdates(page, available());
   routes.applyWith(initial);
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("system-update-trigger").click();
   await page.getByRole("button", { name: "Update ReachCommander" }).click();
 
@@ -345,6 +355,7 @@ test("system update downloads sanitized diagnostics without closing the overlay"
   const routes = await routeSystemUpdates(page, available());
   routes.applyWith(tracedStatus());
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("system-update-trigger").click();
   await page.getByRole("button", { name: "Update ReachCommander" }).click();
 
@@ -396,6 +407,7 @@ test("system update auto-opens stale and timed-out technical details", async ({
   );
 
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("system-update-trigger").click();
   await page.getByRole("button", { name: "Update ReachCommander" }).click();
 
@@ -451,6 +463,7 @@ test("system update shows automatic recovery and the restored result", async ({
     }),
   );
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("system-update-trigger").click();
   await page.getByRole("button", { name: "Update ReachCommander" }).click();
 
@@ -525,6 +538,7 @@ test("system update uses generic progress and refresh guidance with a protocol-v
   );
 
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("system-update-trigger").click();
   await page.getByRole("button", { name: "Update ReachCommander" }).click();
 
@@ -545,7 +559,9 @@ test("system update confirmation is immutable, cancellable, and returns focus", 
 }) => {
   const routes = await routeSystemUpdates(page, available());
   await page.goto("/");
+  await openApplicationMenu(page);
   const trigger = page.getByTestId("system-update-trigger");
+  await openApplicationMenu(page);
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Update ReachCommander?" });
   await expect(dialog).toContainText("v1.3.0");
@@ -556,7 +572,7 @@ test("system update confirmation is immutable, cancellable, and returns focus", 
   await expect(dialog.locator("input, select, textarea")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await expect(page.getByTestId('application-menu-trigger')).toBeFocused();
   expect(routes.applyBodies).toEqual([]);
 });
 
@@ -575,6 +591,7 @@ test("system update explains pinned, unsupported, and active-operation states", 
   );
   await page.goto("/");
   const control = page.locator(".update-control");
+  await openApplicationMenu(page);
   await expect(control).toHaveAccessibleName(
     "Updates disabled while version-pinned",
   );
@@ -589,6 +606,7 @@ test("system update explains pinned, unsupported, and active-operation states", 
     }),
   );
   await page.reload();
+  await openApplicationMenu(page);
   await expect(control).toHaveAccessibleName(
     /Ubuntu installer-managed deployment/,
   );
@@ -603,6 +621,7 @@ test("system update explains pinned, unsupported, and active-operation states", 
     }),
   );
   await page.reload();
+  await openApplicationMenu(page);
   await expect(control).toHaveAccessibleName(
     "Update waiting for operations to finish",
   );
@@ -639,6 +658,7 @@ for (const terminal of [
       }),
     );
     await page.goto("/");
+    await openApplicationMenu(page);
     await page.getByTestId("system-update-trigger").click();
     await page.getByRole("button", { name: "Update ReachCommander" }).click();
     const overlay = page.getByRole("alertdialog", { name: terminal.title });
@@ -674,15 +694,18 @@ for (const norton of [false, true]) {
     await page.setViewportSize({ width: 360, height: 560 });
     await page.goto("/");
     if (norton) {
-      await page.getByTestId("theme-selector").selectOption("norton");
+      await selectTheme(page, "norton");
       await expect(page.locator("html")).toHaveAttribute(
         "data-theme",
         "norton",
       );
     }
 
+    await openApplicationMenu(page);
+
     const trigger = page.getByTestId("system-update-trigger");
     await expect(trigger).toBeVisible();
+    await openApplicationMenu(page);
     await trigger.click();
     await page.getByRole("button", { name: "Update ReachCommander" }).click();
     const overlay = page.getByRole("alertdialog");
@@ -736,6 +759,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
         }),
       );
       await page.goto("/");
+      await openApplicationMenu(page);
       await page.getByTestId("system-update-trigger").click();
       await page.getByRole("button", { name: "Update ReachCommander" }).click();
 

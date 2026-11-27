@@ -38,7 +38,15 @@ public sealed record MediaPreviewSession(
     DateTimeOffset ExpiresAt,
     string? FailureCode = null,
     string? FailureDetail = null,
-    bool TranscodeActive = false);
+    bool TranscodeActive = false,
+    SubtitleEncodingInfo? SubtitleEncoding = null,
+    string? SubtitleErrorCode = null);
+
+public sealed record SubtitleEncodingInfo(
+    TextEncodings.TextEncodingKind SourceEncoding,
+    bool RequiresReview,
+    bool ConversionNeeded,
+    string PreviewText);
 
 public sealed record MediaAsset(
     Stream Content,
@@ -52,7 +60,8 @@ public sealed record SubtitleSavePlan(
     string SubtitlePath,
     string BackupPath,
     long OffsetMilliseconds,
-    bool CanExecute);
+    bool CanExecute,
+    double TimeScale = 1);
 
 public sealed record SubtitleSaveResult(
     string SubtitlePath,

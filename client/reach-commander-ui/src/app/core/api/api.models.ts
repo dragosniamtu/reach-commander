@@ -605,6 +605,29 @@ export interface MediaPreviewDto {
   readonly failureCode: string | null;
   readonly failureDetail: string | null;
   readonly transcodeActive: boolean;
+  readonly subtitleEncoding?: {
+    readonly sourceEncoding: TextEncodingKind;
+    readonly requiresReview: boolean;
+    readonly conversionNeeded: boolean;
+    readonly previewText: string;
+  } | null;
+  readonly subtitleErrorCode?: string | null;
+}
+
+export interface SubtitleRepairCapabilitiesDto {
+  readonly enabled: boolean;
+  readonly available: boolean;
+  readonly reasonCode?: string | null;
+  readonly detail?: string | null;
+}
+
+export interface SubtitleRepairStatusDto {
+  readonly state: 'idle' | 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+  readonly stage: string;
+  readonly percent: number;
+  readonly offsetMilliseconds?: number | null;
+  readonly timeScale?: number | null;
+  readonly errorCode?: string | null;
 }
 
 export interface SubtitleSavePlanDto {
@@ -613,6 +636,7 @@ export interface SubtitleSavePlanDto {
   readonly subtitlePath: string;
   readonly backupPath: string;
   readonly offsetMilliseconds: number;
+  readonly timeScale?: number;
   readonly canExecute: boolean;
 }
 
@@ -629,7 +653,21 @@ export type TextEncodingKind =
   | 'utf16LittleEndian'
   | 'utf16BigEndian'
   | 'windows1250'
-  | 'windows1252';
+  | 'windows1251'
+  | 'windows1252'
+  | 'windows1253'
+  | 'windows1254'
+  | 'windows1255'
+  | 'windows1256'
+  | 'windows1257'
+  | 'windows1258'
+  | 'thai874'
+  | 'shiftJis'
+  | 'gbk'
+  | 'big5'
+  | 'korean949'
+  | 'latin1'
+  | 'latin2';
 export type TextEncodingConfidence = 'high' | 'medium' | 'low';
 export type TextEncodingPreviewStatus = 'ready' | 'warning' | 'invalid';
 export type TextEncodingOperationState =
@@ -804,13 +842,24 @@ export abstract class CommanderApiPort {
   abstract selectMediaPreviewSubtitle(
     sessionId: string,
     subtitlePath: string,
+    sourceEncoding?: TextEncodingKind,
+    encodingReviewed?: boolean,
   ): Promise<MediaPreviewDto>;
+
+  abstract getSubtitleRepairCapabilities(): Promise<SubtitleRepairCapabilitiesDto>;
+
+  abstract startSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto>;
+
+  abstract getSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto>;
+
+  abstract cancelSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto>;
 
   abstract requestMediaPreviewFallback(sessionId: string): Promise<MediaPreviewDto>;
 
   abstract planMediaPreviewSubtitleSave(
     sessionId: string,
     offsetMilliseconds: number,
+    timeScale?: number,
   ): Promise<SubtitleSavePlanDto>;
 
   abstract executeMediaPreviewSubtitleSave(planId: string): Promise<SubtitleSaveResultDto>;

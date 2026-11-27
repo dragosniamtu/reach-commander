@@ -19,7 +19,7 @@ public sealed class MediaPreviewException(
     public static MediaPreviewException SubtitleEncodingUnsupported() =>
         new MediaPreviewException(
             "subtitle_encoding_unsupported",
-            "The subtitle file must use UTF-8, Windows-1250, or BOM-marked UTF-16 encoding.");
+            "The subtitle could not be decoded. Choose its source encoding and review the text.");
 
     public static MediaPreviewException SubtitleOffsetInvalid() => new(
         "subtitle_offset_invalid",

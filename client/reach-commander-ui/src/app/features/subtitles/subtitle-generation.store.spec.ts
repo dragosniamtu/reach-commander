@@ -117,6 +117,20 @@ describe('SubtitleGenerationStore', () => {
     expect(store.selectedJob()?.jobId).toBe('job-1');
   });
 
+  it('allows explicit regeneration and restores skipping for the next selection', async () => {
+    await configure();
+    expect(store.skipExisting()).toBe(true);
+    store.skipExisting.set(false);
+    const pending = store.generate();
+    const request = http.expectOne('/api/subtitle-jobs');
+    expect(request.request.body.skipExisting).toBe(false);
+    request.flush(subtitleJob({ phase: 'completed' }));
+    await pending;
+    store.close();
+    await configure();
+    expect(store.skipExisting()).toBe(true);
+  });
+
   it('recovers active and terminal history after refresh and polls while the dialog is closed', async () => {
     const pending = store.restore();
     http

@@ -1,0 +1,64 @@
+:host {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+}
+.application-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text-1);
+  font: 600 12px var(--font-ui);
+  cursor: pointer;
+}
+.application-menu-trigger:hover,
+.application-menu-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent-text);
+}
+.application-menu-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.6;
+}
+.chevron {
+  width: 13px;
+}
+.application-menu-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: min(580px, calc(100vw - 28px));
+  max-height: calc(100dvh - 76px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 0.4);
+}
+.application-menu-panel[hidden] {
+  display: none;
+}
+:host-context([data-theme='norton']) .application-menu-panel,
+:host-context([data-theme='norton']) .application-menu-trigger,
+:host-context([data-theme='windows95']) .application-menu-panel,
+:host-context([data-theme='windows95']) .application-menu-trigger {
+  border-radius: 0;
+}

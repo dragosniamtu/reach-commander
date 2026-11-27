@@ -57,10 +57,17 @@ describe('MediaPreviewDialogComponent', () => {
     adjustedCues: signal([]),
     canPlanSave: signal(true),
     canExecuteSave: signal(false),
+    canStartRepair: signal(true),
+    repairActive: signal(false),
+    subtitleSelectionError: signal(null),
+    repairAvailabilityMessage: signal(null),
     mediaUrl: signal<string | null>(null),
     setOffset: vi.fn(),
     setVideoTime: vi.fn(),
     selectSubtitle: vi.fn(() => Promise.resolve()),
+    confirmSubtitleEncoding: vi.fn(() => Promise.resolve()),
+    startRepair: vi.fn(() => Promise.resolve()),
+    cancelRepair: vi.fn(() => Promise.resolve()),
     planSave: vi.fn(() => Promise.resolve()),
     executeSave: vi.fn(() => Promise.resolve()),
     retryWithFallback: vi.fn(() => Promise.resolve()),
@@ -79,6 +86,7 @@ describe('MediaPreviewDialogComponent', () => {
     });
     store.canPlanSave.set(true);
     store.canExecuteSave.set(false);
+    store.repairActive.set(false);
     store.mediaUrl.set(null);
     await TestBed.configureTestingModule({
       imports: [MediaPreviewDialogComponent],
@@ -129,6 +137,35 @@ describe('MediaPreviewDialogComponent', () => {
     field.value = '-1250';
     field.dispatchEvent(new Event('input', { bubbles: true }));
     expect(store.setOffset).toHaveBeenCalledWith(-1_250);
+  });
+
+  it('previews the decoded sample and offers confirmation and explicit source encoding', () => {
+    store.state.set(readyState({
+      session: { ...readyState().session!, subtitleEncoding: {
+        sourceEncoding: 'windows1251', requiresReview: true, conversionNeeded: true, previewText: 'Привет <em>',
+      } },
+    }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.encoding-sample').textContent).toBe('Привет <em>');
+    expect(fixture.nativeElement.querySelector('.encoding-sample em')).toBeNull();
+    button('Confirm decoded text').click();
+    expect(store.confirmSubtitleEncoding).toHaveBeenCalledOnce();
+    const encoding = fixture.nativeElement.querySelector('#subtitle-source-encoding') as HTMLSelectElement;
+    encoding.value = 'big5';
+    encoding.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(store.selectSubtitle).toHaveBeenCalledWith('/Movies/movie.srt', 'big5');
+  });
+
+  it('shows cancellable progress and locks manual controls while repair is running', () => {
+    store.state.set(readyState({ repair: { state: 'running', stage: 'Analyzing audio', percent: 35 } }));
+    store.repairActive.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('progress').value).toBe(35);
+    expect(fixture.nativeElement.querySelector('fieldset').disabled).toBe(true);
+    expect(fixture.nativeElement.querySelector('#subtitle-path').disabled).toBe(true);
+    button('Cancel repair').click();
+    expect(store.cancelRepair).toHaveBeenCalledOnce();
   });
 
   it('seeks to the beginning, middle, and end of the video', () => {
@@ -349,7 +386,14 @@ function readyState(overrides: Partial<MediaPreviewState> = {}): MediaPreviewSta
       { name: 'Alternate.srt', path: '/Movies/Alternate.srt' },
       { name: 'movie.srt', path: '/Movies/movie.srt' },
     ],
+    subtitleSelectionPath: null,
+    subtitleSelectionFailed: false,
     offsetMilliseconds: 0,
+    timeScale: 1,
+    repair: null,
+    repairStatusUnknown: false,
+    repairCapabilities: null,
+    checkingRepairCapabilities: false,
     videoTimeMilliseconds: 0,
     savePlan: null,
     saveResult: null,

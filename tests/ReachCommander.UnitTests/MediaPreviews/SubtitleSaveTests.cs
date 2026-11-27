@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ReachCommander.Application.MediaPreviews;
 using ReachCommander.Application.Sources;
+using ReachCommander.Application.TextEncodings;
 using ReachCommander.Domain.Sources;
 using ReachCommander.Infrastructure.Authentication;
 using ReachCommander.Infrastructure.MediaPreviews;
@@ -15,6 +16,106 @@ namespace ReachCommander.UnitTests.MediaPreviews;
 public sealed class SubtitleSaveTests : IDisposable
 {
     private readonly Fixture _fixture = new();
+
+    [Fact]
+    public async Task Encoding_confirmation_rejects_a_file_changed_after_preview()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var encoding = Encoding.GetEncoding(1250);
+        File.WriteAllBytes(_fixture.SubtitlePath, encoding.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nBună\n"));
+        var session = await _fixture.OpenAsync();
+        File.WriteAllBytes(_fixture.SubtitlePath, encoding.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nAltă\n"));
+        var error = await Assert.ThrowsAsync<MediaPreviewException>(() => _fixture.Service.SelectSubtitleAsync(
+            session.SessionId, "/Movies/movie.srt", default, TextEncodingKind.Windows1250, true).AsTask());
+        Assert.Equal("subtitle_save_plan_stale", error.Code);
+    }
+
+    [Theory]
+    [InlineData(TextEncodingKind.Windows1250, 1250, "Bună, ştii, ţară!")]
+    [InlineData(TextEncodingKind.Windows1251, 1251, "Привіт, світе!")]
+    [InlineData(TextEncodingKind.Windows1256, 1256, "مرحبا بالعالم")]
+    [InlineData(TextEncodingKind.ShiftJis, 932, "こんにちは")]
+    public async Task Legacy_repair_requires_review_and_preserves_language(TextEncodingKind encoding, int page, string text)
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var original = Encoding.GetEncoding(page, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback)
+            .GetBytes($"1\r\n00:00:10,000 --> 00:00:12,000\r\n{text}\r\n");
+        File.WriteAllBytes(_fixture.SubtitlePath, original);
+        var session = await _fixture.OpenAsync();
+        session = await _fixture.Service.SelectSubtitleAsync(session.SessionId, "/Movies/movie.srt", default, encoding);
+        Assert.True(session.SubtitleEncoding!.RequiresReview);
+        var error = await Assert.ThrowsAsync<MediaPreviewException>(() =>
+            _fixture.Service.PlanSubtitleSaveAsync(session.SessionId, 1000, default).AsTask());
+        Assert.Equal("subtitle_encoding_review_required", error.Code);
+        session = await _fixture.Service.SelectSubtitleAsync(session.SessionId, "/Movies/movie.srt", default, encoding, true);
+        var plan = await _fixture.Service.PlanSubtitleSaveAsync(session.SessionId, 500, default, 1.04);
+        await _fixture.Service.ExecuteSubtitleSaveAsync(plan.PlanId, default);
+        Assert.Equal(original, File.ReadAllBytes(_fixture.BackupPath));
+        Assert.Contains("00:00:10,900 --> 00:00:12,980", File.ReadAllText(_fixture.SubtitlePath));
+        Assert.Contains(text, File.ReadAllText(_fixture.SubtitlePath));
+    }
+
+    [Fact]
+    public async Task Save_rejects_changed_content_even_when_size_and_timestamp_match()
+    {
+        var session = await _fixture.OpenAsync();
+        var plan = await _fixture.Service.PlanSubtitleSaveAsync(session.SessionId, 1000, default);
+        var modifiedAt = File.GetLastWriteTimeUtc(_fixture.SubtitlePath);
+        File.WriteAllText(_fixture.SubtitlePath, File.ReadAllText(_fixture.SubtitlePath).Replace("Hello", "Other"));
+        File.SetLastWriteTimeUtc(_fixture.SubtitlePath, modifiedAt);
+        var error = await Assert.ThrowsAsync<MediaPreviewException>(() =>
+            _fixture.Service.ExecuteSubtitleSaveAsync(plan.PlanId, default).AsTask());
+        Assert.Equal("subtitle_save_plan_stale", error.Code);
+        Assert.False(File.Exists(_fixture.BackupPath));
+    }
+
+    [Fact]
+    public async Task Second_save_rejects_changed_content_even_when_size_and_timestamp_match()
+    {
+        var session = await _fixture.OpenAsync();
+        var first = await _fixture.Service.PlanSubtitleSaveAsync(session.SessionId, 1000, default);
+        await _fixture.Service.ExecuteSubtitleSaveAsync(first.PlanId, default);
+        var second = await _fixture.Service.PlanSubtitleSaveAsync(session.SessionId, 1000, default);
+        var modifiedAt = File.GetLastWriteTimeUtc(_fixture.SubtitlePath);
+        var edited = File.ReadAllText(_fixture.SubtitlePath).Replace("Hello", "Other");
+        File.WriteAllText(_fixture.SubtitlePath, edited);
+        File.SetLastWriteTimeUtc(_fixture.SubtitlePath, modifiedAt);
+
+        var error = await Assert.ThrowsAsync<MediaPreviewException>(() =>
+            _fixture.Service.ExecuteSubtitleSaveAsync(second.PlanId, default).AsTask());
+
+        Assert.Equal("subtitle_save_plan_stale", error.Code);
+        Assert.Equal(edited, File.ReadAllText(_fixture.SubtitlePath));
+        Assert.Equal(_fixture.OriginalBytes, File.ReadAllBytes(_fixture.BackupPath));
+        Assert.False(File.Exists(Path.Combine(_fixture.MoviesPath, "movie_original (2).srt")));
+    }
+
+    [Fact]
+    public async Task Encoding_only_save_converts_unicode_to_utf8_and_backs_up_exact_bytes()
+    {
+        var text = "1\r\n00:00:01,000 --> 00:00:02,000\r\nBună! 日本語 العربية Українська\r\n";
+        var original = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(text)).ToArray();
+        File.WriteAllBytes(_fixture.SubtitlePath, original);
+        var session = await _fixture.OpenAsync();
+        var plan = await _fixture.Service.PlanSubtitleSaveAsync(session.SessionId, 0, default);
+        await _fixture.Service.ExecuteSubtitleSaveAsync(plan.PlanId, default);
+        Assert.Equal(original, File.ReadAllBytes(_fixture.BackupPath));
+        Assert.Equal(Encoding.UTF8.GetBytes(text), File.ReadAllBytes(_fixture.SubtitlePath));
+        var saved = _fixture.Sessions.GetRequired(session.SessionId).Subtitle!;
+        Assert.Equal(TextEncodingKind.Utf8, saved.Encoding!.SourceEncoding);
+        Assert.False(saved.Encoding.RequiresReview);
+        Assert.False(saved.Encoding.ConversionNeeded);
+        Assert.Contains("日本語 العربية Українська", saved.Encoding.PreviewText);
+    }
+
+    [Fact]
+    public async Task Malformed_sidecar_does_not_prevent_video_preview()
+    {
+        File.WriteAllText(_fixture.SubtitlePath, "not a valid SRT");
+        var session = await _fixture.OpenAsync();
+        Assert.Equal(MediaPreviewPhase.Ready, session.Phase);
+        Assert.Empty(session.Cues);
+    }
 
     [Fact]
     public async Task Execute_preserves_original_and_publishes_corrected_name()
@@ -174,7 +275,7 @@ public sealed class SubtitleSaveTests : IDisposable
 
     public void Dispose() => _fixture.Dispose();
 
-    private sealed class Fixture : IDisposable
+    internal sealed class Fixture : IDisposable
     {
         private readonly TemporaryDirectory _temporary = new();
 
@@ -197,9 +298,9 @@ public sealed class SubtitleSaveTests : IDisposable
                 IsReadOnly: readOnly,
                 DefaultLeft: true,
                 DefaultRight: false);
-            var pathSecurity = new PathSecurityService(new FakeSourceCatalog(source));
+            var pathSecurity = PathSecurity = new PathSecurityService(new FakeSourceCatalog(source));
             var options = Options.Create(new MediaPreviewOptions());
-            var sessions = new MediaPreviewSessionStore(Clock, options);
+            var sessions = Sessions = new MediaPreviewSessionStore(Clock, options);
             var plans = new SubtitleSavePlanStore(Clock, options);
             var localFileSystem = new LocalMediaPreviewFileSystem();
             IMediaPreviewFileSystem fileSystem = moveFailures is null
@@ -248,6 +349,8 @@ public sealed class SubtitleSaveTests : IDisposable
             new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero));
 
         public MediaPreviewService Service { get; }
+        public MediaPreviewSessionStore Sessions { get; }
+        public PathSecurityService PathSecurity { get; }
 
         public ValueTask<MediaPreviewSession> OpenAsync() => Service.CreateAsync(
             new CreateMediaPreviewCommand("media", "/Movies/movie.mp4"),

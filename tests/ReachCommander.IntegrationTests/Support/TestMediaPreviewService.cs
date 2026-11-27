@@ -52,7 +52,9 @@ internal sealed class TestMediaPreviewService : IMediaPreviewService
     public ValueTask<MediaPreviewSession> SelectSubtitleAsync(
         Guid sessionId,
         string subtitlePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReachCommander.Application.TextEncodings.TextEncodingKind sourceEncoding = ReachCommander.Application.TextEncodings.TextEncodingKind.Auto,
+        bool encodingReviewed = false)
     {
         var updated = Get(sessionId) with
         {
@@ -106,7 +108,8 @@ internal sealed class TestMediaPreviewService : IMediaPreviewService
     public ValueTask<SubtitleSavePlan> PlanSubtitleSaveAsync(
         Guid sessionId,
         long offsetMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double timeScale = 1)
     {
         _ = Get(sessionId);
         var plan = new SubtitleSavePlan(

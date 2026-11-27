@@ -1,6 +1,10 @@
 # Local AI subtitles
 
-Select a video or folder in ReachCommander, choose **Generate Subtitles**, leave English checked and optionally check Romanian, then choose **Generate**. At least one language is required. Folder jobs recursively discover MKV, MP4, AVI, MOV, M4V and WebM files, process one video at a time, and continue after individual failures. Progress and results survive a browser refresh. Cancel stops the active worker process tree; interruption does not install partially generated subtitles.
+To fix an existing subtitle's encoding and timing while keeping its text in any
+language, use [Repair subtitles](subtitle-repair.md). Automatic repair uses the
+local CPU worker without requiring Whisper or translation model downloads.
+
+Select a video or folder in ReachCommander, choose **Menu → Subtitles → Generate Subtitles**, leave English checked and optionally check Romanian, then choose **Generate**. At least one language is required. Folder jobs recursively discover MKV, MP4, AVI, MOV, M4V and WebM files, process one video at a time, and continue after individual failures. Progress and results survive a browser refresh. Cancel stops the active worker process tree; interruption does not install partially generated subtitles.
 
 | Selection | Output for `Movie.mkv` |
 | --- | --- |
@@ -9,6 +13,12 @@ Select a video or folder in ReachCommander, choose **Generate Subtitles**, leave
 | Romanian only | `Movie.srt` (Romanian) |
 
 The API validates every requested output before preserving existing associated SRT, ASS, SSA and VTT files under unique `.existing-YYYYMMDD-NNN.ext.bak` names and installing the new files. Embedded subtitles and videos are untouched. Ambiguous sidecar ownership fails safely. Successful videos can be skipped on rerun while their video fingerprint, requested languages, and installed output hashes still match.
+
+Generation uses Whisper word timestamps to set both the beginning and end of each
+caption, preserving silent gaps instead of extending captions until the next line.
+Romanian translation retains the same timing. Previously generated SRT files keep
+their old timestamps until regenerated; turn off **Skip successfully processed
+videos** when rerunning an unchanged video. The existing subtitles are backed up.
 
 ## Installed Ubuntu releases
 
@@ -132,7 +142,7 @@ The test suite requires only Python and never imports/downloads AI dependencies:
 python -m unittest discover -s worker/subtitles/tests -v
 ```
 
-Tests cover strict protocol/path checks, symlink rejection, default audio selection, no audio, English/translated transcription selection, bounded subprocess calls, readable matching bilingual SRT timing, mocked generation, cancellation, terminal publication, readiness and temporary cleanup. The CI job runs these contracts under Python 3.11 on Linux. Tests that use FFmpeg skip when it is unavailable. A separate required Linux Docker job builds the real worker, downloads pinned models, then runs transcription/translation with runtime networking disabled. It verifies actual API installation, preservation of the video and original subtitle, matched bilingual timing and rerun skipping. Publication verifies both architectures and the application's exact paired worker before promoting release tags.
+Tests cover strict protocol/path checks, symlink rejection, default audio selection, no audio, English/translated transcription selection, bounded subprocess calls, readable matching bilingual SRT timing, mocked generation, cancellation, terminal publication, readiness and temporary cleanup. The CI job runs these contracts under Python 3.11 on Linux. Tests that use FFmpeg skip when it is unavailable. A separate required Linux Docker job builds the real worker, downloads pinned models, then runs transcription/translation with runtime networking disabled. It verifies actual API installation, preservation of the video and original subtitle, matched bilingual timing and rerun skipping. A real inference fixture verifies captions end before long internal and trailing silences, including after Romanian translation. Publication verifies both architectures and the application's exact paired worker before promoting release tags.
 
 To try one movie after setup, select an existing short movie in a writable source, choose **Generate Subtitles**, select English and Romanian, and watch its job reach completion. Check `Movie.srt` and `Movie.ro.srt`, play them in Jellyfin, and verify any previous sidecars have unique `.bak` backups. Rerun with skipping enabled and confirm the file is skipped. `docker compose -f compose.yaml -f compose.subtitles.yaml --profile subtitles ps` confirms the worker container is running. For a missing-model error rerun the explicit download command; do not enable runtime internet access.
 

@@ -325,13 +325,13 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.componentInstance.execute({ type: 'escape' });
     await Promise.resolve();
     expect(subtitles.close).toHaveBeenCalled();
-    expect(document.activeElement).toBe(opener);
+    expect(document.activeElement).toBe(fixture.nativeElement.querySelector('[data-testid="application-menu-trigger"]'));
   });
 
-  it('places the widget last, opens details, and starts only one polling lifecycle', () => {
+  it('places the widget in the application menu, opens details, and starts only one polling lifecycle', () => {
     const actions = fixture.nativeElement.querySelector('.top-actions');
-    expect(actions.lastElementChild?.tagName).toBe('APP-SYSTEM-METRICS-WIDGET');
-    expect(actions.lastElementChild?.previousElementSibling?.tagName).toBe(
+    expect(actions.closest('.application-menu-panel')).not.toBeNull();
+    expect(actions.querySelector('app-system-metrics-widget')?.previousElementSibling?.tagName).toBe(
       'APP-SYSTEM-UPDATE-BUTTON',
     );
     expect(metrics.start).toHaveBeenCalledOnce();
@@ -423,7 +423,7 @@ describe('CommanderShellComponent system metrics integration', () => {
       ['windows95', 'Windows 95'],
     ]);
     expect(selector.value).toBe('default');
-    expect(selector.parentElement?.nextElementSibling?.tagName).toBe('APP-ACCOUNT-MENU');
+    expect(selector.closest('.application-menu-panel')).not.toBeNull();
 
     selector.value = 'windows95';
     selector.dispatchEvent(new Event('change'));
@@ -661,7 +661,8 @@ describe('CommanderShellComponent system metrics integration', () => {
 
     expect(topbar.children[0]?.classList.contains('brand-block')).toBe(true);
     expect(topbar.children[1]?.tagName).toBe('APP-ACTIVE-PANEL-TOOLBAR');
-    expect(topbar.children[2]?.classList.contains('top-actions')).toBe(true);
+    expect(topbar.children).toHaveLength(2);
+    expect(topbar.querySelector('.top-actions')?.closest('.application-menu-panel')).not.toBeNull();
 
     fixture.componentInstance.execute({ type: 'focus-search' });
     await Promise.resolve();
@@ -695,7 +696,7 @@ describe('CommanderShellComponent system metrics integration', () => {
       panelSide: 'left', sourceId: 'media', sourceName: 'Media', directoryPath: '/TV',
       entries: [expect.objectContaining({ relativePath: '/TV/captions.srt' })],
     }));
-    expect(fixture.componentInstance.textEncodingOpener()).toBe(encoding);
+    expect(fixture.componentInstance.textEncodingOpener()).toBe(fixture.nativeElement.querySelector('[data-testid="application-menu-trigger"]'));
   });
 
   it('blocks commander movement during encoding and refreshes only its captured panel on completion', () => {
@@ -770,6 +771,37 @@ describe('CommanderShellComponent system metrics integration', () => {
     fixture.componentInstance.execute({ type: 'open-cursor' });
 
     expect(store.openEntry).toHaveBeenCalledWith('left', expect.objectContaining(candidate));
+  });
+
+  it('opens subtitle repair from the Menu for one video and uses the Menu trigger as opener', () => {
+    const movie = {
+      name: 'movie.avi', relativePath: '/Movies/movie.avi', type: 'file' as const, size: 12,
+      modifiedAt: null, extension: 'avi', isReadOnly: false, isSymbolicLink: false,
+      attributes: 'Normal', archiveFormatHint: null, archiveRole: null,
+    };
+    const context = {
+      sourceId: 'media', videoPath: movie.relativePath, videoName: movie.name, sourceReadOnly: false,
+    };
+    const listing = panel({
+      tabs: [{ id: 'movies', label: 'Movies', location: { kind: 'filesystem', sourceId: 'media', path: '/Movies' } }],
+      activeTabId: 'movies', entries: [movie], cursorIndex: 1,
+    });
+    store.sources.set([source('media', 'Media')]);
+    store.leftPanel.set(listing);
+    store.createMediaPreviewContext.mockReturnValue(context);
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector('[data-testid="application-menu-trigger"]');
+    const repair = fixture.nativeElement.querySelector('[data-testid="toolbar-repair-subtitles"]') as HTMLButtonElement;
+    expect(repair).not.toBeNull();
+    expect(repair.disabled).toBe(false);
+    trigger.click();
+    repair.click();
+    expect(mediaPreview.open).toHaveBeenCalledWith(context, trigger);
+
+    store.leftPanel.set({ ...listing, selectedItems: new Set([movie.relativePath, '/Movies/other.avi']) });
+    fixture.detectChanges();
+    expect(repair.disabled).toBe(true);
   });
 
   it('opens the subtitle synchronization workspace when Enter targets a supported video', () => {

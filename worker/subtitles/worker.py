@@ -22,8 +22,11 @@ import time
 import uuid
 
 from model_readiness import ModelReadiness
+import subtitle_sync
 
 MAX_REQUEST = 32 * 1024
+# JSON can escape each UTF-8 byte as six ASCII bytes. Also allow the envelope.
+MAX_REPAIR_REQUEST = 6 * subtitle_sync.MAX_SRT_BYTES + MAX_REQUEST
 MAX_RESULT = 16 * 1024 * 1024
 MAX_CUES = 50000
 HEARTBEAT_INTERVAL = 5
@@ -85,6 +88,21 @@ def validate_request(value, expected_id):
             or not isinstance(value["videoPath"], str) or "\0" in value["videoPath"]
             or not Path(value["videoPath"]).is_absolute()):
         raise WorkerError("invalid_request")
+    return value
+
+
+def validate_repair_request(value, expected_id):
+    if (not isinstance(value, dict) or set(value) != {"version", "id", "kind", "videoPath", "subtitleSrt"}
+            or type(value["version"]) is not int or value["version"] != 2
+            or not isinstance(value["id"], str) or not ID.fullmatch(value["id"])
+            or value["id"] != expected_id or value["kind"] != "synchronize"
+            or not isinstance(value["videoPath"], str) or "\0" in value["videoPath"]
+            or not Path(value["videoPath"]).is_absolute()):
+        raise WorkerError("invalid_request")
+    try:
+        subtitle_sync.cue_intervals(value["subtitleSrt"])
+    except ValueError:
+        raise WorkerError("invalid_subtitles") from None
     return value
 
 
@@ -154,7 +172,7 @@ def read_json(path, limit=MAX_REQUEST):
         if len(data) > limit:
             raise WorkerError("invalid_request")
         return json.loads(data.decode("utf-8"), object_pairs_hook=unique_object)
-    except (OSError, ValueError, UnicodeError):
+    except (OSError, ValueError, RecursionError):
         raise WorkerError("invalid_request") from None
 
 
@@ -343,11 +361,15 @@ def load_whisper(config):
 
 
 def transcribe_english(model, audio, duration, progress):
+    # Word timing restores each cue end to its last spoken word after VAD removes
+    # silence. Segment-only timing can map that end to the next speech chunk.
     segments, info = model.transcribe(str(audio), task="transcribe", beam_size=5,
-                                      vad_filter=True, condition_on_previous_text=False)
+                                      vad_filter=True, word_timestamps=True,
+                                      condition_on_previous_text=False)
     if info.language != "en":
         segments, _ = model.transcribe(str(audio), task="translate", language=info.language,
-                                       beam_size=5, vad_filter=True, condition_on_previous_text=False)
+                                       beam_size=5, vad_filter=True, word_timestamps=True,
+                                       condition_on_previous_text=False)
     cues = []
     for segment in segments:
         if len(cues) >= MAX_CUES:
@@ -419,6 +441,40 @@ def execute(request, config, temp, progress):
         return result_document(request["id"], "failed", error=str(error))
     except Exception:
         error = {"transcribing": "transcription_failed", "translating": "translation_failed"}.get(stage, "worker_failed")
+        return result_document(request["id"], "failed", error=error)
+    finally:
+        audio.unlink(missing_ok=True)
+
+
+def execute_repair(request, config, temp, progress):
+    audio = temp / "audio.wav"
+    stage = "probing"
+    try:
+        offline_environment()
+        if not subtitle_sync.available():
+            raise WorkerError("alignment_unavailable")
+        intervals = subtitle_sync.cue_intervals(request["subtitleSrt"])
+        path = validate_video(request["videoPath"], config.roots)
+        progress(stage, 1)
+        with opened_video(path) as (source, descriptors):
+            stream, duration = probe_video(source, config, descriptors)
+            stage = "extracting"
+            progress(stage, 5)
+            extract_audio(source, audio, stream, duration, config, descriptors)
+        stage = "synchronizing"
+        progress(stage, 15)
+        offset, scale = subtitle_sync.estimate(audio, intervals)
+        if (type(offset) is not int or abs(offset) > subtitle_sync.MAX_OFFSET_MS or not math.isfinite(scale)
+                or not subtitle_sync.MIN_SCALE <= scale <= subtitle_sync.MAX_SCALE):
+            raise WorkerError("synchronization_failed")
+        return (result_document(request["id"], "completed", percent=100)
+                | {"offsetMilliseconds": offset, "timeScale": scale})
+    except WorkerError as error:
+        return result_document(request["id"], "failed", error=str(error))
+    except subtitle_sync.DependencyUnavailable:
+        return result_document(request["id"], "failed", error="alignment_unavailable")
+    except Exception:
+        error = "synchronization_failed" if stage == "synchronizing" else "worker_failed"
         return result_document(request["id"], "failed", error=error)
     finally:
         audio.unlink(missing_ok=True)
@@ -533,11 +589,13 @@ class Supervisor:
         self.config = config
         self.requests = config.shared / "requests"
         self.results = config.shared / "results"
+        self.repair_requests = config.shared / "repair-requests"
+        self.repair_results = config.shared / "repair-results"
         self.stop = threading.Event()
         self.model_availability = (False, False)
         self.model_readiness = ModelReadiness(config.models, self.invalidate_models)
         self.next_heartbeat = 0
-        for directory in (self.requests, self.results, config.temp):
+        for directory in (self.requests, self.results, self.repair_requests, self.repair_results, config.temp):
             directory.mkdir(parents=True, exist_ok=True)
             no_links(directory)
 
@@ -557,9 +615,12 @@ class Supervisor:
         if time.monotonic() < self.next_heartbeat:
             return
         english, romanian = self.model_availability
+        updated = datetime.now(timezone.utc).isoformat()
         atomic_json(self.config.shared / "status.json", {
-            "version": 1, "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "version": 1, "updatedAt": updated,
             "englishAvailable": english, "romanianAvailable": romanian})
+        atomic_json(self.config.shared / "repair-status.json", {
+            "version": 1, "updatedAt": updated, "synchronizationAvailable": subtitle_sync.available()})
         self.next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL
 
     def child_command(self, request_path, temp):
@@ -575,12 +636,17 @@ class Supervisor:
 
     def run_once(self):
         self.publish_status()
-        for request_path in sorted(self.requests.glob("*.json")):
+        self.run_queue(self.requests, self.results, validate_request, MAX_REQUEST)
+        if not self.stop.is_set():
+            self.run_queue(self.repair_requests, self.repair_results, validate_repair_request, MAX_REPAIR_REQUEST)
+
+    def run_queue(self, requests, results, validate, limit):
+        for request_path in sorted(requests.glob("*.json")):
             identifier = request_path.stem
             if not ID.fullmatch(identifier):
                 continue
-            result_path = self.results / request_path.name
-            cancel = self.requests / (identifier + ".cancel")
+            result_path = results / request_path.name
+            cancel = requests / (identifier + ".cancel")
             try:
                 existing = self.read_result(result_path, identifier)
                 if existing and existing.get("state") in TERMINAL:
@@ -588,7 +654,7 @@ class Supervisor:
                 if self.stop.is_set() or cancel.exists():
                     atomic_json(result_path, result_document(identifier, "cancelled"))
                     continue
-                request = validate_request(read_json(request_path), identifier)
+                request = validate(read_json(request_path, limit), identifier)
                 validate_video(request["videoPath"], self.config.roots)
             except WorkerError as error:
                 # API cleanup removes the request before its terminal result. A
@@ -606,12 +672,11 @@ class Supervisor:
                     if os.name == "nt":
                         attach_windows_job(process)
                 except OSError:
-                    atomic_json(result_path, result_document(identifier, "failed", error="worker_failed"))
-                    continue
+                    process = None
                 deadline = time.monotonic() + self.config.job_timeout
                 cancelled = timed_out = False
                 try:
-                    while process.poll() is None:
+                    while process is not None and process.poll() is None:
                         self.publish_status()
                         cancelled = self.stop.is_set() or cancel.exists() or not request_path.exists()
                         timed_out = time.monotonic() > deadline
@@ -619,19 +684,22 @@ class Supervisor:
                             break
                         self.stop.wait(self.config.poll_seconds)
                 finally:
-                    kill_tree(process)
+                    if process is not None:
+                        kill_tree(process)
                 cancelled = cancelled or self.stop.is_set() or cancel.exists()
                 if cancelled:
                     final = result_document(identifier, "cancelled")
                 elif timed_out:
                     final = result_document(identifier, "failed", error="timeout")
-                else:
+                elif process is not None:
                     try:
                         final = self.read_result(Path(temporary) / "completed.json", identifier)
                     except WorkerError:
                         final = None
                     if not final or final.get("state") not in TERMINAL:
                         final = result_document(identifier, "failed", error="worker_failed")
+                else:
+                    final = result_document(identifier, "failed", error="worker_failed")
             # Publish terminal state after process-tree termination and temp cleanup.
             atomic_json(result_path, final)
             if self.stop.is_set():
@@ -668,6 +736,7 @@ class Supervisor:
             finally:
                 self.stop.set()
                 (self.config.shared / "status.json").unlink(missing_ok=True)
+                (self.config.shared / "repair-status.json").unlink(missing_ok=True)
 
 
 def healthcheck(shared):
@@ -700,15 +769,21 @@ def main():
     config = Config.from_env()
     if args.command == "child":
         request_path = Path(args.request)
-        request = validate_request(read_json(request_path), request_path.stem)
-        output = config.shared / "results" / request_path.name
+        if request_path.parent == config.shared / "repair-requests":
+            request = validate_repair_request(read_json(request_path, MAX_REPAIR_REQUEST), request_path.stem)
+            output = config.shared / "repair-results" / request_path.name
+            execute_job = execute_repair
+        else:
+            request = validate_request(read_json(request_path), request_path.stem)
+            output = config.shared / "results" / request_path.name
+            execute_job = execute
         last_progress = None
         def progress(stage, percent):
             nonlocal last_progress
             if (stage, percent) != last_progress:
                 atomic_json(output, result_document(request["id"], "running", stage, percent))
                 last_progress = (stage, percent)
-        atomic_json(Path(args.temp) / "completed.json", execute(request, config, Path(args.temp), progress))
+        atomic_json(Path(args.temp) / "completed.json", execute_job(request, config, Path(args.temp), progress))
     else:
         supervisor = Supervisor(config)
         signal.signal(signal.SIGTERM, lambda *_: supervisor.stop.set())

@@ -22,7 +22,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - **Lossless text conversion:** strict decoders and encoders preview legacy text, reject replacement-character loss, and preserve every original byte in collision-safe `_original` backups.
 - **Streamed upload safety:** multipart files are bounded, staged beside their destination, committed all-or-nothing, and serialized with renames through a shared directory lock.
 - **Isolated archive handling:** ZIP, RAR, and 7z parsing runs in a bounded child worker; previews are immutable, extraction is conflict-safe, and the worker never receives destination paths.
-- **Non-destructive subtitle synchronization:** supported videos use an authenticated direct or temporary HLS preview; corrected SRT timing is regenerated server-side after the original is preserved byte-for-byte.
+- **Non-destructive subtitle repair:** review legacy encoding, convert to UTF-8, and automatically correct SRT timing in any language using the local CPU worker. Preview before saving; original subtitle bytes are preserved.
 - **Host-safe preview transcoding:** FFmpeg work is serial, cancelable, limited to two codec threads with a low-CPU preset and reduced process priority, while installer-managed Docker deployments reserve CPU headroom for the host.
 - **Cross-platform observability:** Windows and Linux collectors normalize CPU, memory, storage, GPU, temperature, fan, network, and uptime data without shelling out to vendor tools.
 - **Installable without data leakage:** Angular's production service worker caches only the versioned application shell; filesystem listings and every `/api` response remain network-only.
@@ -44,7 +44,7 @@ ReachCommander demonstrates more than a file-browser UI:
 - Browser persistence for pane identity, tabs, logical paths, sorting, and filters.
 - Dense details tables with directories first, sortable columns, capacity, read-only, and unavailable-source states.
 - Centralized Total Commander-style keyboard handling and a permanent function-key bar.
-- A contextual top toolbar for Multi-Rename, batch text Encoding, Add files, and active-panel search.
+- A contextual header with active-panel search and one Menu containing labeled file and application actions.
 - Three persistent interface themes—Modern, Norton, and Windows 95—selected from the top toolbar and stored only in the current browser or installed PWA.
 - Explicit `RO`, `RW`, and unavailable source states.
 - Read-only source discovery, directory listing, and file-information APIs.
@@ -360,7 +360,7 @@ Existing Ubuntu installations must rerun a checksum-verified installer bundle to
 
 ## Active-panel toolbar and search
 
-The toolbar on the left side of the top bar always reflects the active panel, source, and logical directory; hardware monitoring remains on the right. **Add source** configures one absolute Ubuntu host folder on a compatible installer-managed deployment, while the × on a source chip removes only that mapping after confirmation. Opening Multi-Rename, Encoding, or Add files captures the active panel context, so switching panels cannot redirect an operation already under review.
+The top bar reflects the active panel, source, and logical directory. **Menu** contains file actions, hardware monitoring, updates, theme and account controls, each with an icon and label. **Add source** configures one absolute Ubuntu host folder on a compatible installer-managed deployment, while the × on a source chip removes only that mapping after confirmation. Opening Multi-Rename, Encoding, or Add files captures the active panel context, so switching panels cannot redirect an operation already under review.
 
 Search filters only the loaded current directory and preserves a separate value per panel:
 
@@ -428,7 +428,13 @@ Back up `/data` for authentication plus durable operation metadata, and back up 
 
 ## Local AI subtitle generation
 
-Choose **Generate Subtitles** from a video's or folder's context menu or the active-panel toolbar. Select English (the default), Romanian, or both. Folder jobs discover supported videos recursively, show durable per-file progress, support cancellation, and skip unchanged successful videos on rerun. Open **Subtitle jobs** to see results after closing the dialog or refreshing the page.
+To keep an existing translation and repair its encoding or timing, select its video
+and choose **Menu → Subtitles → Repair subtitles**. Review the decoded text, estimate timing
+from the audio, preview, then save UTF-8 with a byte-exact original backup. This
+works with any subtitle language and does not require Whisper or translation models.
+See [subtitle repair and its limits](docs/subtitle-repair.md).
+
+Choose **Menu → Subtitles → Generate Subtitles**, or use a video's or folder's context menu. Select English (the default), Romanian, or both. Folder jobs discover supported videos recursively, show durable per-file progress, support cancellation, and skip unchanged successful videos on rerun. Open **Menu → Subtitles → Subtitle jobs** to see results after closing the dialog or refreshing the page.
 
 The primary output is always the video's exact basename plus `.srt`; selecting both languages adds `.ro.srt` for Romanian. Existing associated SRT/ASS/SSA/VTT sidecars are preserved under unique `.bak` names before new files are published. Videos and embedded subtitles are never changed. Installation is journaled with rollback and restart recovery.
 

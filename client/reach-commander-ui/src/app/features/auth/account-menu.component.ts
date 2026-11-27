@@ -8,12 +8,14 @@ import {
   ViewChild,
   inject,
   signal,
+  input,
 } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthenticationStore } from '../../core/auth/authentication-store';
 
 @Component({
   selector: 'app-account-menu',
+  host: { '[style.display]': "showTrigger() ? 'block' : 'contents'" },
   imports: [A11yModule, ReactiveFormsModule],
   templateUrl: './account-menu.component.html',
   styleUrl: './account-menu.component.scss',
@@ -21,6 +23,8 @@ import { AuthenticationStore } from '../../core/auth/authentication-store';
 })
 export class AccountMenuComponent {
   readonly auth = inject(AuthenticationStore);
+  readonly showTrigger = input(true);
+  readonly opener = input<HTMLElement | null>(null);
   readonly menuOpen = signal(false);
   readonly passwordDialogOpen = signal(false);
   readonly showPasswords = signal(false);
@@ -73,7 +77,7 @@ export class AccountMenuComponent {
 
     this.passwordDialogOpen.set(false);
     this.clearSensitiveFields();
-    queueMicrotask(() => this.accountTrigger?.nativeElement.focus());
+    queueMicrotask(() => (this.opener() ?? this.accountTrigger?.nativeElement)?.focus());
   }
 
   async submitPasswordChange(): Promise<void> {
@@ -103,7 +107,7 @@ export class AccountMenuComponent {
       this.passwordDialogOpen.set(false);
       this.clearSensitiveFields();
       this.announcement.set('Password changed. Other sessions were signed out.');
-      queueMicrotask(() => this.accountTrigger?.nativeElement.focus());
+      queueMicrotask(() => (this.opener() ?? this.accountTrigger?.nativeElement)?.focus());
     }
   }
 
@@ -125,7 +129,7 @@ export class AccountMenuComponent {
 
     if (this.menuOpen()) {
       this.menuOpen.set(false);
-      queueMicrotask(() => this.accountTrigger?.nativeElement.focus());
+      queueMicrotask(() => (this.opener() ?? this.accountTrigger?.nativeElement)?.focus());
     }
   }
 

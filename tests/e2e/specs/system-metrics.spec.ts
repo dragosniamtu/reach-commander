@@ -1,11 +1,15 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { expect, test } from '@playwright/test';
 
 test('opens live system metrics from the top-right control', async ({ page }) => {
   await page.goto('/');
+  await openApplicationMenu(page);
   const trigger = page.getByTestId('system-metrics-trigger');
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
   await expect(trigger).toHaveAttribute('data-state', 'disabled');
+
+  await openApplicationMenu(page);
 
   await trigger.click();
   const panel = page.getByRole('dialog', { name: 'System metrics' });
@@ -15,16 +19,19 @@ test('opens live system metrics from the top-right control', async ({ page }) =>
 
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await expect(page.getByTestId('application-menu-trigger')).toBeFocused();
 });
 
 test('keeps the compact trigger and details panel inside a phone viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
 
+  await openApplicationMenu(page);
+
   const trigger = page.getByTestId('system-metrics-trigger');
   await expect(trigger).toBeVisible();
   await expect(trigger).toContainText('System');
+  await openApplicationMenu(page);
   await trigger.click();
 
   const panel = page.getByRole('dialog', { name: 'System metrics' });

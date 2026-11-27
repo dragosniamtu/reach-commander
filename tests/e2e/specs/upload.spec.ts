@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { expect, test } from "@playwright/test";
 
 test("uploads a complete batch and rejects a conflicting batch atomically", async ({
@@ -57,6 +58,8 @@ test("read-only sources disable Add files with an explanation", async ({
   const right = page.getByTestId("right-panel");
   await right.getByTestId("source-archive").click();
   await right.click();
+
+  await openApplicationMenu(page);
 
   const addFiles = page.getByTestId("toolbar-add-files");
   await expect(addFiles).toBeDisabled();

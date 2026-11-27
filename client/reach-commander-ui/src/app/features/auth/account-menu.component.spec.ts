@@ -109,6 +109,26 @@ describe('AccountMenuComponent', () => {
     expect(authentication.logout).toHaveBeenCalledOnce();
   });
 
+  it('supports an external menu opener without hiding its password dialog', async () => {
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    try {
+      fixture.componentRef.setInput('showTrigger', false);
+      fixture.componentRef.setInput('opener', opener);
+      fixture.detectChanges();
+      expect(element('[data-testid="account-menu-trigger"]')).toBeNull();
+      fixture.componentInstance.openPasswordDialog();
+      fixture.detectChanges();
+      expect(element('[data-testid="change-password-dialog"]')).not.toBeNull();
+      fixture.componentInstance.closePasswordDialog();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(document.activeElement).toBe(opener);
+    } finally {
+      opener.remove();
+    }
+  });
+
   function openPasswordDialog(): void {
     element<HTMLButtonElement>('[data-testid="account-menu-trigger"]').click();
     fixture.detectChanges();

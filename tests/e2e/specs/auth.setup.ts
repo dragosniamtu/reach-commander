@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import {
@@ -49,7 +50,7 @@ async function login(page: import('@playwright/test').Page, username: string, pa
 }
 
 async function logout(page: import('@playwright/test').Page) {
-  await page.getByTestId('account-menu-trigger').click();
+  await openApplicationMenu(page);
   await page.getByTestId('logout').click();
   await expect(page.getByTestId('login-form')).toBeVisible();
 }
@@ -59,7 +60,7 @@ async function changePassword(
   currentPassword: string,
   newPassword: string,
 ) {
-  await page.getByTestId('account-menu-trigger').click();
+  await openApplicationMenu(page);
   await page.getByTestId('change-password').click();
   const dialog = page.getByTestId('change-password-dialog');
   await dialog.locator('#current-password').fill(currentPassword);

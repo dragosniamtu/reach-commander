@@ -1,3 +1,4 @@
+import { openApplicationMenu, selectTheme } from '../support/application-menu';
 import { expect, test, type Page } from '@playwright/test';
 import { systemUpdateFixture } from '../support/seed-fixtures';
 
@@ -51,8 +52,9 @@ test('applies and persists Windows 95 chrome across the commander and authentica
   await resetTheme(page);
 
   const root = page.locator('html');
+  await openApplicationMenu(page);
   const selector = page.getByTestId('theme-selector');
-  await selector.selectOption('windows95');
+  await selectTheme(page, 'windows95');
 
   await expect(root).toHaveAttribute('data-theme', 'windows95');
   expect(
@@ -100,7 +102,7 @@ test('applies and persists Windows 95 chrome across the commander and authentica
     'windows95',
   );
 
-  await page.getByTestId('account-menu-trigger').click();
+  await openApplicationMenu(page);
   await page.getByTestId('logout').click();
   const authCard = page.locator('.auth-card');
   await expect(authCard).toBeVisible();
@@ -126,7 +128,7 @@ test('applies and persists Windows 95 chrome across the commander and authentica
 test('keeps raised Windows 95 header controls and chips dark on gray', async ({ page }) => {
   const consoleErrors = captureConsoleErrors(page);
   await resetTheme(page);
-  await page.getByTestId('theme-selector').selectOption('windows95');
+  await selectTheme(page, 'windows95');
 
   const toolbarButtonStyles = await page
     .getByTestId('toolbar-trash')
@@ -175,13 +177,15 @@ test('keeps raised Windows 95 header controls and chips dark on gray', async ({ 
 
   const themeLabelStyles = await page.locator('.theme-selector > span').evaluate((element) => {
     const label = getComputedStyle(element);
-    const topbar = getComputedStyle(element.closest('.topbar')!);
+    const topbar = getComputedStyle(element.closest('.application-menu-panel')!);
     return { color: label.color, background: topbar.backgroundColor };
   });
-  expect(themeLabelStyles.color).toBe('rgb(255, 255, 255)');
+  expect(themeLabelStyles.color).toBe('rgb(32, 32, 32)');
   expect(contrastRatio(themeLabelStyles.color, themeLabelStyles.background)).toBeGreaterThanOrEqual(
     4.5,
   );
+
+  await openApplicationMenu(page);
 
   await page.getByTestId('toolbar-trash').focus();
   expect(
@@ -206,7 +210,7 @@ test('keeps accent children white on an Insert-selected non-cursor Windows 95 ro
 }) => {
   const consoleErrors = captureConsoleErrors(page);
   await resetTheme(page);
-  await page.getByTestId('theme-selector').selectOption('windows95');
+  await selectTheme(page, 'windows95');
 
   const panel = page.getByTestId('left-panel');
   const archiveRow = panel.locator('tr[data-path="/nested.zip"]');
@@ -258,9 +262,9 @@ test('uses common square beveled shells and navy title strips for Windows 95 dia
 }) => {
   const consoleErrors = captureConsoleErrors(page);
   await resetTheme(page);
-  await page.getByTestId('theme-selector').selectOption('windows95');
+  await selectTheme(page, 'windows95');
 
-  await page.getByTestId('account-menu-trigger').click();
+  await openApplicationMenu(page);
   await page.getByTestId('change-password').click();
   const passwordDialog = page.getByTestId('change-password-dialog');
   await expect(passwordDialog).toHaveClass(/theme-dialog-shell/);
@@ -310,7 +314,7 @@ test('uses common square beveled shells and navy title strips for Windows 95 dia
 test('keeps Windows 95 small status and semantic text readable on gray', async ({ page }) => {
   const consoleErrors = captureConsoleErrors(page);
   await resetTheme(page);
-  await page.getByTestId('theme-selector').selectOption('windows95');
+  await selectTheme(page, 'windows95');
 
   expect(
     await page.locator('html').evaluate((element) => {
@@ -354,6 +358,8 @@ test('keeps Windows 95 small status and semantic text readable on gray', async (
     contrastRatio(statusStyles.readOnlyPolicy.color, statusStyles.readOnlyPolicy.background),
   ).toBeGreaterThanOrEqual(4.5);
 
+  await openApplicationMenu(page);
+
   await page.getByTestId('system-metrics-trigger').click();
   const metricsPanel = page.getByRole('dialog', { name: 'System metrics' });
   await expect(metricsPanel).toBeVisible();
@@ -374,7 +380,7 @@ test('keeps both Windows 95 panes usable at compact width', async ({ page }, tes
 
   await page.setViewportSize({ width: 680, height: 800 });
   await resetTheme(page);
-  await page.getByTestId('theme-selector').selectOption('windows95');
+  await selectTheme(page, 'windows95');
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'windows95');
   await expect(page.getByTestId('left-panel')).toBeVisible();
@@ -422,7 +428,8 @@ test('uses square gray Windows 95 chrome for the system update overlay', async (
   });
 
   await resetTheme(page);
-  await page.getByTestId('theme-selector').selectOption('windows95');
+  await selectTheme(page, 'windows95');
+  await openApplicationMenu(page);
   await page.getByTestId('system-update-trigger').click();
   const confirmation = page.getByRole('dialog', { name: 'Update ReachCommander?' });
   await expect(confirmation).toHaveClass(/theme-dialog-shell/);

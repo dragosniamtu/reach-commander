@@ -1,3 +1,4 @@
+import { openApplicationMenu, openSubtitlesMenu, selectTheme } from '../support/application-menu';
 import { expect, test } from "@playwright/test";
 
 test("tracks active-panel context and independent wildcard searches", async ({
@@ -68,6 +69,7 @@ test("shows accessible source policies and captures operation destinations", asy
   await left.click();
   const addFiles = page.getByTestId("toolbar-add-files");
   const fileChooserPromise = page.waitForEvent("filechooser");
+  await openApplicationMenu(page);
   await addFiles.click();
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles({
@@ -86,18 +88,19 @@ test("shows accessible source policies and captures operation destinations", asy
   await left.dispatchEvent("pointerdown");
   await page.keyboard.press("Escape");
   await expect(uploadDialog).toBeHidden();
-  await expect(addFiles).toBeFocused();
+  await expect(page.getByTestId('application-menu-trigger')).toBeFocused();
 
   await left.click();
   await left.getByText("Rename Lab", { exact: true }).click();
   const rename = page.getByTestId("toolbar-multi-rename");
+  await openApplicationMenu(page);
   await rename.click();
   let renameDialog = page.getByTestId("multi-rename-dialog");
   await expect(renameDialog).toContainText("Downloads · /");
   await renameDialog
     .getByRole("button", { name: "Close Multi-Rename" })
     .click();
-  await expect(left).toBeFocused();
+  await expect(page.getByTestId('application-menu-trigger')).toBeFocused();
 
   await page.keyboard.press("Control+M");
   renameDialog = page.getByTestId("multi-rename-dialog");
@@ -107,151 +110,96 @@ test("shows accessible source policies and captures operation destinations", asy
   await expect(renameDialog).toBeHidden();
 });
 
-test("keeps toolbar and metrics usable at supported compact width", async ({
-  page,
-}, testInfo) => {
-  await page.setViewportSize({ width: 680, height: 800 });
-  await page.goto("/");
-
-  const toolbar = page.getByRole("toolbar", { name: "Active panel tools" });
-  const metrics = page.getByTestId("system-metrics-trigger");
-  await expect(toolbar).toBeVisible();
-  await expect(metrics).toBeVisible();
-  await metrics.click();
-  await expect(
-    page.getByRole("dialog", { name: "System metrics" }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(metrics).toBeFocused();
-
-  const search = page.getByRole("searchbox", { name: "Search active panel" });
-  await search.fill("*.txt");
-  const toolbarBounds = await toolbar.boundingBox();
-  const metricsBounds = await metrics.boundingBox();
-  expect(toolbarBounds!.y).toBeGreaterThanOrEqual(metricsBounds!.y + metricsBounds!.height);
-  await page.getByTestId("toolbar-clear-search").click();
-  await expect(search).toHaveValue("");
-  await page.getByTestId("toolbar-subtitle-jobs").click();
-  await expect(page.getByRole("dialog", { name: "Subtitle jobs" })).toBeVisible();
-  await page.getByRole("button", { name: "Close subtitles" }).click();
-
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - window.innerWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(1);
-  await page.screenshot({
-    path: testInfo.outputPath("toolbar-680.png"),
-    fullPage: true,
-  });
-});
-
-test("collapses brand copy before topbar controls compete for space", async ({ page }) => {
-  const brandCopy = page.locator(".brand-block > div");
-
-  await page.setViewportSize({ width: 1121, height: 800 });
-  await page.goto("/");
-  await expect(brandCopy).toBeVisible();
-
-  await page.setViewportSize({ width: 1120, height: 800 });
-  await expect(brandCopy).toBeHidden();
-});
-
-test("keeps every toolbar control inside a narrow allocated column", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  const toolbar = page.getByRole("toolbar", { name: "Active panel tools" });
-  const search = page.getByRole("searchbox", { name: "Search active panel" });
-  // Linux system fonts leave about 294px here; constrain the allocated column
-  // directly so this regression is reproducible with any platform's fonts.
-  for (const width of [450, 336, 310, 294]) {
-    await page.locator("app-active-panel-toolbar").evaluate((element, pixels) => {
-      (element as HTMLElement).style.width = `${pixels}px`;
-    }, width);
-    await search.fill("*.txt");
-    const bounds = await toolbar.boundingBox();
-    for (const control of await toolbar.getByRole("button").all()) {
-      const controlBounds = await control.boundingBox();
-      expect(controlBounds!.width).toBeGreaterThanOrEqual(24);
-      expect(controlBounds!.x).toBeGreaterThanOrEqual(bounds!.x);
-      expect(controlBounds!.x + controlBounds!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+test("keeps labeled menu actions inside the viewport in every theme", async ({ page }, testInfo) => {
+  for (const width of [1440, 680]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/');
+    for (const theme of ['default', 'norton', 'windows95']) {
+      await selectTheme(page, theme);
+      await openSubtitlesMenu(page);
+      const menu = page.getByRole('dialog', { name: 'Application menu', exact: true });
+      await expect(menu.getByText('File actions', { exact: true })).toBeVisible();
+      for (const id of ['toolbar-add-source', 'toolbar-extract', 'toolbar-multi-rename',
+        'toolbar-text-encoding', 'toolbar-subtitles-menu', 'toolbar-subtitles',
+        'toolbar-repair-subtitles', 'toolbar-subtitle-jobs',
+        'toolbar-add-files', 'toolbar-trash', 'system-update-trigger', 'system-metrics-trigger',
+        'change-password', 'logout']) {
+        const action = menu.getByTestId(id);
+        await expect(action).toBeVisible();
+        await expect(action.locator('svg').first()).toBeVisible();
+        expect((await action.innerText()).trim().length).toBeGreaterThan(2);
+      }
+      const bounds = await menu.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(800);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: testInfo.outputPath(`menu-${theme}-${width}.png`), fullPage: true });
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('application-menu-trigger')).toBeFocused();
     }
-    expect((await search.boundingBox())!.width).toBeGreaterThanOrEqual(20);
-    await page.getByTestId("toolbar-clear-search").click();
-    await expect(search).toHaveValue("");
   }
-  await page.getByTestId("toolbar-subtitle-jobs").click();
-  await expect(page.getByRole("dialog", { name: "Subtitle jobs" })).toBeVisible();
 });
 
-test("keeps the toolbar hierarchy clear at desktop widths", async ({
-  page,
-}, testInfo) => {
-  for (const viewport of [
-    { width: 1920, height: 1080 },
-    { width: 1600, height: 900 },
-    { width: 1440, height: 900 },
-    { width: 1200, height: 800 },
-    { width: 1121, height: 800 },
-    { width: 1120, height: 800 },
-    { width: 1024, height: 768 },
-  ]) {
-    await page.setViewportSize(viewport);
-    await page.goto("/");
-
-    const toolbar = page.getByRole("toolbar", { name: "Active panel tools" });
-    const search = page.getByRole("searchbox", { name: "Search active panel" });
-    const themeSelector = page.getByTestId("theme-selector");
-    await search.fill("*.txt");
-    const clearSearch = page.getByTestId("toolbar-clear-search");
-    const topActions = page.locator(".top-actions");
-    const metrics = page.getByTestId("system-metrics-trigger");
-    if (viewport.width === 1024) {
-      await topActions.evaluate((element) => {
-        (element as HTMLElement).style.minWidth = "510px";
-      });
-    }
-    const toolbarBounds = await toolbar.boundingBox();
-    const clearSearchBounds = await clearSearch.boundingBox();
-    const topActionsBounds = await topActions.boundingBox();
-    const metricsBounds = await metrics.boundingBox();
-    expect(toolbarBounds).not.toBeNull();
-    expect(clearSearchBounds).not.toBeNull();
-    expect(topActionsBounds).not.toBeNull();
-    expect(metricsBounds).not.toBeNull();
-    await expect(themeSelector).toHaveValue("default");
-    await expect(themeSelector.locator("option")).toHaveText([
-      "Modern",
-      "Norton",
-      "Windows 95",
-    ]);
-    expect(toolbarBounds!.x + toolbarBounds!.width).toBeLessThanOrEqual(
-      metricsBounds!.x,
-    );
-    expect(clearSearchBounds!.x + clearSearchBounds!.width).toBeLessThanOrEqual(
-      topActionsBounds!.x,
-    );
-    await clearSearch.click();
-    await expect(search).toHaveValue("");
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth - window.innerWidth,
-      ),
-    ).toBeLessThanOrEqual(1);
-    await page.screenshot({
-      path: testInfo.outputPath(`toolbar-${viewport.width}.png`),
-      fullPage: true,
-    });
+test("keeps only Menu, folder context and search in the action toolbar", async ({ page }, testInfo) => {
+  for (const width of [1920, 1440, 1120, 1024, 680]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/');
+    const search = page.getByRole('searchbox', { name: 'Search active panel' });
+    const menu = page.getByTestId('application-menu-trigger');
+    await expect(menu).toBeVisible();
+    await expect(page.getByTestId('toolbar-subtitles')).toBeHidden();
+    await expect(page.getByTestId('system-metrics-trigger')).toBeHidden();
+    await search.fill('*.txt');
+    const searchBounds = await search.boundingBox();
+    const menuBounds = await menu.boundingBox();
+    expect(searchBounds!.x + searchBounds!.width).toBeLessThanOrEqual(menuBounds!.x);
+    await page.getByTestId('toolbar-clear-search').click();
+    await expect(search).toHaveValue('');
+    await page.screenshot({ path: testInfo.outputPath(`header-${width}.png`), fullPage: true });
   }
+});
 
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  const left = page.getByTestId("left-panel");
-  await left.getByText("Rename Lab", { exact: true }).click();
-  await page.getByTestId("toolbar-multi-rename").click();
-  const dialog = page.getByTestId("multi-rename-dialog");
-  await expect(dialog).toContainText("1 unchanged");
-  await page.screenshot({
-    path: testInfo.outputPath("multi-rename-1440.png"),
-    fullPage: true,
-  });
+test("isolates menu keyboard navigation and restores focus after application dialogs", async ({ page }) => {
+  await page.goto('/');
+  const menu = page.getByTestId('application-menu-trigger');
+  const cursor = page.getByTestId('left-panel').locator('tr.cursor');
+  const previousCursor = await cursor.getAttribute('data-path');
+  await menu.focus();
+  await menu.press('ArrowDown');
+  await expect(menu).toHaveAttribute('aria-expanded', 'true');
+  const subtitles = page.getByTestId('toolbar-subtitles-menu');
+  await expect(subtitles).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('toolbar-subtitles')).toBeHidden();
+  await expect(page.getByTestId('toolbar-repair-subtitles')).toBeHidden();
+  await subtitles.focus();
+  await subtitles.press('ArrowDown');
+  await expect(page.getByTestId('toolbar-add-files')).toBeFocused();
+  await subtitles.press('Enter');
+  await expect(subtitles).toHaveAttribute('aria-expanded', 'true');
+  await expect(menu).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByTestId('toolbar-subtitles')).toBeVisible();
+  await expect(page.getByTestId('toolbar-repair-subtitles')).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await expect(page.getByTestId('logout')).toBeFocused();
+  await expect(cursor).toHaveAttribute('data-path', previousCursor!);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeFocused();
+
+  for (const [id, name] of [['system-metrics-trigger', 'System metrics'],
+    ['toolbar-subtitle-jobs', 'Subtitle jobs'], ['change-password', 'Change password']]) {
+    if (id === 'toolbar-subtitle-jobs') await openSubtitlesMenu(page);
+    else await openApplicationMenu(page);
+    await page.getByTestId(id).click();
+    const dialog = page.getByRole('dialog', { name, exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(menu).toHaveAttribute('aria-expanded', 'false');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(menu).toBeFocused();
+  }
+  await openApplicationMenu(page);
+  await page.getByRole('searchbox', { name: 'Search active panel' }).click();
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
 });

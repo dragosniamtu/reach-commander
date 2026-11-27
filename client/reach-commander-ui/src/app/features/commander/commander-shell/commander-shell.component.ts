@@ -136,6 +136,7 @@ export class CommanderShellComponent implements OnInit {
   readonly extractionOpener = signal<HTMLElement | null>(null);
   readonly fileOperationOpener = signal<HTMLElement | null>(null);
   readonly singleRenameOpener = signal<HTMLElement | null>(null);
+  readonly multiRenameOpener = signal<HTMLElement | null>(null);
   readonly trashOpen = signal(false);
   readonly createDirectoryContext = signal<CreateDirectoryDialogContext | null>(null);
   readonly systemUpdateDialogStatus = signal<SystemUpdateStatusDto | null>(null);
@@ -177,6 +178,20 @@ export class CommanderShellComponent implements OnInit {
   });
   readonly subtitleContext = computed(() =>
     captureSubtitleContext(this.store.activePanel(), this.activeState(), this.store.sources()));
+  readonly subtitleRepairContext = computed(() => {
+    const panel = this.activeState();
+    if (panel.loading || panel.errorCode || panel.selectedItems.size > 1 ||
+        this.activeTab()?.location.kind !== 'filesystem') {
+      return null;
+    }
+    const rows = buildVisibleRows(panel);
+    const row = panel.selectedItems.size === 1
+      ? rows.find((candidate) => panel.selectedItems.has(candidate.relativePath))
+      : rows[panel.cursorIndex];
+    return row && !row.isParent && row.type === 'file' && !row.archiveFormatHint
+      ? this.store.createMediaPreviewContext(this.store.activePanel(), row)
+      : null;
+  });
   readonly toolbarContext = computed<ActivePanelToolbarContext>(() => ({
     side: this.store.activePanel(),
     sourceName: this.activeSource()?.name ?? 'Source',
@@ -247,13 +262,8 @@ export class CommanderShellComponent implements OnInit {
 
   @ViewChild('leftPanel') private leftPanel?: CommanderPanelComponent;
   @ViewChild('rightPanel') private rightPanel?: CommanderPanelComponent;
-  @ViewChild(SystemMetricsWidgetComponent) metricsWidget?: SystemMetricsWidgetComponent;
   @ViewChild(ActivePanelToolbarComponent)
-  private activeToolbar?: ActivePanelToolbarComponent;
-  @ViewChild(TransferTaskIndicatorComponent)
-  private transferIndicator?: TransferTaskIndicatorComponent;
-  @ViewChild(SystemUpdateButtonComponent)
-  systemUpdateButton?: SystemUpdateButtonComponent;
+  activeToolbar?: ActivePanelToolbarComponent;
 
   private readonly keyboard = inject(CommanderKeyboardService);
   private readonly destroyRef = inject(DestroyRef);
@@ -272,6 +282,7 @@ export class CommanderShellComponent implements OnInit {
       this.metricsStore.reset();
       this.uploadStore.reset();
       this.multiRename.close();
+      this.multiRenameOpener.set(null);
       this.singleRename.close();
       this.archiveExtraction.close();
       this.textEncoding.close();
@@ -502,7 +513,7 @@ export class CommanderShellComponent implements OnInit {
     }
 
     this.systemUpdateDialogStatus.set(null);
-    queueMicrotask(() => this.systemUpdateButton?.focusTrigger());
+    queueMicrotask(() => this.activeToolbar?.focusMenu());
   }
 
   confirmSystemUpdate(): void {
@@ -519,7 +530,7 @@ export class CommanderShellComponent implements OnInit {
       return;
     }
     this.metricsOpen.set(false);
-    queueMicrotask(() => this.metricsWidget?.focusTrigger());
+    queueMicrotask(() => this.activeToolbar?.focusMenu());
   }
 
   reviewUpload(files: readonly File[]): void {
@@ -555,9 +566,7 @@ export class CommanderShellComponent implements OnInit {
 
     this.commandStatus.set(null);
     this.menuOpen.set(false);
-    this.uploadOpener.set(
-      document.activeElement instanceof HTMLElement ? document.activeElement : null,
-    );
+    this.uploadOpener.set(this.operationOpener());
     this.uploadStore.open(
       {
         side,
@@ -604,6 +613,8 @@ export class CommanderShellComponent implements OnInit {
 
     this.menuOpen.set(false);
     this.commandStatus.set(null);
+    this.multiRenameOpener.set(document.activeElement instanceof HTMLElement &&
+      document.activeElement.closest('.application-menu-panel') ? this.operationOpener() : null);
     this.multiRename.open(context);
   }
 
@@ -617,9 +628,7 @@ export class CommanderShellComponent implements OnInit {
 
     this.menuOpen.set(false);
     this.commandStatus.set(null);
-    this.singleRenameOpener.set(
-      document.activeElement instanceof HTMLElement ? document.activeElement : null,
-    );
+    this.singleRenameOpener.set(this.operationOpener());
     this.singleRename.open(context);
   }
 
@@ -640,8 +649,11 @@ export class CommanderShellComponent implements OnInit {
 
   closeMultiRename(): void {
     const side = this.multiRename.state().context?.panelSide ?? this.store.activePanel();
+    const opener = this.multiRenameOpener();
     this.multiRename.close();
-    queueMicrotask(() => (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
+    this.multiRenameOpener.set(null);
+    queueMicrotask(() => opener?.isConnected ? opener.focus()
+      : (side === 'left' ? this.leftPanel : this.rightPanel)?.focusPanel());
   }
 
   openSubtitles(opener: HTMLElement | null, side = this.store.activePanel()): void {
@@ -716,9 +728,7 @@ export class CommanderShellComponent implements OnInit {
 
     this.menuOpen.set(false);
     this.commandStatus.set(null);
-    this.extractionOpener.set(
-      document.activeElement instanceof HTMLElement ? document.activeElement : null,
-    );
+    this.extractionOpener.set(this.operationOpener());
     void this.archiveExtraction.open(result.context);
   }
 
@@ -876,18 +886,30 @@ export class CommanderShellComponent implements OnInit {
     void this.mediaPreview.open(request.context, request.opener);
   }
 
+  openSubtitleRepair(opener: HTMLElement): void {
+    const context = this.subtitleRepairContext();
+    if (context) {
+      this.openMediaPreview({ side: this.store.activePanel(), context, opener });
+    }
+  }
+
   handleTransferDismissed(reason: 'background' | 'closed'): void {
     if (reason === 'background') {
-      queueMicrotask(() => this.transferIndicator?.focus());
+      queueMicrotask(() => this.activeToolbar?.focusMenu());
     } else {
       this.restoreFileOperationFocus();
     }
   }
 
+  private operationOpener(): HTMLElement | null {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return null;
+    return active.closest('.application-menu-panel')
+      ? this.activeToolbar?.menuTriggerElement ?? null : active;
+  }
+
   private captureFileOperationOpener(): void {
-    this.fileOperationOpener.set(
-      document.activeElement instanceof HTMLElement ? document.activeElement : null,
-    );
+    this.fileOperationOpener.set(this.operationOpener());
   }
 
   private async completeSingleRename(completion: SingleRenameCompletion): Promise<void> {

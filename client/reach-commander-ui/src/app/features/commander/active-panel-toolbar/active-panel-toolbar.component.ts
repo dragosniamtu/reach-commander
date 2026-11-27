@@ -5,8 +5,10 @@ import {
   ViewChild,
   input,
   output,
+  signal,
 } from '@angular/core';
 import { PanelSide } from '../../../core/state/commander.models';
+import { ApplicationMenuComponent } from '../application-menu/application-menu.component';
 
 export interface ActivePanelToolbarContext {
   readonly side: PanelSide;
@@ -24,11 +26,13 @@ export interface ActivePanelToolbarContext {
 
 @Component({
   selector: 'app-active-panel-toolbar',
+  imports: [ApplicationMenuComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './active-panel-toolbar.component.html',
   styleUrl: './active-panel-toolbar.component.scss',
 })
 export class ActivePanelToolbarComponent {
+  readonly subtitlesExpanded = signal(false);
   readonly context = input.required<ActivePanelToolbarContext>();
   readonly filter = input.required<string>();
   readonly sourceManagementSupported = input(false);
@@ -36,9 +40,11 @@ export class ActivePanelToolbarComponent {
   readonly sourceManagementDisabledReason = input<string | null>(null);
   readonly sourceManagementRetryAvailable = input(false);
   readonly subtitleDisabledReason = input<string | null>('Select or focus one video or folder.');
+  readonly canRepairSubtitles = input(false);
   readonly subtitleReadinessMessage = input<string | null>(null);
   readonly activeSubtitleJobs = input(0);
   readonly subtitlesRequested = output<HTMLElement>();
+  readonly subtitleRepairRequested = output<HTMLElement>();
   readonly subtitleHistoryRequested = output<HTMLElement>();
   readonly renameRequested = output<void>();
   readonly encodingRequested = output<HTMLElement>();
@@ -53,12 +59,33 @@ export class ActivePanelToolbarComponent {
   private searchInput?: ElementRef<HTMLInputElement>;
   @ViewChild('fileInput', { read: ElementRef })
   private fileInput?: ElementRef<HTMLInputElement>;
-  @ViewChild('addFilesButton', { read: ElementRef })
-  private addFilesButton?: ElementRef<HTMLButtonElement>;
   @ViewChild('encodingButton', { read: ElementRef })
   private encodingButton?: ElementRef<HTMLButtonElement>;
   @ViewChild('addSourceButton', { read: ElementRef })
   private addSourceButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild(ApplicationMenuComponent) private menu?: ApplicationMenuComponent;
+
+  get menuTriggerElement(): HTMLElement | null {
+    return this.menu?.triggerElement ?? null;
+  }
+
+  focusMenu(): void {
+    this.menuTriggerElement?.focus();
+  }
+
+  requestSubtitles(history = false): void {
+    const opener = this.menuTriggerElement;
+    if (opener && (history || this.subtitleDisabledReason() === null)) {
+      (history ? this.subtitleHistoryRequested : this.subtitlesRequested).emit(opener);
+    }
+  }
+
+  requestSubtitleRepair(): void {
+    const opener = this.menuTriggerElement;
+    if (opener && this.canRepairSubtitles()) {
+      this.subtitleRepairRequested.emit(opener);
+    }
+  }
 
   sourceManagementReason(): string | null {
     if (this.sourceManagementPending()) {
@@ -76,7 +103,7 @@ export class ActivePanelToolbarComponent {
       return;
     }
     if (this.sourceManagementReason() === null && this.addSourceButton) {
-      this.sourceRequested.emit(this.addSourceButton.nativeElement);
+      this.sourceRequested.emit(this.menuTriggerElement ?? this.addSourceButton.nativeElement);
     }
   }
 
@@ -128,7 +155,7 @@ export class ActivePanelToolbarComponent {
 
   requestEncoding(): void {
     if (this.context().encodingDisabledReason === null && this.encodingButton) {
-      this.encodingRequested.emit(this.encodingButton.nativeElement);
+      this.encodingRequested.emit(this.menuTriggerElement ?? this.encodingButton.nativeElement);
     }
   }
 
@@ -145,7 +172,7 @@ export class ActivePanelToolbarComponent {
     if (files.length > 0) {
       this.filesSelected.emit(files);
     }
-    queueMicrotask(() => this.focusAddFiles());
+    if (files.length === 0) queueMicrotask(() => this.focusAddFiles());
   }
 
   emitFilter(event: Event): void {
@@ -162,6 +189,6 @@ export class ActivePanelToolbarComponent {
   }
 
   focusAddFiles(): void {
-    this.addFilesButton?.nativeElement.focus();
+    this.focusMenu();
   }
 }

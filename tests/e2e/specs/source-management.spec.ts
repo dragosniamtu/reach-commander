@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { expect, test } from "@playwright/test";
 import {
   routeInstallerManagedSourceManagement,
@@ -20,6 +21,8 @@ test("unsupported deployments explain why Add source is disabled", async ({ page
   await routeUnsupportedSourceManagement(page);
   await page.goto("/");
 
+  await openApplicationMenu(page);
+
   const wrapper = page.getByTestId("toolbar-add-source").locator("..");
   await expect(page.getByTestId("toolbar-add-source")).toBeDisabled();
   await expect(wrapper).toHaveAttribute(
@@ -31,6 +34,7 @@ test("unsupported deployments explain why Add source is disabled", async ({ page
 test("adds a read-only host source, reconnects, and refreshes both source selectors", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("toolbar-add-source").click();
 
   const dialog = page.getByRole("dialog", { name: "Add host source" });
@@ -70,6 +74,7 @@ test("adds a read-only host source, reconnects, and refreshes both source select
 test("requires explicit read-write confirmation and sends only the narrow request", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("toolbar-add-source").click();
 
   const dialog = page.getByRole("dialog", { name: "Add host source" });
@@ -132,6 +137,7 @@ test("removes only a confirmed source mapping and refreshes both selectors", asy
 test("blocks duplicate source submissions while the operation is active", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("toolbar-add-source").click();
   const dialog = page.getByRole("dialog", { name: "Add host source" });
   await dialog.getByLabel("Display name").fill("Backups");
@@ -147,6 +153,7 @@ test("blocks duplicate source submissions while the operation is active", async 
 test("reports rollback without activating the requested mapping", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("toolbar-add-source").click();
   const dialog = page.getByRole("dialog", { name: "Add host source" });
   await dialog.getByLabel("Display name").fill("Unsafe candidate");
@@ -169,6 +176,7 @@ test("reports rollback without activating the requested mapping", async ({ page 
 test("shows bounded failed-operation diagnostics without leaking host paths", async ({ page }) => {
   const host = await routeInstallerManagedSourceManagement(page);
   await page.goto("/");
+  await openApplicationMenu(page);
   await page.getByTestId("toolbar-add-source").click();
   const dialog = page.getByRole("dialog", { name: "Add host source" });
   await dialog.getByLabel("Display name").fill("Cold storage");

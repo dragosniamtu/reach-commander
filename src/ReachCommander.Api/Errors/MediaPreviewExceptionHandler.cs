@@ -64,8 +64,9 @@ public sealed class MediaPreviewExceptionHandler(
         "subtitle_source_read_only" => StatusCodes.Status403Forbidden,
         "video_format_unsupported" or "subtitle_encoding_unsupported" =>
             StatusCodes.Status415UnsupportedMediaType,
-        "preview_capacity_reached" => StatusCodes.Status429TooManyRequests,
-        "media_tools_unavailable" => StatusCodes.Status503ServiceUnavailable,
+        "preview_capacity_reached" or "subtitle_repair_busy" => StatusCodes.Status429TooManyRequests,
+        "media_tools_unavailable" or "subtitle_repair_disabled" or "subtitle_repair_unavailable" => StatusCodes.Status503ServiceUnavailable,
+        "subtitle_encoding_review_required" => StatusCodes.Status409Conflict,
         "subtitle_save_failed" or "subtitle_recovery_required" =>
             StatusCodes.Status500InternalServerError,
         "video_invalid" or

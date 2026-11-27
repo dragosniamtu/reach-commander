@@ -1,3 +1,4 @@
+import { selectTheme } from '../support/application-menu';
 import { expect, test } from '@playwright/test';
 import { longFileNameFixture } from '../support/fixture-names';
 
@@ -12,7 +13,7 @@ for (const theme of ['default', 'norton', 'windows95'] as const) {
     await page.evaluate((key) => localStorage.removeItem(key), themeStorageKey);
     await page.reload();
 
-    await page.getByTestId('theme-selector').selectOption(theme);
+    await selectTheme(page, theme);
     await expect(page.getByTestId('theme-selector')).toHaveValue(theme);
     if (theme === 'default') {
       await expect(page.locator('html')).not.toHaveAttribute('data-theme');

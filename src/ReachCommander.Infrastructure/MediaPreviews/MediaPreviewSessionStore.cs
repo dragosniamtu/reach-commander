@@ -13,7 +13,9 @@ internal sealed record StoredSubtitle(
     string LogicalPath,
     string PhysicalPath,
     MediaFileFingerprint Fingerprint,
-    SrtDocument Document);
+    SrtDocument Document,
+    SubtitleEncodingInfo? Encoding = null,
+    string? ContentHash = null);
 
 internal sealed record StoredMediaPreviewSession(
     Guid SessionId,
@@ -33,7 +35,8 @@ internal sealed record StoredMediaPreviewSession(
     CancellationTokenSource Lifetime,
     string? FailureCode = null,
     string? FailureDetail = null,
-    bool TranscodeActive = false);
+    bool TranscodeActive = false,
+    string? SubtitleErrorCode = null);
 
 internal sealed class MediaPreviewSessionStore(
     TimeProvider clock,
@@ -41,6 +44,8 @@ internal sealed class MediaPreviewSessionStore(
 {
     private readonly ConcurrentDictionary<Guid, StoredMediaPreviewSession> _sessions = new();
     private readonly TimeSpan _inactivity = options.Value.SessionInactivity;
+
+    public event Action<Guid, StoredSubtitle>? SubtitleReplaced;
 
     public void Add(StoredMediaPreviewSession session)
     {
@@ -97,6 +102,8 @@ internal sealed class MediaPreviewSessionStore(
             var next = update(current);
             if (_sessions.TryUpdate(sessionId, next, current))
             {
+                if (current.Subtitle is { } previous && !ReferenceEquals(previous, next.Subtitle))
+                    SubtitleReplaced?.Invoke(sessionId, previous);
                 return next;
             }
         }

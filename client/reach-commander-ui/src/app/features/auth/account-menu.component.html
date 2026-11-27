@@ -1,19 +1,21 @@
-<button
-  #accountTrigger
-  type="button"
-  class="account-trigger"
-  data-testid="account-menu-trigger"
-  aria-haspopup="menu"
-  [attr.aria-expanded]="menuOpen()"
-  [disabled]="auth.state().pending"
-  (click)="toggleMenu()"
->
-  <span class="account-dot" aria-hidden="true"></span>
-  <span class="account-name">{{ auth.state().username }}</span>
-  <span aria-hidden="true">▾</span>
-</button>
+@if (showTrigger()) {
+  <button
+    #accountTrigger
+    type="button"
+    class="account-trigger"
+    data-testid="account-menu-trigger"
+    aria-haspopup="menu"
+    [attr.aria-expanded]="menuOpen()"
+    [disabled]="auth.state().pending"
+    (click)="toggleMenu()"
+  >
+    <span class="account-dot" aria-hidden="true"></span>
+    <span class="account-name">{{ auth.state().username }}</span>
+    <span aria-hidden="true">▾</span>
+  </button>
+}
 
-@if (menuOpen()) {
+@if (showTrigger() && menuOpen()) {
   <div class="account-menu" data-testid="account-menu" role="menu" aria-label="Account">
     <div class="account-identity">
       <span>Signed in as</span>

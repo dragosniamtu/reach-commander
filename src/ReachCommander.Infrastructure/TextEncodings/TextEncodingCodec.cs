@@ -177,8 +177,25 @@ internal static class TextEncodingCodec
         TextEncodingKind.Utf16BigEndian => Utf16BigEndian,
         TextEncodingKind.Windows1250 => Windows1250,
         TextEncodingKind.Windows1252 => Windows1252,
+        TextEncodingKind.Windows1251 => Legacy(1251),
+        TextEncodingKind.Windows1253 => Legacy(1253),
+        TextEncodingKind.Windows1254 => Legacy(1254),
+        TextEncodingKind.Windows1255 => Legacy(1255),
+        TextEncodingKind.Windows1256 => Legacy(1256),
+        TextEncodingKind.Windows1257 => Legacy(1257),
+        TextEncodingKind.Windows1258 => Legacy(1258),
+        TextEncodingKind.Thai874 => Legacy(874),
+        TextEncodingKind.ShiftJis => Legacy(932),
+        TextEncodingKind.Gbk => Legacy(936),
+        TextEncodingKind.Big5 => Legacy(950),
+        TextEncodingKind.Korean949 => Legacy(949),
+        TextEncodingKind.Latin1 => Legacy(28591),
+        TextEncodingKind.Latin2 => Legacy(28592),
         _ => throw TextEncodingException.InvalidSourceEncoding(),
     };
+
+    private static Encoding Legacy(int codePage) => Encoding.GetEncoding(
+        codePage, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
 
     private static void ValidateOutputEncoding(TextEncodingKind outputEncoding)
     {

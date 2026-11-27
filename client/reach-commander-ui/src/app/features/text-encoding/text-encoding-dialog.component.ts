@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { TextEncodingKind } from '../../core/api/api.models';
 import { TextEncodingStore } from '../../core/state/text-encoding-store';
+import { encodingLabel } from '../../core/state/text-encoding-options';
 
 @Component({
   selector: 'app-text-encoding-dialog',
@@ -24,6 +25,7 @@ import { TextEncodingStore } from '../../core/state/text-encoding-store';
 })
 export class TextEncodingDialogComponent implements AfterViewInit {
   readonly store = inject(TextEncodingStore);
+  readonly encodingLabel = encodingLabel;
   readonly closeRequested = output<void>();
   readonly recoveryAcknowledged = signal(false);
   readonly operationActive = computed(() =>
@@ -75,19 +77,6 @@ export class TextEncodingDialogComponent implements AfterViewInit {
       dialog.setAttribute('open', '');
     }
     queueMicrotask(() => this.sourceEncoding?.nativeElement.focus());
-  }
-
-  encodingLabel(encoding: TextEncodingKind | null): string {
-    switch (encoding) {
-      case 'auto': return 'Auto detect';
-      case 'utf8': return 'UTF-8';
-      case 'utf8Bom': return 'UTF-8 with BOM';
-      case 'utf16LittleEndian': return 'UTF-16 LE';
-      case 'utf16BigEndian': return 'UTF-16 BE';
-      case 'windows1250': return 'Windows-1250';
-      case 'windows1252': return 'Windows-1252';
-      default: return 'Unknown';
-    }
   }
 
   statusText(status: string): string {

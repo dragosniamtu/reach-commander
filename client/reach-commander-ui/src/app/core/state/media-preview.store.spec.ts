@@ -4,6 +4,7 @@ import {
   CreateMediaPreviewRequestDto,
   FileEntryDto,
   MediaPreviewDto,
+  SubtitleRepairStatusDto,
   SubtitleSavePlanDto,
   SubtitleSaveResultDto,
 } from '../api/api.models';
@@ -150,6 +151,119 @@ describe('MediaPreviewStore', () => {
     expect(store.activeCue()).toBeNull();
   });
 
+  it('allows a zero-offset UTF-8 conversion after encoding review', async () => {
+    const opening = store.open(context(), null);
+    const subtitleEncoding = {
+      sourceEncoding: 'windows1251', requiresReview: false, conversionNeeded: true,
+      previewText: 'Привет',
+    };
+    api.resolveCreate({ ...ready(), subtitleEncoding } as MediaPreviewDto);
+    await opening;
+
+    expect(store.canPlanSave()).toBe(true);
+  });
+
+  it('blocks save until the user reviews the source text', async () => {
+    const opening = store.open(context(), null);
+    const subtitleEncoding = {
+      sourceEncoding: 'windows1251', requiresReview: true, conversionNeeded: true,
+      previewText: 'Привет',
+    };
+    api.resolveCreate({ ...ready(), subtitleEncoding } as MediaPreviewDto);
+    await opening;
+    store.setOffset(500);
+
+    expect(store.canPlanSave()).toBe(false);
+  });
+
+  it('previews and saves the timing estimate with a fine-tuned offset', async () => {
+    await openReady(store, api);
+    await store.startRepair();
+    await scheduler.runNext();
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1250);
+    store.setOffset(300);
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1350);
+    const planning = store.planSave();
+    expect(api.savePlanRequests).toEqual([{
+      sessionId: 'session-id', offsetMilliseconds: 300, timeScale: 1.05,
+    }]);
+    api.resolvePlan(savePlan());
+    await planning;
+  });
+
+  it('rejects a completion racing with cancellation and subtitle reselection', async () => {
+    await openReady(store, api);
+    let resolvePoll!: (status: SubtitleRepairStatusDto) => void;
+    api.repairPoll = new Promise((resolve) => { resolvePoll = resolve; });
+    await store.startRepair();
+    expect(store.canPlanSave()).toBe(false);
+    store.setOffset(500);
+    expect(store.state().offsetMilliseconds).toBe(0);
+    const polling = scheduler.runNext();
+    await store.cancelRepair();
+    await store.selectSubtitle('/Movies/Alternate.srt');
+    resolvePoll({ state: 'completed', stage: 'Ready', percent: 100, offsetMilliseconds: 600, timeScale: 1.02 });
+    await polling;
+    expect(api.cancelRequests).toEqual(['session-id']);
+    expect(store.state().session?.subtitlePath).toBe('/Movies/Alternate.srt');
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1000);
+  });
+
+  it('stops retrying failed repair status and lets the user cancel or edit manually', async () => {
+    await openReady(store, api);
+    api.repairPollError = new HttpErrorResponse({ status: 503 });
+    await store.startRepair();
+    for (let attempt = 0; attempt < 5; attempt++) await scheduler.runNext();
+
+    expect(scheduler.pending).toBe(0);
+    expect(store.repairActive()).toBe(false);
+    store.setOffset(250);
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1250);
+    await store.cancelRepair();
+    expect(api.cancelRequests).toEqual(['session-id']);
+  });
+
+  it('keeps manual timing usable when repair cancellation fails and ignores the outstanding poll', async () => {
+    await openReady(store, api);
+    const status = deferred<SubtitleRepairStatusDto>();
+    api.repairPoll = status.promise;
+    api.cancellationError = new HttpErrorResponse({ status: 503 });
+    await store.startRepair();
+    const polling = scheduler.runNext();
+    await store.cancelRepair();
+
+    expect(scheduler.pending).toBe(0);
+    expect(store.repairActive()).toBe(false);
+    store.setOffset(400);
+    status.resolve({ state: 'completed', stage: 'Ready', percent: 100, offsetMilliseconds: 900, timeScale: 1.05 });
+    await polling;
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1400);
+    api.cancellationError = null;
+    await store.cancelRepair();
+    expect(api.cancelRequests).toEqual(['session-id', 'session-id']);
+  });
+
+  it('hides previous cues while a subtitle selection is pending or failed', async () => {
+    await openReady(store, api);
+    store.setVideoTime(1250);
+    expect(store.activeCue()?.text).toBe('Hello');
+
+    const next = deferred<MediaPreviewDto>();
+    api.selectedSubtitle = next.promise;
+    const selecting = store.selectSubtitle('/Movies/Alternate.srt');
+    expect(store.activeCue()).toBeNull();
+    next.reject(new HttpErrorResponse({ status: 422, error: { code: 'subtitle_encoding_unsupported' } }));
+    await selecting;
+    expect(store.activeCue()).toBeNull();
+
+    api.selectedSubtitle = Promise.resolve(ready({
+      subtitlePath: '/Movies/Alternate.srt',
+      cues: [{ index: 0, startMilliseconds: 1000, endMilliseconds: 2000, text: 'Привет' }],
+    }));
+    await store.selectSubtitle('/Movies/Alternate.srt', 'windows1251');
+    expect(store.activeCue()?.text).toBe('Привет');
+  });
+
   it('disables save for zero offset and read-only sources', async () => {
     await openReady(store, api);
     expect(store.canPlanSave()).toBe(false);
@@ -177,10 +291,73 @@ describe('MediaPreviewStore', () => {
     const executing = store.executeSave();
     expect(api.executeRequests).toEqual(['plan-id']);
     api.resolveExecute(saveResult());
+    await Promise.resolve();
+    api.resolveStatus(ready());
     await executing;
     expect(store.state().phase).toBe('saved');
     expect(store.state().savePlan).toBeNull();
     expect(store.state().saveResult).toEqual(saveResult());
+  });
+
+  it('rebases timing to the saved cues before a second edit in the same session', async () => {
+    await openReady(store, api);
+    await store.startRepair();
+    await scheduler.runNext();
+    const firstPlan = store.planSave();
+    api.resolvePlan(savePlan());
+    await firstPlan;
+
+    const executing = store.executeSave();
+    api.resolveExecute(saveResult());
+    await Promise.resolve();
+    expect(api.statusRequests).toEqual(['session-id']);
+    const firstBackup = store.state().saveResult?.backupPath;
+    store.setOffset(400);
+    expect(store.canPlanSave()).toBe(false);
+    expect(store.state().offsetMilliseconds).toBe(200);
+    api.resolveStatus(ready({
+      subtitleEncoding: { sourceEncoding: 'utf8', requiresReview: false, conversionNeeded: false, previewText: 'Hello' },
+      cues: [{ index: 0, startMilliseconds: 1250, endMilliseconds: 2300, text: 'Hello' }],
+    }));
+    await executing;
+
+    expect(store.state().saveResult?.backupPath).toBe(firstBackup);
+    expect(store.state().offsetMilliseconds).toBe(0);
+    expect(store.state().timeScale).toBe(1);
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1250);
+    store.setOffset(100);
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1350);
+    const secondPlan = store.planSave();
+    expect(api.savePlanRequests.at(-1)).toEqual({ sessionId: 'session-id', offsetMilliseconds: 100 });
+    api.resolvePlan(savePlan());
+    await secondPlan;
+  });
+
+  it('keeps a successful backup visible and blocks edits until a failed refresh is retried', async () => {
+    await openReady(store, api);
+    store.setOffset(500);
+    const planning = store.planSave();
+    api.resolvePlan(savePlan());
+    await planning;
+    const executing = store.executeSave();
+    api.resolveExecute(saveResult());
+    await Promise.resolve();
+    api.rejectStatus(new HttpErrorResponse({ status: 503 }));
+    await executing;
+
+    expect(store.state().phase).toBe('savedRefreshFailed');
+    expect(store.state().saveResult?.backupPath).toBe('/Movies/movie_original.srt');
+    expect(store.adjustedCues()).toEqual([]);
+    store.setOffset(100);
+    expect(store.canPlanSave()).toBe(false);
+
+    const refreshing = store.refreshSavedSubtitle();
+    api.resolveStatus(ready({
+      cues: [{ index: 0, startMilliseconds: 1500, endMilliseconds: 2500, text: 'Hello' }],
+    }));
+    await refreshing;
+    expect(store.state().phase).toBe('saved');
+    expect(store.adjustedCues()[0]?.startMilliseconds).toBe(1500);
   });
 
   it('queues an explicit browser fallback and resumes polling', async () => {
@@ -325,7 +502,14 @@ class FakeMediaPreviewApi extends CommanderApiTestBase {
   fileListError: unknown | null = null;
   fileListRequests: Array<{ sourceId: string; path: string }> = [];
   statusRequests: string[] = [];
-  savePlanRequests: Array<{ sessionId: string; offsetMilliseconds: number }> = [];
+  savePlanRequests: Array<{ sessionId: string; offsetMilliseconds: number; timeScale?: number }> = [];
+  cancelRequests: string[] = [];
+  cancellationError: unknown = null;
+  repairPollError: unknown = null;
+  selectedSubtitle: Promise<MediaPreviewDto> | null = null;
+  repairPoll = Promise.resolve<SubtitleRepairStatusDto>({
+    state: 'completed', stage: 'Timing correction ready', percent: 100, offsetMilliseconds: 200, timeScale: 1.05,
+  });
   executeRequests: string[] = [];
   closeRequests: string[] = [];
   private creates = deferredQueue<MediaPreviewDto>();
@@ -346,14 +530,34 @@ class FakeMediaPreviewApi extends CommanderApiTestBase {
   override getMediaPreview(sessionId: string): Promise<MediaPreviewDto> {
     this.statusRequests.push(sessionId); return this.statuses.nextPromise();
   }
+  override getSubtitleRepairCapabilities() {
+    return Promise.resolve({ enabled: true, available: true });
+  }
+  override startSubtitleRepair(_sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return Promise.resolve({ state: 'running', stage: 'Analyzing audio', percent: 20 });
+  }
+  override getSubtitleRepair(_sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return this.repairPollError ? Promise.reject(this.repairPollError) : this.repairPoll;
+  }
+  override cancelSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto> {
+    this.cancelRequests.push(sessionId);
+    if (this.cancellationError) return Promise.reject(this.cancellationError);
+    return Promise.resolve({ state: 'cancelled', stage: 'Cancelled', percent: 100 });
+  }
+  override selectMediaPreviewSubtitle(_sessionId: string, subtitlePath: string): Promise<MediaPreviewDto> {
+    return this.selectedSubtitle ?? Promise.resolve(ready({ subtitlePath }));
+  }
   override requestMediaPreviewFallback(_sessionId: string): Promise<MediaPreviewDto> {
     return this.fallbacks.nextPromise();
   }
   override planMediaPreviewSubtitleSave(
     sessionId: string,
     offsetMilliseconds: number,
+    timeScale?: number,
   ): Promise<SubtitleSavePlanDto> {
-    this.savePlanRequests.push({ sessionId, offsetMilliseconds });
+    this.savePlanRequests.push({
+      sessionId, offsetMilliseconds, ...(timeScale === undefined ? {} : { timeScale }),
+    });
     return this.plans.nextPromise();
   }
   override executeMediaPreviewSubtitleSave(planId: string): Promise<SubtitleSaveResultDto> {
@@ -365,6 +569,7 @@ class FakeMediaPreviewApi extends CommanderApiTestBase {
   resolveCreate(value: MediaPreviewDto): void { this.creates.resolveNext(value); }
   rejectCreate(error: unknown): void { this.creates.rejectNext(error); }
   resolveStatus(value: MediaPreviewDto): void { this.statuses.resolveNext(value); }
+  rejectStatus(error: unknown): void { this.statuses.rejectNext(error); }
   resolveFallback(value: MediaPreviewDto): void { this.fallbacks.resolveNext(value); }
   resolvePlan(value: SubtitleSavePlanDto): void { this.plans.resolveNext(value); }
   resolveExecute(value: SubtitleSaveResultDto): void { this.executions.resolveNext(value); }

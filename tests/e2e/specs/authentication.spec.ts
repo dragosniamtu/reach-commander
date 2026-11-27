@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { expect, test } from '@playwright/test';
 import { e2ePassword, e2eUsername } from '../support/authentication';
 
@@ -12,7 +13,7 @@ test('logout clears protected rows and persisted panel state before login restor
   await page.keyboard.type('existing');
   await expect(page.getByRole('searchbox', { name: 'Search active panel' })).toHaveValue('existing');
 
-  await page.getByTestId('account-menu-trigger').click();
+  await openApplicationMenu(page);
   await page.getByTestId('logout').click();
 
   await expect(page.getByTestId('login-form')).toBeVisible();

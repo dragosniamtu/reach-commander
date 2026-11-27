@@ -1,3 +1,4 @@
+import { openSubtitlesMenu } from '../support/application-menu';
 import { expect, test, type Page } from "@playwright/test";
 import type {
   SubtitleCapabilities,
@@ -27,18 +28,21 @@ test("explains disabled generation, keeps history available, and does not keep p
   });
   subtitles.jobs = [job({ phase: "completed", currentPath: null, files: [] })];
   await openMovie(page);
+  await openSubtitlesMenu(page);
   const generateAction = page.getByTestId("toolbar-subtitles");
   await expect(generateAction).toBeEnabled();
   await expect(generateAction.locator("..")).toHaveAttribute(
     "title",
     /disabled on this server/,
   );
+  await openSubtitlesMenu(page);
   await generateAction.click();
   const dialog = page.getByRole("dialog", { name: "Generate Subtitles" });
   await expect(dialog).toContainText("disabled on this server");
   await expect(dialog).toContainText("administrator");
   await expect(dialog.getByTestId("subtitle-generate")).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await openSubtitlesMenu(page);
   await page.getByTestId("toolbar-subtitle-jobs").click();
   const history = page.getByRole("dialog", { name: "Subtitle jobs" });
   await expect(history.getByLabel("Subtitle job")).toContainText("Completed");
@@ -102,6 +106,7 @@ test("offers English when Romanian is not installed and preserves source restric
     reasonCode: "subtitle_models_missing",
   });
   await openMovie(page);
+  await openSubtitlesMenu(page);
   await page.getByTestId("toolbar-subtitles").click();
   const dialog = page.getByRole("dialog", { name: "Generate Subtitles" });
   await expect(dialog.getByLabel("English", { exact: true })).toBeChecked();
@@ -133,9 +138,14 @@ test("generates selected languages, shows progress and completion, and refreshes
       fileReads.push(request.url());
   });
   const row = await openMovie(page);
+  await openSubtitlesMenu(page);
   await page.getByTestId("toolbar-subtitles").click();
   const configure = page.getByRole("dialog", { name: "Generate Subtitles" });
   await configure.getByLabel("Romanian", { exact: true }).check();
+  const skipExisting = configure.getByLabel("Skip successfully processed videos");
+  await expect(skipExisting).toBeChecked();
+  await skipExisting.uncheck();
+  await expect(configure).toContainText("Existing subtitles are backed up.");
   await configure.getByTestId("subtitle-generate").click();
   const progress = page.getByRole("dialog", { name: "Subtitle jobs" });
   await expect(progress).toContainText("Queued");
@@ -145,7 +155,7 @@ test("generates selected languages, shows progress and completion, and refreshes
       path: "/Movies/Family Movie.mp4",
       english: true,
       romanian: true,
-      skipExisting: true,
+      skipExisting: false,
     },
   ]);
   subtitles.jobs = [job({ romanian: true, currentPercent: 45 })];
@@ -171,7 +181,12 @@ test("generates selected languages, shows progress and completion, and refreshes
   await expect.poll(() => fileReads.length).toBeGreaterThan(beforeCompletion);
   await progress.getByRole("button", { name: "Close", exact: true }).click();
   await expect(row).toBeVisible();
+  await openSubtitlesMenu(page);
+  await page.getByTestId("toolbar-subtitles").click();
+  await expect(configure.getByLabel("Skip successfully processed videos")).toBeChecked();
+  await configure.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.reload();
+  await openSubtitlesMenu(page);
   await page.getByTestId("toolbar-subtitle-jobs").click();
   await expect(
     page.getByRole("dialog", { name: "Subtitle jobs" }),
@@ -188,6 +203,7 @@ test("cancels a restored job and refreshes retained history while generation is 
   });
   subtitles.jobs = [job()];
   await page.goto("/");
+  await openSubtitlesMenu(page);
   await page.getByTestId("toolbar-subtitle-jobs").click();
   const dialog = page.getByRole("dialog", { name: "Subtitle jobs" });
   await expect(dialog).toContainText("Running");
@@ -226,6 +242,7 @@ test("keeps file navigation usable during readiness loading and supports retry a
   });
   subtitles.capabilitiesStatus = 503;
   await openMovie(page);
+  await openSubtitlesMenu(page);
   await page.getByTestId("toolbar-subtitles").click();
   const dialog = page.getByRole("dialog", { name: "Generate Subtitles" });
   await expect(dialog).toContainText("Checking subtitle availability");

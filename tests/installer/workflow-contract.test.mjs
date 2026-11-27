@@ -224,6 +224,10 @@ test('real offline subtitle container inference gates application publication', 
   assert.ok(start >= 0 && start < end, 'real subtitle inference job must exist');
   const inference = content.slice(start, end);
   assert.match(inference, /tools\/subtitle_container_smoke\.sh/);
+  assert.match(inference, /tools\/subtitle_sync_smoke\.py/);
+  const inferenceScript = await readFile(new URL('../../tools/subtitle_container_smoke.sh', import.meta.url), 'utf8');
+  assert.match(inferenceScript, /tools\/subtitle_generation_timing_smoke\.py/);
+  assert.match(inferenceScript, /timing-result\.json/);
   assert.match(inference, /docker build[^\n]*worker\/subtitles/);
   assert.match(inference, /name: subtitle-inference-diagnostics/);
   assert.match(content.slice(end), /needs: \[backend, acceptance, container-smoke, subtitle-inference\]/);
@@ -461,7 +465,7 @@ test('runtime pins FFmpeg and the container smoke proves the media lifecycle', a
 test('container smoke preserves and annotates runtime diagnostics before cleanup', async () => {
   const content = await workflow();
   const smokeStart = content.indexOf('  container-smoke:');
-  const publishStart = content.indexOf('  container-publish:');
+  const publishStart = content.indexOf('  subtitle-inference:');
   assert.notEqual(smokeStart, -1);
   assert.notEqual(publishStart, -1);
   const smoke = content.slice(smokeStart, publishStart);

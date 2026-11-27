@@ -60,9 +60,23 @@
         @if (!store.english() && !store.romanian()) {
           <p class="error" role="alert">Select at least one language.</p>
         }
+        <label>
+          <input
+            id="subtitle-skip-existing"
+            type="checkbox"
+            [checked]="store.skipExisting()"
+            [disabled]="store.submitting()"
+            (change)="setSkipExisting($event)"
+          />
+          Skip successfully processed videos
+        </label>
         <p class="hint">
-          Save subtitles beside each video. Folders include subfolders; successfully processed
-          videos are skipped.
+          Save subtitles beside each video. Folders include subfolders.
+          @if (store.skipExisting()) {
+            Successfully processed videos are skipped. Uncheck to regenerate them.
+          } @else {
+            Regenerate selected videos, including previous successes. Existing subtitles are backed up.
+          }
         </p>
       } @else {
         @if (store.loading() && !store.jobs().length) {

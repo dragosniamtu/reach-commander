@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ReachCommander.Application.MediaPreviews;
+using ReachCommander.Application.TextEncodings;
 
 namespace ReachCommander.Api.Contracts.MediaPreviews;
 
@@ -11,9 +12,11 @@ public sealed record CreateMediaPreviewRequestDto(
 }
 
 public sealed record SelectMediaPreviewSubtitleRequestDto(
-    [Required] string SubtitlePath);
+    [Required] string SubtitlePath,
+    TextEncodingKind SourceEncoding = TextEncodingKind.Auto,
+    bool EncodingReviewed = false);
 
-public sealed record CreateSubtitleSavePlanRequestDto(long OffsetMilliseconds);
+public sealed record CreateSubtitleSavePlanRequestDto(long OffsetMilliseconds, double TimeScale = 1);
 
 public sealed record SubtitleCueDto(
     int Index,
@@ -41,7 +44,9 @@ public sealed record MediaPreviewDto(
     DateTimeOffset ExpiresAt,
     string? FailureCode,
     string? FailureDetail,
-    bool TranscodeActive)
+    bool TranscodeActive,
+    SubtitleEncodingInfo? SubtitleEncoding = null,
+    string? SubtitleErrorCode = null)
 {
     public static MediaPreviewDto FromModel(MediaPreviewSession session) => new(
         session.SessionId,
@@ -56,7 +61,9 @@ public sealed record MediaPreviewDto(
         session.ExpiresAt,
         session.FailureCode,
         session.FailureDetail,
-        session.TranscodeActive);
+        session.TranscodeActive,
+        session.SubtitleEncoding,
+        session.SubtitleErrorCode);
 }
 
 public sealed record SubtitleSavePlanDto(
@@ -65,7 +72,8 @@ public sealed record SubtitleSavePlanDto(
     string SubtitlePath,
     string BackupPath,
     long OffsetMilliseconds,
-    bool CanExecute)
+    bool CanExecute,
+    double TimeScale = 1)
 {
     public static SubtitleSavePlanDto FromModel(SubtitleSavePlan plan) => new(
         plan.PlanId,
@@ -73,7 +81,8 @@ public sealed record SubtitleSavePlanDto(
         plan.SubtitlePath,
         plan.BackupPath,
         plan.OffsetMilliseconds,
-        plan.CanExecute);
+        plan.CanExecute,
+        plan.TimeScale);
 }
 
 public sealed record SubtitleSaveResultDto(

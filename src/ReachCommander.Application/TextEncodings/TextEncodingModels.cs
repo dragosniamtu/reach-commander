@@ -9,6 +9,20 @@ public enum TextEncodingKind
     Utf16BigEndian,
     Windows1250,
     Windows1252,
+    Windows1251,
+    Windows1253,
+    Windows1254,
+    Windows1255,
+    Windows1256,
+    Windows1257,
+    Windows1258,
+    Thai874,
+    ShiftJis,
+    Gbk,
+    Big5,
+    Korean949,
+    Latin1,
+    Latin2,
 }
 
 public enum TextEncodingConfidence

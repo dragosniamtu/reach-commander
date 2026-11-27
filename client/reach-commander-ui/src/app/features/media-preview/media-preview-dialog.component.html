@@ -16,7 +16,7 @@
         <span class="eyebrow">Media workspace</span>
         <h2 id="media-preview-title">Synchronize subtitles</h2>
         <p id="media-preview-description">
-          Preview one constant SRT timing offset without modifying the video.
+          Preview SRT encoding and timing corrections before saving.
         </p>
       </div>
       <button
@@ -41,7 +41,7 @@
             (canplay)="onPlaybackReady()"
           ></video>
           @if (store.activeCue(); as cue) {
-            <div class="subtitle-overlay" aria-live="off">{{ cue.text }}</div>
+            <div class="subtitle-overlay" aria-live="off" dir="auto">{{ cue.text }}</div>
           }
           @if (busy()) {
             <div class="preparing" role="status" aria-live="polite">
@@ -60,7 +60,9 @@
         @if (playbackFailed()) {
           <p class="warning" role="alert">
             Direct playback failed.
-            <button type="button" (click)="retryPlayback()">Prepare compatible preview</button>
+            <button type="button" [disabled]="store.repairActive()" (click)="retryPlayback()">
+              Prepare compatible preview
+            </button>
           </p>
         }
       </section>
@@ -71,7 +73,7 @@
             <div><span>Video</span><code>{{ session.videoPath }}</code></div>
             <div>
               <span>Subtitle</span>
-              <code>{{ session.subtitlePath ?? 'No same-name SRT found' }}</code>
+              <code>{{ session.subtitlePath ?? (session.subtitleErrorCode ? 'SRT could not be loaded' : 'No same-name SRT found') }}</code>
             </div>
           </section>
 
@@ -80,29 +82,95 @@
             <select
               id="subtitle-path"
               data-testid="subtitle-picker"
-              [value]="session.subtitlePath ?? ''"
-              [disabled]="busy() || store.state().subtitleCandidates.length === 0"
+              [value]="subtitlePath()"
+              [disabled]="subtitleControlsDisabled() || store.state().subtitleCandidates.length === 0"
               (change)="selectSubtitle($event)"
             >
               @if (store.state().subtitleCandidates.length === 0) {
                 <option value="">No SRT files found</option>
               } @else {
-                @if (session.subtitlePath === null) {
+                @if (!subtitlePath()) {
                   <option value="" selected>Select an SRT file</option>
                 }
                 @for (candidate of store.state().subtitleCandidates; track candidate.path) {
                   <option
                     [value]="candidate.path"
-                    [selected]="candidate.path === session.subtitlePath"
+                    [selected]="candidate.path === subtitlePath()"
                   >{{ candidate.name }}</option>
                 }
               }
             </select>
+            @if (store.subtitleSelectionError(); as message) {
+              <p class="warning" role="alert">{{ message }} Select the SRT and choose its source encoding.</p>
+            }
+            <label for="subtitle-source-encoding">Source encoding</label>
+            <select
+              id="subtitle-source-encoding"
+              [value]="sourceEncoding()"
+              [disabled]="subtitleControlsDisabled() || (!subtitlePath() && store.state().subtitleCandidates.length === 0)"
+              (change)="selectSourceEncoding($event)"
+            >
+              @for (encoding of sourceEncodings; track encoding.value) {
+                <option [value]="encoding.value" [selected]="sourceEncoding() === encoding.value">{{ encoding.label }}</option>
+              }
+            </select>
+            @if (subtitlePath() === session.subtitlePath && !store.state().subtitleSelectionFailed) {
+              @if (session.subtitleEncoding; as encoding) {
+                <p class="encoding-description">Decoded as {{ encodingLabel(encoding.sourceEncoding) }}. Saves use UTF-8.</p>
+                @if (encoding.previewText) {
+                  <pre class="encoding-sample" aria-label="Decoded subtitle sample" dir="auto" tabindex="0">{{ encoding.previewText }}</pre>
+                }
+                @if (encoding.requiresReview) {
+                  <p class="encoding-description">Check the sample and select a different encoding if the characters look wrong.</p>
+                  <button
+                    type="button"
+                    [disabled]="subtitleControlsDisabled()"
+                    (click)="store.confirmSubtitleEncoding()"
+                  >Confirm decoded text</button>
+                }
+              }
+            }
           </section>
 
-          <section class="offset-controls">
-            <h3>Constant timing offset</h3>
-            <p>Positive values show subtitles later; negative values show them earlier.</p>
+          <section class="repair-controls" aria-label="Automatic timing repair">
+            <button
+              type="button"
+              class="primary"
+              [disabled]="!store.canStartRepair()"
+              (click)="store.startRepair()"
+            >Repair subtitles</button>
+            @if (store.state().checkingRepairCapabilities) {
+              <p role="status">Checking automatic timing availability…</p>
+            } @else if (store.repairAvailabilityMessage(); as message) {
+              <p>{{ message }}</p>
+              <button type="button" (click)="store.checkRepairCapabilities()">Recheck</button>
+            }
+            @if (store.state().repair; as repair) {
+              @if (store.repairActive()) {
+                <p role="status">{{ repair.stage }} · {{ repair.percent }}%</p>
+                <progress aria-label="Automatic timing repair progress" [value]="repair.percent" max="100"></progress>
+                <button
+                  type="button"
+                  [disabled]="repair.state === 'cancelling'"
+                  (click)="store.cancelRepair()"
+                >Cancel repair</button>
+              } @else if (repair.state === 'completed') {
+                <p role="status">Timing estimate ready. Play the video to check alignment before saving.</p>
+              } @else if (repair.state === 'cancelled') {
+                <p role="status">Timing repair cancelled.</p>
+              }
+            }
+            @if (store.state().repairStatusUnknown) {
+              <p role="status">Automatic repair may still be running. You can adjust timing manually, retry cancellation, or close the workspace.</p>
+              <button type="button" [disabled]="subtitleControlsDisabled()" (click)="store.cancelRepair()">
+                Cancel repair
+              </button>
+            }
+          </section>
+
+          <fieldset class="offset-controls" [disabled]="subtitleControlsDisabled()">
+            <legend>Timing correction</legend>
+            <p>Positive offsets show subtitles later. Negative offsets show them earlier.</p>
             <div class="presets">
               <button type="button" (click)="adjustOffset(-1000)">−1000 ms</button>
               <button type="button" (click)="adjustOffset(-500)">−500 ms</button>
@@ -122,7 +190,13 @@
               [value]="store.state().offsetMilliseconds"
               (input)="setExactOffset($event)"
             />
-          </section>
+            @if (store.state().timeScale !== 1 || store.state().repair?.state === 'completed') {
+              <p>Estimated timing scale <output>{{ store.state().timeScale.toFixed(6) }}×</output></p>
+            }
+            @if (store.state().offsetMilliseconds !== 0 || store.state().timeScale !== 1 || store.state().repair?.state === 'completed') {
+              <button type="button" (click)="store.resetCorrection()">Reset correction</button>
+            }
+          </fieldset>
 
           @if (session.sourceReadOnly) {
             <p class="read-only">Preview only: this source is read-only.</p>
@@ -134,7 +208,7 @@
               <code>{{ plan.subtitlePath }}</code>
               <span aria-hidden="true">→</span>
               <code>{{ plan.backupPath }}</code>
-              <p>The video is not modified. The original subtitle is preserved byte-for-byte.</p>
+              <p>The corrected subtitle is saved as UTF-8. The backup preserves the original subtitle byte-for-byte. The video is not modified.</p>
               <button
                 type="button"
                 class="primary"
@@ -146,6 +220,9 @@
             <section class="save-success" aria-live="polite">
               <strong>Corrected subtitle saved</strong>
               <p>Original: <code>{{ result.backupPath }}</code></p>
+              @if (store.state().phase === 'savedRefreshFailed') {
+                <button type="button" (click)="store.refreshSavedSubtitle()">Reload subtitle preview</button>
+              }
             </section>
           } @else if (store.canPlanSave()) {
             <button type="button" class="primary review-save" (click)="reviewSave()">

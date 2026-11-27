@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -21,6 +22,7 @@ test.describe.serial('file operations', () => {
 
     const progress = page.getByTestId('transfer-progress-dialog');
     await progress.getByRole('button', { name: 'Background', exact: true }).click();
+    await openApplicationMenu(page);
     const indicator = page.getByRole('button', { name: /Copy .*Open task details/i });
     await expect(indicator).toBeVisible();
     await indicator.click();
@@ -74,6 +76,8 @@ test.describe.serial('file operations', () => {
     await left.focus();
     await page.keyboard.press('Control+R');
     await expect(left.getByText('photo.jpg', { exact: true })).toBeVisible();
+
+    await openApplicationMenu(page);
 
     await page.getByTestId('toolbar-trash').click();
     const trash = page.getByRole('dialog', { name: 'Trash' });
@@ -142,6 +146,8 @@ async function finishVisibleTask(page: Page) {
 }
 
 async function finishBackgroundTask(page: Page, label: RegExp) {
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await openApplicationMenu(page);
   const indicator = page.getByRole('button', { name: label });
   await expect(indicator).toBeVisible();
   await indicator.click();

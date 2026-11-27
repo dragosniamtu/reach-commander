@@ -70,7 +70,9 @@ public sealed class MediaPreviewsController(IMediaPreviewService service) : Cont
         await service.SelectSubtitleAsync(
             sessionId,
             request.SubtitlePath,
-            cancellationToken)));
+            cancellationToken,
+            request.SourceEncoding,
+            request.EncodingReviewed)));
 
     [HttpPost("{sessionId:guid}/fallback")]
     [EnableRateLimiting(AuthenticationConfiguration.MediaPreviewPolicy)]
@@ -97,7 +99,8 @@ public sealed class MediaPreviewsController(IMediaPreviewService service) : Cont
         await service.PlanSubtitleSaveAsync(
             sessionId,
             request.OffsetMilliseconds,
-            cancellationToken)));
+            cancellationToken,
+            request.TimeScale)));
 
     [HttpPost("subtitle-save-plans/{planId:guid}/execute")]
     [EnableRateLimiting(AuthenticationConfiguration.MediaPreviewPolicy)]

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using ReachCommander.Application.Files;
 using ReachCommander.Application.MediaPreviews;
+using System.Security.Cryptography;
 
 namespace ReachCommander.Infrastructure.MediaPreviews;
 
@@ -17,11 +18,11 @@ internal sealed class SubtitleSavePlanner(
     public async ValueTask<SubtitleSavePlan> PlanAsync(
         Guid sessionId,
         long offsetMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double timeScale = 1)
     {
-        if (offsetMilliseconds == 0 ||
-            offsetMilliseconds < -_maximumOffset ||
-            offsetMilliseconds > _maximumOffset)
+        if (offsetMilliseconds < -_maximumOffset || offsetMilliseconds > _maximumOffset ||
+            !double.IsFinite(timeScale) || timeScale is < 0.8 or > 1.25)
         {
             throw MediaPreviewException.SubtitleOffsetInvalid();
         }
@@ -33,6 +34,15 @@ internal sealed class SubtitleSavePlanner(
         }
 
         var subtitle = session.Subtitle ?? throw MediaPreviewException.SubtitleMissing();
+        if (subtitle.Encoding?.RequiresReview == true)
+            throw new MediaPreviewException("subtitle_encoding_review_required", "Review the decoded subtitle text before continuing.");
+        if (offsetMilliseconds == 0 && timeScale == 1 && subtitle.Encoding?.ConversionNeeded != true)
+            throw MediaPreviewException.SubtitleOffsetInvalid();
+        var video = await pathSecurity.ResolveAsync(session.SourceId, session.VideoLogicalPath, cancellationToken);
+        MediaPreviewService.EnsureNoSymbolicLinks(video);
+        if (!PathsEqual(video.PhysicalPath, session.VideoPhysicalPath) ||
+            MediaPreviewService.CaptureFingerprint(video.PhysicalPath) != session.VideoFingerprint)
+            throw MediaPreviewException.SessionStale();
         var resolved = await pathSecurity.ResolveAsync(
             session.SourceId,
             subtitle.LogicalPath,
@@ -44,7 +54,9 @@ internal sealed class SubtitleSavePlanner(
         }
 
         var snapshot = GetSnapshotOrStale(resolved.PhysicalPath);
-        if (snapshot.IsSymbolicLink || snapshot.Fingerprint != subtitle.Fingerprint)
+        if (resolved.Source.IsReadOnly || snapshot.IsSymbolicLink || snapshot.Fingerprint != subtitle.Fingerprint ||
+            (subtitle.ContentHash is not null && subtitle.ContentHash != Convert.ToHexString(SHA256.HashData(
+                await MediaPreviewService.ReadBoundedSubtitleAsync(resolved.PhysicalPath, options.Value.MaximumSubtitleBytes, cancellationToken)))))
         {
             throw MediaPreviewException.SubtitleSavePlanStale();
         }
@@ -59,7 +71,8 @@ internal sealed class SubtitleSavePlanner(
         var backupLogicalPath = directoryLogicalPath == "/"
             ? $"/{backupName}"
             : $"{directoryLogicalPath}/{backupName}";
-        var correctedBytes = subtitle.Document.RenderWithOffset(offsetMilliseconds);
+        var correctedBytes = subtitle.Document.RenderWithTiming(offsetMilliseconds, timeScale);
+        if (correctedBytes.Length > options.Value.MaximumSubtitleBytes) throw MediaPreviewException.SubtitleTooLarge();
         var createdAt = clock.GetUtcNow();
         var stored = new StoredSubtitleSavePlan(
             Guid.NewGuid(),
@@ -75,7 +88,9 @@ internal sealed class SubtitleSavePlanner(
             Path.Combine(directoryPhysicalPath, backupName),
             snapshot.Fingerprint,
             correctedBytes,
-            offsetMilliseconds);
+            offsetMilliseconds,
+            timeScale,
+            subtitle.ContentHash);
         plans.Add(stored);
         return Map(stored);
     }
@@ -118,7 +133,8 @@ internal sealed class SubtitleSavePlanner(
         plan.SubtitleLogicalPath,
         plan.BackupLogicalPath,
         plan.OffsetMilliseconds,
-        CanExecute: true);
+        CanExecute: true,
+        TimeScale: plan.TimeScale);
 
     private static string GetLogicalDirectory(string logicalPath)
     {

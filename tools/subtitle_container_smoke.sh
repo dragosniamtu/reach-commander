@@ -49,6 +49,14 @@ docker run --rm --user 1000:1000 --read-only --cap-drop ALL --security-opt no-ne
   --mount "type=bind,source=$root/models,target=/models" \
   --entrypoint python reachcommander-subtitles:smoke /app/download_models.py --models /models --romanian
 
+# Verify phrase endings with real Whisper/Marian inference and a long silent gap.
+docker run --rm --user 1000:1000 --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp:size=256m,mode=1777 --memory 6g --cpus 2 \
+  --mount "type=bind,source=$root/models,target=/models,readonly" \
+  --mount "type=bind,source=$PWD/tools/subtitle_generation_timing_smoke.py,target=/app/subtitle_generation_timing_smoke.py,readonly" \
+  --entrypoint python reachcommander-subtitles:smoke /app/subtitle_generation_timing_smoke.py --models /models \
+  | tee "$diagnostics/timing-result.json"
+
 docker run --detach --name reachcommander-subtitle-worker --user 1000:1000 --read-only --network none \
   --cap-drop ALL --security-opt no-new-privileges --memory 6g --cpus 2 --pids-limit 256 \
   --tmpfs /tmp:size=768m,mode=1777 \

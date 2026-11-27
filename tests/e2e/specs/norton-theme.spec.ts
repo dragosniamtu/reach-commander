@@ -1,3 +1,4 @@
+import { openApplicationMenu, selectTheme } from '../support/application-menu';
 import { expect, test } from "@playwright/test";
 
 const storageKey = "reachcommander.theme.v1";
@@ -12,6 +13,7 @@ test("selects, persists, and resets the Norton theme", async ({
   page,
 }, testInfo) => {
   const root = page.locator("html");
+  await openApplicationMenu(page);
   const selector = page.getByTestId("theme-selector");
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -21,7 +23,7 @@ test("selects, persists, and resets the Norton theme", async ({
   });
 
   await expect(selector).toHaveValue("default");
-  await selector.selectOption("norton");
+  await selectTheme(page, "norton");
 
   await expect(root).toHaveAttribute("data-theme", "norton");
   await expect(selector).toHaveValue("norton");
@@ -68,7 +70,7 @@ test("selects, persists, and resets the Norton theme", async ({
     await page.evaluate((key) => localStorage.getItem(key), storageKey),
   ).toBe("norton");
 
-  await selector.selectOption("default");
+  await selectTheme(page, "default");
   await expect(root).not.toHaveAttribute("data-theme", "norton");
   await expect(selector).toHaveValue("default");
   expect(
@@ -86,9 +88,11 @@ test("keeps the Norton selector and dual-pane shell usable at compact width", as
   await page.setViewportSize({ width: 680, height: 800 });
   await page.reload();
 
+  await openApplicationMenu(page);
+
   const selector = page.getByTestId("theme-selector");
   await expect(selector).toBeVisible();
-  await selector.selectOption("norton");
+  await selectTheme(page, "norton");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "norton");
   await expect(page.getByTestId("left-panel")).toBeVisible();
   await expect(page.getByTestId("right-panel")).toBeVisible();

@@ -4,6 +4,7 @@ using ReachCommander.Application.SourceManagement;
 using ReachCommander.Infrastructure.Archives.Extraction;
 using ReachCommander.Infrastructure.TextEncodings;
 using ReachCommander.Application.SubtitleGeneration;
+using ReachCommander.Application.MediaPreviews;
 
 namespace ReachCommander.Infrastructure.SystemUpdates;
 
@@ -16,12 +17,14 @@ internal sealed class SystemUpdateOperationProbe(
     IFileOperationService fileOperations,
     ArchiveExtractionOperationStore? archiveOperations = null,
     TextEncodingOperationStore? textEncodings = null,
-    ISubtitleGenerationService? subtitleJobs = null) :
+    ISubtitleGenerationService? subtitleJobs = null,
+    ISubtitleRepairService? subtitleRepairs = null) :
     ISystemUpdateOperationProbe,
     ISourceManagementOperationEligibility
 {
     public async Task<bool> HasActiveOperationsAsync(CancellationToken cancellationToken)
     {
+        if (subtitleRepairs?.HasActiveOperations == true) return true;
         var operations = await fileOperations.ListAsync(cancellationToken).ConfigureAwait(false);
         if (operations.Any(operation => operation.Phase is
                 FileOperationPhase.Queued or

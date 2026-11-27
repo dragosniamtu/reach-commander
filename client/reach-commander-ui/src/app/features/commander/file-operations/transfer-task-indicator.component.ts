@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, ViewChild, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, ViewChild, computed, inject, input } from '@angular/core';
 import { FileOperationKind, FileOperationStatusDto } from '../../../core/api/api.models';
 import { FileOperationStore } from './file-operation.store';
 
@@ -10,6 +10,7 @@ import { FileOperationStore } from './file-operation.store';
 })
 export class TransferTaskIndicatorComponent {
   readonly store = inject(FileOperationStore);
+  readonly menuItem = input(false);
   readonly task = computed(() => this.store.activeTask() ??
     this.store.tasks().find((task) => !task.acknowledged) ?? null);
 

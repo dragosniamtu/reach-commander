@@ -23,6 +23,9 @@ internal sealed partial class SrtDocument
 
     public IReadOnlyList<SubtitleCue> Cues { get; }
 
+    public string TimingReference() => string.Join("\n\n", _blocks.Select((block, index) =>
+        $"{index + 1}\n{FormatTimestamp(block.StartMilliseconds)} --> {FormatTimestamp(block.EndMilliseconds)}\n_")) + "\n";
+
     public static SrtDocument Parse(string text, int maximumCues)
     {
         if (string.IsNullOrWhiteSpace(text) || maximumCues <= 0)
@@ -74,16 +77,20 @@ internal sealed partial class SrtDocument
         return new SrtDocument(blocks);
     }
 
-    public byte[] RenderWithOffset(long offsetMilliseconds)
+    public byte[] RenderWithOffset(long offsetMilliseconds) => RenderWithTiming(offsetMilliseconds, 1);
+
+    public byte[] RenderWithTiming(long offsetMilliseconds, double timeScale)
     {
+        if (!double.IsFinite(timeScale) || timeScale is < 0.8 or > 1.25)
+            throw MediaPreviewException.SubtitleOffsetInvalid();
         try
         {
             var builder = new StringBuilder();
             for (var index = 0; index < _blocks.Count; index++)
             {
                 var block = _blocks[index];
-                var shiftedStart = checked(block.StartMilliseconds + offsetMilliseconds);
-                var shiftedEnd = checked(block.EndMilliseconds + offsetMilliseconds);
+                var shiftedStart = checked((long)Math.Round(block.StartMilliseconds * timeScale, MidpointRounding.AwayFromZero) + offsetMilliseconds);
+                var shiftedEnd = checked((long)Math.Round(block.EndMilliseconds * timeScale, MidpointRounding.AwayFromZero) + offsetMilliseconds);
                 var start = Math.Max(0, shiftedStart);
                 var end = Math.Max(0, shiftedEnd);
                 if (end <= start)

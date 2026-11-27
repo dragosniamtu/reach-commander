@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -14,6 +15,8 @@ test.describe.serial('text encoding conversion', () => {
       '/Encoding Lab/romanian.srt',
       '/Encoding Lab/notes.txt',
     ]);
+
+    await openApplicationMenu(page);
 
     await page.getByTestId('toolbar-text-encoding').click();
     const dialog = page.getByTestId('text-encoding-dialog');
@@ -46,6 +49,8 @@ test.describe.serial('text encoding conversion', () => {
     const left = await openEncodingLab(page);
     await left.locator('tr[data-path="/Encoding Lab/photo.jpg"]').click();
 
+    await openApplicationMenu(page);
+
     const encoding = page.getByTestId('toolbar-text-encoding');
     await expect(encoding).toBeDisabled();
     await expect(encoding.locator('..')).toHaveAttribute(
@@ -55,6 +60,7 @@ test.describe.serial('text encoding conversion', () => {
 
     await left.locator('tr[data-path="/Encoding Lab/binary.sub"]').click();
     await expect(encoding).toBeEnabled();
+    await openApplicationMenu(page);
     await encoding.click();
     const dialog = page.getByTestId('text-encoding-dialog');
     await expect(dialog).toContainText('Invalid');

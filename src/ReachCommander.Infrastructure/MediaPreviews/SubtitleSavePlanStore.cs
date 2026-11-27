@@ -17,7 +17,9 @@ internal sealed record StoredSubtitleSavePlan(
     string BackupPhysicalPath,
     MediaFileFingerprint OriginalFingerprint,
     byte[] CorrectedBytes,
-    long OffsetMilliseconds);
+    long OffsetMilliseconds,
+    double TimeScale = 1,
+    string? OriginalHash = null);
 
 internal sealed class SubtitleSavePlanStore(
     TimeProvider clock,

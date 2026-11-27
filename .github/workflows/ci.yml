@@ -524,6 +524,13 @@ jobs:
           docker build --tag reachcommander:subtitle-smoke .
       - name: Verify offline inference and safe API installation
         run: bash tools/subtitle_container_smoke.sh
+      - name: Verify model-free subtitle timing repair in the Linux worker
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --cpus 2 --memory 6g \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,uid=1000,gid=1000,mode=1777,size=256m \
+            --mount "type=bind,src=$PWD/tools/subtitle_sync_smoke.py,dst=/app/subtitle_sync_smoke.py,readonly" \
+            --entrypoint python reachcommander-subtitles:smoke /app/subtitle_sync_smoke.py
       - name: Upload real inference diagnostics
         if: always()
         uses: actions/upload-artifact@v7

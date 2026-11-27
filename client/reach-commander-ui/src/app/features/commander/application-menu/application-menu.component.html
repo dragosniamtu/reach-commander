@@ -1,0 +1,31 @@
+<button
+  #trigger
+  type="button"
+  class="application-menu-trigger"
+  data-testid="application-menu-trigger"
+  aria-haspopup="dialog"
+  aria-controls="application-menu-panel"
+  [attr.aria-expanded]="opened()"
+  (click)="toggle()"
+  (keydown)="triggerKeydown($event)"
+>
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true">
+    <path d="M3 5h14M3 10h14M3 15h14" />
+  </svg>
+  <span>Menu</span>
+  <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true">
+    <path d="m6 8 4 4 4-4" />
+  </svg>
+</button>
+<section
+  #panel
+  id="application-menu-panel"
+  class="application-menu-panel"
+  role="dialog"
+  aria-label="Application menu"
+  [hidden]="!opened()"
+  (keydown)="panelKeydown($event)"
+  (click)="selectAction($event)"
+>
+  <ng-content />
+</section>

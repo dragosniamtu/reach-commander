@@ -1,3 +1,4 @@
+import { openApplicationMenu } from '../support/application-menu';
 import { expect, test } from "@playwright/test";
 
 test("previews complete names, renames mixed entries, and safely undoes", async ({
@@ -69,6 +70,8 @@ test("read-only sources explain why Multi-Rename is unavailable", async ({
   const left = page.getByTestId("left-panel");
   await left.getByTestId("source-archive").click();
   await left.getByText("locked.txt", { exact: true }).click();
+
+  await openApplicationMenu(page);
 
   const renameWrapper = page.getByTestId("toolbar-multi-rename").locator("..");
   await expect(page.getByTestId("toolbar-multi-rename")).toBeDisabled();

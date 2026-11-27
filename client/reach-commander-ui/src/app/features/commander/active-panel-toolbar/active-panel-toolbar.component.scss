@@ -1,17 +1,16 @@
 :host {
   display: block;
   min-width: 0;
-  container-type: inline-size;
 }
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   min-width: 0;
 }
 .context-chip {
   display: grid;
-  flex: 0 1 145px;
+  flex: 0 1 210px;
   min-width: 80px;
   gap: 2px;
   padding: 4px 7px;
@@ -28,12 +27,12 @@
 }
 .context-chip strong {
   color: var(--accent-text);
-  font: 700 8px var(--font-ui);
+  font: 700 10px var(--font-ui);
   letter-spacing: 0.04em;
 }
 .context-chip code {
   color: var(--text-4);
-  font: 8px var(--font-mono);
+  font: 10px var(--font-mono);
 }
 .action-wrapper {
   display: inline-flex;
@@ -47,7 +46,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 8px;
   height: 30px;
   padding: 0 8px;
   border: 1px solid var(--line-strong);
@@ -117,39 +116,18 @@ svg {
   white-space: nowrap;
   border: 0;
 }
-@container (max-width: 1000px) {
-  .action-text {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-  }
-  button {
-    width: 31px;
-    padding: 0;
-  }
-  .context-chip {
-    flex-basis: 110px;
-    min-width: 72px;
-  }
+
+.context-chip { order: 1; }
+.search-box { order: 2; }
+app-application-menu { order: 3; }
+
+.subtitle-menu-actions {
+  display: grid;
+  gap: 2px;
+  margin: 3px 0 3px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-strong);
 }
-@container (max-width: 450px) {
-  .context-chip {
-    display: none;
-  }
-  .toolbar {
-    gap: 2px;
-  }
-  .action-wrapper {
-    flex: 0 1 29px;
-    min-width: 24px;
-  }
-  .action-wrapper button {
-    width: 100%;
-    min-width: 0;
-  }
-  .search-box {
-    flex: 1 0 5rem;
-  }
-}
+.subtitle-menu-actions[hidden] { display: none; }
+.submenu-chevron { margin-left: auto; }
+button[aria-expanded='true'] .submenu-chevron { transform: rotate(90deg); }

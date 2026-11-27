@@ -147,6 +147,10 @@ public static class DependencyInjection
         services.AddHostedService<MediaPreviewCleanupService>();
         services.AddHostedService<MediaPreviewWorker>();
         services.AddSubtitleGeneration(configuration);
+        services.AddSingleton<ISubtitleSyncEngine, SubtitleSyncMailbox>();
+        services.AddSingleton<SubtitleRepairService>();
+        services.AddSingleton<ISubtitleRepairService>(provider => provider.GetRequiredService<SubtitleRepairService>());
+        services.AddHostedService(provider => provider.GetRequiredService<SubtitleRepairService>());
         services.AddSingleton<IHostPlatform, RuntimeHostPlatform>();
         services.AddSingleton<BoundedTextFileReader>();
         services.AddSingleton<ITrustedPathResolver, TrustedPathResolver>();

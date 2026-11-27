@@ -28,6 +28,7 @@ export class SystemMetricsWidgetComponent {
   readonly snapshot = input.required<SystemMetricsDto | null>();
   readonly effectiveState = input.required<HardwareMetricsState | 'loading'>();
   readonly expanded = input(false);
+  readonly menuItem = input(false);
   readonly openDetails = output<void>();
 
   @ViewChild('trigger', { read: ElementRef }) private trigger?: ElementRef<HTMLButtonElement>;

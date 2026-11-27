@@ -23,6 +23,7 @@ interface CurrentVersionPresentation {
 export class SystemUpdateButtonComponent {
   readonly status = input<SystemUpdateStatusDto | null>(null);
   readonly pending = input(false);
+  readonly menuItem = input(false);
   readonly check = output<void>();
   readonly open = output<void>();
 

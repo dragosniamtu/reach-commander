@@ -32,6 +32,9 @@ import {
   FileOperationSubmissionDto,
   CreateMediaPreviewRequestDto,
   MediaPreviewDto,
+  SubtitleRepairCapabilitiesDto,
+  SubtitleRepairStatusDto,
+  TextEncodingKind,
   SubtitleSavePlanDto,
   SubtitleSaveResultDto,
   RestorePreviewDto,
@@ -386,13 +389,35 @@ export class ReachCommanderApi extends CommanderApiPort {
   selectMediaPreviewSubtitle(
     sessionId: string,
     subtitlePath: string,
+    sourceEncoding?: TextEncodingKind,
+    encodingReviewed?: boolean,
   ): Promise<MediaPreviewDto> {
     return firstValueFrom(
       this.http.put<MediaPreviewDto>(
         `/api/media-previews/${encodeURIComponent(sessionId)}/subtitle`,
-        { subtitlePath },
+        {
+          subtitlePath,
+          ...(sourceEncoding === undefined ? {} : { sourceEncoding }),
+          ...(encodingReviewed === undefined ? {} : { encodingReviewed }),
+        },
       ),
     );
+  }
+
+  getSubtitleRepairCapabilities(): Promise<SubtitleRepairCapabilitiesDto> {
+    return firstValueFrom(this.http.get<SubtitleRepairCapabilitiesDto>('/api/media-previews/repair-capabilities'));
+  }
+
+  startSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return firstValueFrom(this.http.post<SubtitleRepairStatusDto>(subtitleRepairUrl(sessionId), null));
+  }
+
+  getSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return firstValueFrom(this.http.get<SubtitleRepairStatusDto>(subtitleRepairUrl(sessionId)));
+  }
+
+  cancelSubtitleRepair(sessionId: string): Promise<SubtitleRepairStatusDto> {
+    return firstValueFrom(this.http.delete<SubtitleRepairStatusDto>(subtitleRepairUrl(sessionId)));
   }
 
   requestMediaPreviewFallback(sessionId: string): Promise<MediaPreviewDto> {
@@ -407,11 +432,12 @@ export class ReachCommanderApi extends CommanderApiPort {
   planMediaPreviewSubtitleSave(
     sessionId: string,
     offsetMilliseconds: number,
+    timeScale?: number,
   ): Promise<SubtitleSavePlanDto> {
     return firstValueFrom(
       this.http.post<SubtitleSavePlanDto>(
         `/api/media-previews/${encodeURIComponent(sessionId)}/subtitle-save-plans`,
-        { offsetMilliseconds },
+        { offsetMilliseconds, ...(timeScale === undefined ? {} : { timeScale }) },
       ),
     );
   }
@@ -440,6 +466,10 @@ export class ReachCommanderApi extends CommanderApiPort {
   mediaPreviewHlsUrl(sessionId: string, assetName: string): string {
     return `/api/media-previews/${encodeURIComponent(sessionId)}/hls/${encodeURIComponent(assetName)}`;
   }
+}
+
+function subtitleRepairUrl(sessionId: string): string {
+  return `/api/media-previews/${encodeURIComponent(sessionId)}/repair`;
 }
 
 function isUploadTransportEvent(

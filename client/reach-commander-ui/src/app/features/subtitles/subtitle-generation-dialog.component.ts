@@ -59,6 +59,10 @@ export class SubtitleGenerationDialogComponent implements AfterViewInit {
     this.store[language].set((event.target as HTMLInputElement).checked);
   }
 
+  setSkipExisting(event: Event): void {
+    this.store.skipExisting.set((event.target as HTMLInputElement).checked);
+  }
+
   nativeCancel(event: Event): void {
     event.preventDefault();
     this.closeRequested.emit();

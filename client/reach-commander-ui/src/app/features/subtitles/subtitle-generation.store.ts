@@ -37,6 +37,7 @@ export class SubtitleGenerationStore {
   readonly context = signal<SubtitleContext | null>(null);
   readonly english = signal(true);
   readonly romanian = signal(false);
+  readonly skipExisting = signal(true);
   readonly submitting = signal(false);
   readonly loading = signal(false);
   readonly capabilities = signal<SubtitleCapabilities | null>(null);
@@ -109,6 +110,7 @@ export class SubtitleGenerationStore {
     this.context.set(Object.freeze({ ...context }));
     this.english.set(true);
     this.romanian.set(false);
+    this.skipExisting.set(true);
     this.error.set(null);
     this.dialog.set('configure');
     void this.loadCapabilities();
@@ -190,7 +192,7 @@ export class SubtitleGenerationStore {
         path: context.path,
         english: this.english(),
         romanian: this.romanian(),
-        skipExisting: true,
+        skipExisting: this.skipExisting(),
       });
       if (session !== this.session) return;
       this.applyJob(job);
@@ -249,6 +251,7 @@ export class SubtitleGenerationStore {
     this.submitting.set(false);
     this.english.set(true);
     this.romanian.set(false);
+    this.skipExisting.set(true);
     this.error.set(null);
     this.capabilities.set(null);
     this.capabilitiesLoading.set(false);

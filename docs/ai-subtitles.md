@@ -4,7 +4,9 @@ To fix an existing subtitle's encoding and timing while keeping its text in any
 language, use [Repair subtitles](subtitle-repair.md). Automatic repair uses the
 local CPU worker without requiring Whisper or translation model downloads.
 
-Select a video or folder in ReachCommander, choose **Menu → Subtitles → Generate Subtitles**, leave English checked and optionally check Romanian, then choose **Generate**. At least one language is required. Folder jobs recursively discover MKV, MP4, AVI, MOV, M4V and WebM files, process one video at a time, and continue after individual failures. Progress and results survive a browser refresh. Cancel stops the active worker process tree; interruption does not install partially generated subtitles.
+Select one or more videos in ReachCommander, choose **Menu → Subtitles → Generate Subtitles**, leave English checked and optionally check Romanian, then choose **Generate**. At least one language is required. For multiple videos, the dialog lists every selected file in the displayed order. The same language and skip-existing choices apply to all files, and one server job processes them one at a time. Unselected videos are not included. The job continues when the dialog or browser closes; progress and per-file results are available under **Menu → Subtitles → Subtitle jobs**.
+
+You can also select one folder to recursively discover MKV, MP4, AVI, MOV, M4V and WebM files. Both folder and selected-file jobs continue after individual failures. Select video files together, or one folder separately. Cancel stops the active worker process tree and cancels the remaining files; interruption does not install partially generated subtitles.
 
 | Selection | Output for `Movie.mkv` |
 | --- | --- |
@@ -110,7 +112,7 @@ Use corresponding PowerShell `$env:NAME = 'value'` assignments on Windows, absol
 | ffprobe / FFmpeg timeout | 30 seconds / 30 minutes |
 | Mailbox request / result bounds | 32 KiB / 16 MiB; each SRT at most 8 MiB |
 
-The API defaults to eight active/queued jobs, 10,000 discovered videos and 10,000 discovered directories per selection. It also caps escaped path metadata at 4 MiB and each persisted job at 8 MiB; a larger selection fails with guidance to select a smaller folder. Each new submission trims older terminal history to the latest 100 jobs. These bounds keep recursive discovery and refresh/restart state manageable. Worker cancellation acknowledgements are collected after jobs and every ten seconds while idle; unacknowledged requests are bounded by the configured queue capacity.
+The API defaults to eight active/queued jobs, 10,000 selected or discovered videos and 10,000 discovered directories per selection. One batch occupies one job slot. Batch submissions are limited to a 1 MiB request body, a 1 MiB escaped path list and 4,096 characters per path. It also caps escaped path metadata at 4 MiB and each persisted job at 8 MiB; a larger selection fails with guidance to select fewer files or a smaller folder. Each new submission trims older terminal history to the latest 100 jobs. These bounds keep recursive discovery and refresh/restart state manageable. Worker cancellation acknowledgements are collected after jobs and every ten seconds while idle; unacknowledged requests are bounded by the configured queue capacity.
 
 Only one supervisor may hold the mailbox lock, and it starts exactly one model child at a time. Increase tmpfs and memory limits together if increasing the maximum media duration. CPU subtitles may take minutes or longer than playback time on low-power hardware. The worker chooses the audio stream flagged as default, otherwise the lowest-index audio stream. It detects speech language using Whisper, transcribes English, and translates non-English speech into English. Romanian is translated locally from that English transcript using Marian. Whisper does not produce Romanian translation output.
 

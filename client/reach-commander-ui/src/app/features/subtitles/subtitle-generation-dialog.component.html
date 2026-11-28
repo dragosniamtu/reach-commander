@@ -31,9 +31,23 @@
       }
       @if (store.dialog() === 'configure') {
         <p class="path">
-          <strong>{{ store.context()?.sourceName }}</strong
-          ><code>{{ store.context()?.path }}</code>
+          <strong>{{ store.context()?.sourceName }}</strong>
+          @if ((store.context()?.paths?.length ?? 0) > 1) {
+            <span>{{ store.context()?.paths?.length }} videos selected</span>
+          } @else {
+            <code>{{ store.context()?.path }}</code>
+          }
         </p>
+        @if ((store.context()?.paths?.length ?? 0) > 1) {
+          <ol class="selected-videos" role="list" aria-label="Selected videos" tabindex="0">
+            @for (path of store.context()?.paths; track path) {
+              <li>
+                <code>{{ path }}</code>
+              </li>
+            }
+          </ol>
+          <p class="hint">Videos are processed one at a time, in the order shown.</p>
+        }
         <fieldset [disabled]="store.submitting()">
           <legend>Subtitle languages</legend>
           <label
@@ -75,7 +89,8 @@
           @if (store.skipExisting()) {
             Successfully processed videos are skipped. Uncheck to regenerate them.
           } @else {
-            Regenerate selected videos, including previous successes. Existing subtitles are backed up.
+            Regenerate selected videos, including previous successes. Existing subtitles are backed
+            up.
           }
         </p>
       } @else {
@@ -83,7 +98,7 @@
           <p role="status">Loading subtitle jobs…</p>
         }
         @if (!store.loading() && !store.jobs().length) {
-          <p>No subtitle jobs yet. Select a video or folder to get started.</p>
+          <p>No subtitle jobs yet. Select videos or a folder to get started.</p>
         }
         @if (store.jobs().length) {
           <label class="job-picker"
@@ -96,6 +111,9 @@
               @for (job of store.jobs(); track job.jobId) {
                 <option [value]="job.jobId">
                   {{ job.createdAt | date: 'MMM d, HH:mm' }} · {{ job.path }} ·
+                  @if (job.files.length > 1) {
+                    {{ job.files.length }} files ·
+                  }
                   {{ label(job.phase) }}
                 </option>
               }

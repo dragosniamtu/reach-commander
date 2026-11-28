@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -166,6 +168,88 @@ public sealed class SubtitleJobsApiTests
         Assert.Equal(expected, response.StatusCode);
         Assert.DoesNotContain(factory.WorkspaceRoot, await response.Content.ReadAsStringAsync());
     }
+
+    [Fact]
+    public async Task Submit_batch_returns_pending_files_and_generates_only_the_selected_videos()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        WriteStatus(factory, true, false);
+        var movies = Path.Combine(factory.MediaRoot, "Movies");
+        File.WriteAllText(Path.Combine(movies, "Selected.mp4"), "test video");
+        File.WriteAllText(Path.Combine(movies, "Unselected.mp4"), "test video");
+        var engine = new TestEngine();
+        await using var configured = ConfigureBatchHost(factory, engine);
+        using var client = configured.CreateClient();
+        string[] paths = ["/Movies/Selected.mp4", "/Movies/Gladiator II.mkv"];
+
+        var response = await client.PostAsJsonAsync("/api/subtitle-jobs", new { sourceId = "media", path = paths[0], paths });
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var status = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(paths[0], status.GetProperty("path").GetString());
+        Assert.Equal(paths, status.GetProperty("files").EnumerateArray().Select(file => file.GetProperty("path").GetString()));
+        Assert.All(status.GetProperty("files").EnumerateArray(), file => Assert.Equal("pending", file.GetProperty("phase").GetString()));
+        Assert.NotNull(response.Headers.Location);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        do
+        {
+            await Task.Delay(20, timeout.Token);
+            status = await client.GetFromJsonAsync<JsonElement>(response.Headers.Location, timeout.Token);
+        } while (status.GetProperty("phase").GetString() is "queued" or "discovering" or "running" or "cancelling");
+        Assert.Equal("completed", status.GetProperty("phase").GetString());
+        Assert.Equal(2, engine.Calls);
+        Assert.True(File.Exists(Path.Combine(movies, "Selected.srt")));
+        Assert.True(File.Exists(Path.Combine(movies, "Gladiator II.srt")));
+        Assert.False(File.Exists(Path.Combine(movies, "Unselected.srt")));
+    }
+
+    [Theory]
+    [InlineData("/Movies", HttpStatusCode.UnprocessableEntity)]
+    [InlineData("/../secret.mkv", HttpStatusCode.BadRequest)]
+    public async Task Invalid_later_batch_entry_rejects_the_whole_request(string secondPath, HttpStatusCode expected)
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        WriteStatus(factory, true, false);
+        await using var configured = ConfigureBatchHost(factory, new TestEngine());
+        using var client = configured.CreateClient();
+        const string path = "/Movies/Gladiator II.mkv";
+
+        var response = await client.PostAsJsonAsync("/api/subtitle-jobs", new { sourceId = "media", path, paths = new[] { path, secondPath } });
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement>("/api/subtitle-jobs")).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Oversized_submit_body_is_rejected_before_enqueue()
+    {
+        await using var factory = new ReachCommanderApiFactory();
+        WriteStatus(factory, true, false);
+        await using var configured = ConfigureBatchHost(factory, new TestEngine());
+        using var client = configured.CreateClient();
+        const string path = "/Movies/Gladiator II.mkv";
+
+        using var request = new StringContent(JsonSerializer.Serialize(new
+        {
+            sourceId = "media", path, paths = new[] { path, new string('x', 1024 * 1024) },
+        }), Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/subtitle-jobs", request);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement>("/api/subtitle-jobs")).EnumerateArray());
+    }
+
+    private static WebApplicationFactory<Program> ConfigureBatchHost(
+        ReachCommanderApiFactory factory, TestEngine engine) => factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.PostConfigure<SubtitleGenerationOptions>(options =>
+            {
+                options.Enabled = true;
+                options.SharedPath = Path.Combine(factory.WorkspaceRoot, "worker");
+            });
+            services.RemoveAll<ISubtitleEngine>();
+            services.AddSingleton<ISubtitleEngine>(engine);
+        }));
 
     private static void WriteStatus(ReachCommanderApiFactory factory, bool english, bool romanian)
     {

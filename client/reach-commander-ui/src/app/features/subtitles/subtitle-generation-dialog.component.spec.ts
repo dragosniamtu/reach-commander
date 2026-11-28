@@ -31,6 +31,33 @@ describe('SubtitleGenerationDialogComponent', () => {
   });
   afterEach(() => http.verify());
 
+  it('lists every selected video before starting and explains sequential processing', async () => {
+    const context = {
+      panelSide: 'left' as const,
+      sourceId: 'media',
+      sourceName: 'Media',
+      path: '/First.mkv',
+      paths: ['/First.mkv', '/Second.mp4'],
+    };
+    store.open(context);
+    http.expectOne('/api/subtitle-jobs/capabilities').flush(ready);
+    await Promise.resolve();
+    fixture.detectChanges();
+    const list = fixture.nativeElement.querySelector('[aria-label="Selected videos"]');
+    expect(list).not.toBeNull();
+    expect(list.getAttribute('role')).toBe('list');
+    expect(list.tabIndex).toBe(0);
+    expect([...list.querySelectorAll('li')].map((row: any) => row.textContent.trim())).toEqual([
+      '/First.mkv',
+      '/Second.mp4',
+    ]);
+    expect(fixture.nativeElement.textContent).toContain('2 videos selected');
+    expect(fixture.nativeElement.textContent).toContain('one at a time');
+    expect(fixture.nativeElement.querySelector('[data-testid="subtitle-generate"]').disabled).toBe(
+      false,
+    );
+  });
+
   it.each([
     [
       { ...ready, enabled: false, reasonCode: 'subtitle_generation_disabled' },

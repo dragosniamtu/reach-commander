@@ -93,6 +93,48 @@ describe('SubtitleGenerationStore', () => {
     expect(store.english()).toBe(true);
   });
 
+  it('captures an immutable batch and submits one durable job even after the dialog closes', async () => {
+    const paths = ['/First.mkv', '/Second.mp4'];
+    const context = {
+      panelSide: 'left' as const,
+      sourceId: 'media',
+      sourceName: 'Media',
+      path: paths[0],
+      paths,
+    };
+    store.open(context);
+    http.expectOne('/api/subtitle-jobs/capabilities').flush(ready);
+    await Promise.resolve();
+    paths.push('/Not selected.mkv');
+    store.romanian.set(true);
+    store.skipExisting.set(false);
+    const pending = store.generate();
+    store.close();
+    const request = http.expectOne('/api/subtitle-jobs');
+    expect(request.request.body).toEqual({
+      sourceId: 'media',
+      path: '/First.mkv',
+      paths: ['/First.mkv', '/Second.mp4'],
+      english: true,
+      romanian: true,
+      skipExisting: false,
+    });
+    request.flush(
+      subtitleJob({
+        phase: 'queued',
+        files: [
+          { path: '/First.mkv', phase: 'pending', error: null },
+          { path: '/Second.mp4', phase: 'pending', error: null },
+        ],
+      }),
+    );
+    await pending;
+    expect(store.jobs()).toHaveLength(1);
+    expect(store.jobs()[0].files).toHaveLength(2);
+    expect(store.dialog()).toBe('closed');
+    expect(scheduled).not.toBeNull();
+  });
+
   it.each([
     [true, false],
     [true, true],

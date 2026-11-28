@@ -57,9 +57,14 @@ def main():
         en_timings = [line for line in english_srt.splitlines() if " --> " in line]
         ro_timings = [line for line in romanian_srt.splitlines() if " --> " in line]
         assert en_timings == ro_timings, "Romanian subtitles must retain the corrected ends"
+        for cue in (first_cues[-1], second_cues[-1]):
+            buffered_end = worker.timestamp(round(cue.end * 1000) + 1000)
+            assert any(timing.endswith(f" --> {buffered_end}") for timing in en_timings), \
+                "Rendered captions must include one extra second before the long silence"
         assert english_srt != romanian_srt, "Real Romanian translation must run"
         print(json.dumps({"state": "passed", "timings": en_timings,
-                          "silentGapSeconds": 8, "romanianTimingsMatch": True}))
+                          "silentGapSeconds": 8, "readingBufferSeconds": 1,
+                          "romanianTimingsMatch": True}))
 
 
 if __name__ == "__main__":

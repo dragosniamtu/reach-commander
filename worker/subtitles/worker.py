@@ -335,6 +335,10 @@ def render_subtitles(cues, translations=None):
         previous_end = end
     english_srt, romanian_srt = [], []
     for index, (start, end, en_text, ro_text) in enumerate(output, 1):
+        # Add reading time after splitting captions, without moving their starts
+        # or letting either language overlap the next displayed caption.
+        next_start = output[index][0] if index < len(output) else 100 * 3600 * 1000 - 1
+        end = min(end + 1000, next_start)
         header = f"{index}\n{timestamp(start)} --> {timestamp(end)}\n"
         english_srt.append(header + en_text + "\n\n")
         romanian_srt.append(header + ro_text + "\n\n")

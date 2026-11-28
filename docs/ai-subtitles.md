@@ -15,7 +15,9 @@ Select a video or folder in ReachCommander, choose **Menu → Subtitles → Gene
 The API validates every requested output before preserving existing associated SRT, ASS, SSA and VTT files under unique `.existing-YYYYMMDD-NNN.ext.bak` names and installing the new files. Embedded subtitles and videos are untouched. Ambiguous sidecar ownership fails safely. Successful videos can be skipped on rerun while their video fingerprint, requested languages, and installed output hashes still match.
 
 Generation uses Whisper word timestamps to set both the beginning and end of each
-caption, preserving silent gaps instead of extending captions until the next line.
+caption. Each displayed caption gets up to one extra second of reading time, ending
+at the next caption's start if it comes sooner. Start times stay unchanged, and
+longer silent gaps remain clear.
 Romanian translation retains the same timing. Previously generated SRT files keep
 their old timestamps until regenerated; turn off **Skip successfully processed
 videos** when rerunning an unchanged video. The existing subtitles are backed up.

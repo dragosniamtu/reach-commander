@@ -10,6 +10,8 @@ namespace ReachCommander.Api.Controllers;
 [Route("api/subtitle-jobs")]
 public sealed class SubtitleJobsController(ISubtitleGenerationService service) : ControllerBase
 {
+    private const long MaximumRequestBytes = 1024 * 1024;
+
     [HttpGet("capabilities")]
     public async Task<ActionResult<SubtitleGenerationCapabilities>> Capabilities(CancellationToken cancellationToken) =>
         Ok(await service.GetCapabilitiesAsync(cancellationToken));
@@ -19,11 +21,13 @@ public sealed class SubtitleJobsController(ISubtitleGenerationService service) :
         Ok(await service.ListAsync(cancellationToken));
 
     [HttpPost]
-    [RequestSizeLimit(8192)]
+    [RequestSizeLimit(MaximumRequestBytes)]
+    [RejectOversizedContentLength(MaximumRequestBytes)]
     [EnableRateLimiting(AuthenticationConfiguration.SubtitleGenerationPolicy)]
     public async Task<ActionResult<SubtitleJobStatus>> Submit(SubtitleJobRequest request, CancellationToken cancellationToken)
     {
-        var job = await service.SubmitAsync(new(request.SourceId, request.Path, request.English, request.Romanian, request.SkipExisting), cancellationToken);
+        var job = await service.SubmitAsync(new(request.SourceId, request.Path, request.English, request.Romanian,
+            request.SkipExisting, request.Paths), cancellationToken);
         return AcceptedAtAction(nameof(Get), new { jobId = job.JobId }, job);
     }
 
@@ -38,5 +42,5 @@ public sealed class SubtitleJobsController(ISubtitleGenerationService service) :
 
 public sealed record SubtitleJobRequest(
     [Required, StringLength(128)] string SourceId,
-    [Required, StringLength(4096)] string Path,
-    bool English = true, bool Romanian = false, bool SkipExisting = true);
+    [Required, StringLength(SubtitleGenerationRequest.MaximumPathLength)] string Path,
+    bool English = true, bool Romanian = false, bool SkipExisting = true, IReadOnlyList<string>? Paths = null);

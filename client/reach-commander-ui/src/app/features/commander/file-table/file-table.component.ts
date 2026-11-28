@@ -26,7 +26,7 @@ export class FileTableComponent {
   readonly sortRequested = output<PanelState['sortColumn']>();
   readonly rowSelected = output<PointerSelection>();
   readonly rowOpened = output<FileTableRow>();
-  readonly subtitleDisabledReason = input<string | null>('Select or focus one video or folder.');
+  readonly subtitleDisabledReason = input<string | null>('Select videos or focus one video or folder.');
   readonly subtitleReadinessMessage = input<string | null>(null);
   readonly subtitlesRequested = output<FileTableRow>();
   readonly rows = computed(() => buildVisibleRows(this.panel()));

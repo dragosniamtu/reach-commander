@@ -7,7 +7,10 @@ using ReachCommander.Infrastructure.FileOperations.Persistence;
 
 namespace ReachCommander.Infrastructure.SubtitleGeneration;
 
-internal sealed record StoredSubtitleJob(SubtitleGenerationRequest Request, SubtitleJobStatus Status);
+internal sealed record SubtitleVideoSnapshot(string Path, long Length, long LastWriteTimeUtcTicks);
+
+internal sealed record StoredSubtitleJob(SubtitleGenerationRequest Request, SubtitleJobStatus Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SubtitleVideoSnapshot>? Snapshots = null);
 
 internal sealed class SubtitleJobStore(AuthenticationDataPaths paths, IOptions<SubtitleGenerationOptions> options)
 {
@@ -24,7 +27,8 @@ internal sealed class SubtitleJobStore(AuthenticationDataPaths paths, IOptions<S
     internal static bool IsActive(SubtitleJobPhase phase) => phase is SubtitleJobPhase.Queued or
         SubtitleJobPhase.Discovering or SubtitleJobPhase.Running or SubtitleJobPhase.Cancelling;
 
-    internal async Task<SubtitleJobStatus> EnqueueAsync(SubtitleGenerationRequest request, CancellationToken token)
+    internal async Task<SubtitleJobStatus> EnqueueAsync(SubtitleGenerationRequest request, CancellationToken token,
+        IReadOnlyList<SubtitleVideoSnapshot>? snapshots = null)
     {
         await _gate.WaitAsync(token);
         try
@@ -33,9 +37,10 @@ internal sealed class SubtitleJobStore(AuthenticationDataPaths paths, IOptions<S
             if (_jobs.Values.Count(job => IsActive(job.Status.Phase)) >= options.Value.MaximumQueuedJobs)
                 throw new SubtitleGenerationException("subtitle_capacity_reached", "The subtitle queue is full. Wait for an active job to finish.");
             var now = DateTimeOffset.UtcNow;
+            var files = request.Paths?.Select(path => new SubtitleFileStatus(path, SubtitleFilePhase.Pending)).ToArray() ?? [];
             var status = new SubtitleJobStatus(Guid.NewGuid(), request.SourceId, request.Path, request.English, request.Romanian,
-                SubtitleJobPhase.Queued, "Queued", null, 0, [], now, now);
-            await SaveAsync(new(request, status), token);
+                SubtitleJobPhase.Queued, "Queued", null, 0, files, now, now);
+            await SaveAsync(new(request, status, snapshots), token);
             await TrimAsync();
             return status;
         }
@@ -85,7 +90,12 @@ internal sealed class SubtitleJobStore(AuthenticationDataPaths paths, IOptions<S
             var job = _jobs.Values.Where(job => job.Status.Phase == SubtitleJobPhase.Queued)
                 .OrderBy(job => job.Status.CreatedAt).FirstOrDefault();
             if (job is null) return null;
-            job = job with { Status = job.Status with { Phase = SubtitleJobPhase.Discovering, Stage = "Finding videos", UpdatedAt = DateTimeOffset.UtcNow } };
+            job = job with { Status = job.Status with
+            {
+                Phase = SubtitleJobPhase.Discovering,
+                Stage = job.Request.Paths is null ? "Finding videos" : "Preparing",
+                UpdatedAt = DateTimeOffset.UtcNow,
+            } };
             await SaveAsync(job, token);
             return job;
         }

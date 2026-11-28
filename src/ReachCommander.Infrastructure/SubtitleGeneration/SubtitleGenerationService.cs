@@ -31,9 +31,9 @@ internal sealed class SubtitleGenerationService(
             throw new SubtitleGenerationException("subtitle_state_unavailable", "Subtitle generation needs administrator attention before it can start.");
         if (!request.English && !request.Romanian)
             throw new SubtitleGenerationException("subtitle_languages_required", "Select at least one subtitle language.");
-        var resolved = await discovery.ValidateSelectionAsync(request.SourceId, request.Path, cancellationToken);
-        await readiness.RequireAvailableAsync(request.Romanian, cancellationToken);
-        var status = await store.EnqueueAsync(request with { SourceId = resolved.Source.Id, Path = resolved.LogicalPath }, cancellationToken);
+        var (selection, snapshots) = await discovery.ValidateSelectionAsync(request, cancellationToken);
+        await readiness.RequireAvailableAsync(selection.Romanian, cancellationToken);
+        var status = await store.EnqueueAsync(selection, cancellationToken, snapshots);
         _queue.Signal();
         return status;
     }
@@ -45,7 +45,10 @@ internal sealed class SubtitleGenerationService(
     {
         var status = await store.UpdateAsync(jobId, current => current.Phase switch
         {
-            SubtitleJobPhase.Queued => current with { Phase = SubtitleJobPhase.Cancelled, Stage = "Cancelled" },
+            SubtitleJobPhase.Queued => current with
+            {
+                Phase = SubtitleJobPhase.Cancelled, Stage = "Cancelled", Files = CancelUnfinishedFiles(current.Files),
+            },
             SubtitleJobPhase.Running or SubtitleJobPhase.Discovering => current with { Phase = SubtitleJobPhase.Cancelling, Stage = "Cancelling" },
             _ => current,
         }, cancellationToken);
@@ -109,12 +112,14 @@ internal sealed class SubtitleGenerationService(
         {
             if ((await store.GetAsync(id, token)).Phase == SubtitleJobPhase.Cancelling) await cancellation.CancelAsync();
             token.ThrowIfCancellationRequested();
-            var files = await discovery.DiscoverAsync(job.Request, token);
+            var isBatch = job.Request.Paths is not null;
+            var files = isBatch ? job.Status.Files : await discovery.DiscoverAsync(job.Request, token);
+            var snapshots = job.Snapshots?.ToDictionary(file => file.Path, StringComparer.Ordinal);
             await store.UpdateAsync(id, current => current with
             {
                 Files = files,
                 Phase = current.Phase == SubtitleJobPhase.Cancelling ? current.Phase : SubtitleJobPhase.Running,
-                Stage = "Preparing",
+                Stage = current.Phase == SubtitleJobPhase.Cancelling ? current.Stage : "Preparing",
             }, token);
             foreach (var file in files.Where(file => file.Phase == SubtitleFilePhase.Pending))
             {
@@ -122,7 +127,11 @@ internal sealed class SubtitleGenerationService(
                 await UpdateFileAsync(id, file.Path, SubtitleFilePhase.Running, null, token);
                 try
                 {
-                    var video = await discovery.ResolveVideoAsync(job.Request.SourceId, file.Path, token);
+                    var video = await discovery.ResolveVideoAsync(job.Request.SourceId, file.Path, isBatch, token);
+                    if (snapshots is not null && snapshots.TryGetValue(file.Path, out var snapshot) &&
+                        (video.Length != snapshot.Length || video.LastWriteTimeUtcTicks != snapshot.LastWriteTimeUtcTicks))
+                        throw new SubtitleGenerationException("subtitle_video_changed",
+                            "The selected video changed after this job was queued. Select it again to generate subtitles.");
                     if (job.Request.SkipExisting && await installer.IsAlreadyGeneratedAsync(video, job.Request.English, job.Request.Romanian, token))
                     {
                         await UpdateFileAsync(id, file.Path, SubtitleFilePhase.Skipped, null, token);
@@ -157,8 +166,7 @@ internal sealed class SubtitleGenerationService(
             {
                 Phase = stoppingToken.IsCancellationRequested ? SubtitleJobPhase.Interrupted : SubtitleJobPhase.Cancelled,
                 Stage = stoppingToken.IsCancellationRequested ? "Interrupted by service restart" : "Cancelled",
-                Files = current.Files.Select(file => file.Phase is SubtitleFilePhase.Pending or SubtitleFilePhase.Running
-                    ? file with { Phase = SubtitleFilePhase.Cancelled } : file).ToArray(),
+                Files = CancelUnfinishedFiles(current.Files),
             }, CancellationToken.None);
         }
         catch (Exception exception)
@@ -188,6 +196,10 @@ internal sealed class SubtitleGenerationService(
             CurrentPath = path, CurrentPercent = phase == SubtitleFilePhase.Running ? 0 : 100,
             Files = current.Files.Select(file => file.Path == path ? file with { Phase = phase, Error = error } : file).ToArray(),
         }, token);
+
+    private static SubtitleFileStatus[] CancelUnfinishedFiles(IReadOnlyList<SubtitleFileStatus> files) =>
+        files.Select(file => file.Phase is SubtitleFilePhase.Pending or SubtitleFilePhase.Running
+            ? file with { Phase = SubtitleFilePhase.Cancelled } : file).ToArray();
 
     private static string SafeError(Exception exception) => exception is SubtitleGenerationException error
         ? error.PublicDetail : "This video could not be processed safely. Its existing subtitles were preserved; check server logs.";

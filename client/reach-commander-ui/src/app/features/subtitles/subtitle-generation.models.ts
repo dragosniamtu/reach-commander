@@ -46,6 +46,7 @@ export interface SubtitleJobStatus {
 export interface SubtitleJobRequest {
   readonly sourceId: string;
   readonly path: string;
+  readonly paths?: readonly string[];
   readonly english: boolean;
   readonly romanian: boolean;
   readonly skipExisting: boolean;
@@ -56,6 +57,7 @@ export interface SubtitleContext {
   readonly sourceId: string;
   readonly sourceName: string;
   readonly path: string;
+  readonly paths?: readonly string[];
 }
 
 export function subtitleJobActive(job: SubtitleJobStatus): boolean {
@@ -86,25 +88,43 @@ export function captureSubtitleContext(
       : rows[panel.cursorIndex] && !rows[panel.cursorIndex].isParent
         ? [rows[panel.cursorIndex]]
         : [];
-  if (candidates.length !== 1 || panel.selectedItems.size > 1) {
-    return unavailable('Select or focus one video or folder.');
+  if (panel.selectedItems.size > 0 && candidates.length !== panel.selectedItems.size) {
+    return unavailable(
+      'Some selected items are hidden or unavailable. Select the visible videos again.',
+    );
   }
-  const entry = candidates[0];
-  if (entry.isSymbolicLink || entry.isReadOnly) {
-    return unavailable('Choose a writable video or folder that is not a symbolic link.');
+  if (candidates.length === 0) {
+    return unavailable('Select videos or focus one video or folder.');
+  }
+  if (candidates.some((entry) => entry.name.includes('\\') || entry.relativePath.includes('\\'))) {
+    return unavailable(
+      'Names containing a backslash cannot be used for subtitle generation. Rename the item first.',
+    );
+  }
+  if (candidates.length > 1 && candidates.some((entry) => entry.type === 'directory')) {
+    return unavailable('Select video files for a batch, or choose one folder.');
+  }
+  if (candidates.some((entry) => entry.isSymbolicLink || entry.isReadOnly)) {
+    return unavailable('Choose writable videos or a folder without symbolic links.');
   }
   if (
-    entry.type !== 'directory' &&
-    (entry.type !== 'file' || !/\.(mkv|mp4|avi|mov|m4v|webm)$/i.test(entry.name))
+    candidates.some(
+      (entry) =>
+        entry.type !== 'directory' &&
+        (entry.type !== 'file' || !/\.(mkv|mp4|avi|mov|m4v|webm)$/i.test(entry.name)),
+    )
   ) {
-    return unavailable('Choose a folder or an MKV, MP4, AVI, MOV, M4V, or WebM video.');
+    return unavailable('Choose MKV, MP4, AVI, MOV, M4V, or WebM videos, or one folder.');
   }
   return {
     context: Object.freeze({
       panelSide,
       sourceId: source.id,
       sourceName: source.name,
-      path: entry.relativePath,
+      path: candidates[0].relativePath,
+      ...(candidates.length > 1
+        ? { paths: Object.freeze(candidates.map((entry) => entry.relativePath)) }
+        : {}),
     }),
     error: null,
   };

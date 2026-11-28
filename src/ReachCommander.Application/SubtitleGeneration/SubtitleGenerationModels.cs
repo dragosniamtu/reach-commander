@@ -1,7 +1,13 @@
+using System.Text.Json.Serialization;
+
 namespace ReachCommander.Application.SubtitleGeneration;
 
 public sealed record SubtitleGenerationRequest(
-    string SourceId, string Path, bool English = true, bool Romanian = false, bool SkipExisting = true);
+    string SourceId, string Path, bool English = true, bool Romanian = false, bool SkipExisting = true,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Paths = null)
+{
+    public const int MaximumPathLength = 4096;
+}
 
 public sealed record SubtitleGenerationCapabilities(bool Enabled, bool WorkerAvailable, bool EnglishAvailable,
     bool RomanianAvailable, string? ReasonCode, string? Detail);

@@ -79,11 +79,76 @@ describe('subtitle selection', () => {
     expect(captureSubtitleContext('right', selected, [source]).context?.path).toBe('/Season 1');
   });
 
+  it('captures all selected videos in visible order without including unselected files', () => {
+    const selected = panel({
+      entries: [entry('C.mp4'), entry('A.mkv'), entry('B.webm')],
+      selectedItems: new Set(['/C.mp4', '/A.mkv']),
+    });
+    expect(captureSubtitleContext('left', selected, [source])).toEqual({
+      context: {
+        panelSide: 'left',
+        sourceId: 'media',
+        sourceName: 'Media',
+        path: '/A.mkv',
+        paths: ['/A.mkv', '/C.mp4'],
+      },
+      error: null,
+    });
+  });
+
+  it('uses the displayed descending order for a batch', () => {
+    const selected = panel({
+      entries: [entry('A.mkv'), entry('B.mp4')],
+      selectedItems: new Set(['/A.mkv', '/B.mp4']),
+      sortDirection: 'descending',
+    });
+    expect(captureSubtitleContext('right', selected, [source]).context).toMatchObject({
+      path: '/B.mp4',
+      paths: ['/B.mp4', '/A.mkv'],
+    });
+  });
+
+  it('explains how to restore a wholly filtered selection', () => {
+    const selected = panel({ selectedItems: new Set(['/Movie.mkv']), filter: '*.mp4' });
+    expect(captureSubtitleContext('left', selected, [source]).error).toContain(
+      'Select the visible videos again',
+    );
+  });
+
+  it('rejects Linux filenames that would be normalized into a different video path', () => {
+    const selected = panel({
+      entries: [entry('Movie.mkv'), entry('Season\\Pilot.mkv')],
+      selectedItems: new Set(['/Movie.mkv', '/Season\\Pilot.mkv']),
+    });
+    expect(captureSubtitleContext('left', selected, [source]).context).toBeNull();
+    expect(captureSubtitleContext('left', selected, [source]).error).toContain('backslash');
+  });
+
   it.each([
     { entries: [entry('cover.jpg')] },
     { entries: [entry('Movie.mkv', { isSymbolicLink: true })] },
     { entries: [entry('Movie.mkv', { isReadOnly: true })] },
-    { entries: [entry('A.mkv'), entry('B.mkv')], selectedItems: new Set(['/A.mkv', '/B.mkv']) },
+    {
+      entries: [entry('A.mkv'), entry('notes.txt')],
+      selectedItems: new Set(['/A.mkv', '/notes.txt']),
+    },
+    {
+      entries: [entry('A.mkv'), entry('B.mkv', { isSymbolicLink: true })],
+      selectedItems: new Set(['/A.mkv', '/B.mkv']),
+    },
+    {
+      entries: [entry('A.mkv'), entry('B.mkv', { isReadOnly: true })],
+      selectedItems: new Set(['/A.mkv', '/B.mkv']),
+    },
+    {
+      entries: [entry('A.mkv'), entry('TV', { type: 'directory' })],
+      selectedItems: new Set(['/A.mkv', '/TV']),
+    },
+    {
+      entries: [entry('A.mkv'), entry('B.mkv')],
+      selectedItems: new Set(['/A.mkv', '/B.mkv']),
+      filter: 'A',
+    },
     { selectedItems: new Set(['/Hidden.mkv', '/Movie.mkv']) },
     { loading: true },
     { errorCode: 'source_unavailable' },

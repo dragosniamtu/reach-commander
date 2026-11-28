@@ -254,6 +254,68 @@ test("keeps file navigation usable during readiness loading and supports retry a
   await expect(dialog.getByTestId("subtitle-generate")).toBeEnabled();
 });
 
+for (const entryPoint of ['menu', 'context menu'] as const) {
+  test(`generates a selected batch through the ${entryPoint} and restores its full progress`, async ({ page }, testInfo) => {
+    const subtitles = await routeSubtitles(page);
+    const first = await openMovie(page);
+    const panel = page.getByTestId('right-panel');
+    const second = panel.locator('tr[data-path="/Movies/Gladiator II.mkv"]');
+    await second.click({ modifiers: ['Control'] });
+    await expect(panel.locator('tr[aria-selected="true"]')).toHaveCount(2);
+    if (entryPoint === 'context menu') {
+      await first.click({ button: 'right' });
+      await page.getByTestId('context-subtitles').click();
+      await page.setViewportSize({ width: 390, height: 844 });
+    } else {
+      await openSubtitlesMenu(page);
+      await page.getByTestId('toolbar-subtitles').click();
+    }
+    const configure = page.getByRole('dialog', { name: 'Generate Subtitles' });
+    const paths = ['/Movies/Family Movie.mp4', '/Movies/Gladiator II.mkv'];
+    await expect(configure).toContainText('2 videos selected');
+    await expect(configure.getByRole('list', { name: 'Selected videos' }).locator('li'))
+      .toHaveText(paths);
+    await expect(configure).toContainText('one at a time');
+    await expect(configure.getByTestId('subtitle-generate')).toBeEnabled();
+    if (entryPoint === 'context menu') {
+      const bounds = await configure.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+      await page.screenshot({ path: testInfo.outputPath('batch-subtitles-phone.png') });
+    }
+    await configure.getByLabel('Romanian', { exact: true }).check();
+    await configure.getByTestId('subtitle-generate').click();
+    const progress = page.getByRole('dialog', { name: 'Subtitle jobs' });
+    await expect(progress).toContainText('0 of 2 files processed');
+    expect(subtitles.creates).toEqual([{
+      sourceId: 'media', path: paths[0], paths,
+      english: true, romanian: true, skipExisting: true,
+    }]);
+    const files = paths.map(path => ({ path, phase: 'pending' as const, error: null }));
+    subtitles.jobs = [job({ romanian: true, currentPath: paths[0], files: [
+      { ...files[0], phase: 'running' }, files[1],
+    ] })];
+    await expect(progress.getByRole('list', { name: 'Subtitle file results' }).locator('li').first())
+      .toContainText('Running');
+    subtitles.jobs = [job({ romanian: true, currentPath: paths[1], files: [
+      { ...files[0], phase: 'completed' }, { ...files[1], phase: 'running' },
+    ] })];
+    await expect(progress).toContainText('1 of 2 files processed');
+    await progress.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.reload();
+    await openSubtitlesMenu(page);
+    await page.getByTestId('toolbar-subtitle-jobs').click();
+    await expect(progress).toContainText('1 of 2 files processed');
+    await expect(progress.getByRole('list', { name: 'Subtitle file results' }).locator('li'))
+      .toHaveCount(2);
+    subtitles.jobs = [job({ romanian: true, phase: 'completed', currentPath: null, files: [
+      { ...files[0], phase: 'completed' }, { ...files[1], phase: 'completed' },
+    ] })];
+    await expect(progress).toContainText('2 of 2 files processed');
+    expect(subtitles.creates).toHaveLength(1);
+  });
+}
+
 async function openMovie(page: Page) {
   await page.goto("/");
   const panel = page.getByTestId("right-panel");
@@ -333,7 +395,7 @@ async function routeSubtitles(
           phase: "queued",
           currentPath: null,
           currentPercent: null,
-          files: [{ path: body.path, phase: "pending", error: null }],
+          files: (body.paths ?? [body.path]).map(path => ({ path, phase: "pending", error: null })),
         }),
       ];
       await route.fulfill({ status: 202, json: state.jobs[0] });

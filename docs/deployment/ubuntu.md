@@ -33,7 +33,7 @@ chmod 0700 "$INSTALL_WORKDIR"
 trap 'rm -rf -- "$INSTALL_WORKDIR"' EXIT
 cd "$INSTALL_WORKDIR"
 
-REACHCOMMANDER_VERSION=v1.6.1
+REACHCOMMANDER_VERSION=v1.7.0
 REACHCOMMANDER_RELEASE_URL="https://github.com/dragosniamtu/reach-commander/releases/download/${REACHCOMMANDER_VERSION}"
 
 curl --fail --location --output reachcommander-installer.tar.gz \

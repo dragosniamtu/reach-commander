@@ -434,7 +434,7 @@ from the audio, preview, then save UTF-8 with a byte-exact original backup. This
 works with any subtitle language and does not require Whisper or translation models.
 See [subtitle repair and its limits](docs/subtitle-repair.md).
 
-Choose **Menu → Subtitles → Generate Subtitles**, or use a video's or folder's context menu. Select English (the default), Romanian, or both. Folder jobs discover supported videos recursively, show durable per-file progress, support cancellation, and skip unchanged successful videos on rerun. Open **Menu → Subtitles → Subtitle jobs** to see results after closing the dialog or refreshing the page.
+Select one or more videos and choose **Menu → Subtitles → Generate Subtitles**, or use the selection's context menu. Review the file list and select English (the default), Romanian, or both. One job processes the selected videos one at a time. Selecting one folder instead discovers supported videos recursively. Jobs show durable per-file progress, continue after individual failures, support cancellation, and skip unchanged successful videos on rerun. Open **Menu → Subtitles → Subtitle jobs** to see results after closing the dialog or refreshing the page.
 
 The primary output is always the video's exact basename plus `.srt`; selecting both languages adds `.ro.srt` for Romanian. Existing associated SRT/ASS/SSA/VTT sidecars are preserved under unique `.bak` names before new files are published. Videos and embedded subtitles are never changed. Installation is journaled with rollback and restart recovery.
 

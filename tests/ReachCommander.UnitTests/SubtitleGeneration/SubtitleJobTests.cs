@@ -81,6 +81,243 @@ public sealed class SubtitleJobTests : IDisposable
     }
 
     [Fact]
+    public async Task Batch_processes_only_unique_selected_videos_in_selection_order_one_at_a_time()
+    {
+        _directory.Write("media/First.mkv", "video");
+        _directory.Write("media/sub/Second.mp4", "video");
+        _directory.Write("media/Unselected.mkv", "video");
+        _engine.Block = true;
+        using var service = CreateService();
+        string[] selected = ["/sub/Second.mp4", "/First.mkv", "/sub/./Second.mp4"];
+        string[] expected = ["/sub/Second.mp4", "/First.mkv"];
+
+        var job = await service.SubmitAsync(new("media", selected[0], Paths: selected), default);
+
+        Assert.Equal(expected, job.Files.Select(file => file.Path));
+        Assert.All(job.Files, file => Assert.Equal(SubtitleFilePhase.Pending, file.Phase));
+        var execution = service.ProcessNextAsync(default);
+        try
+        {
+            await _engine.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(expected[0], Assert.Single(_engine.Paths));
+            Assert.Equal(new[] { SubtitleFilePhase.Running, SubtitleFilePhase.Pending },
+                (await service.GetAsync(job.JobId, default)).Files.Select(file => file.Phase));
+            Assert.False(await service.ProcessNextAsync(default));
+            Assert.Empty(_installer.Installed);
+        }
+        finally { _engine.Release.TrySetResult(); }
+
+        Assert.True(await execution.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(expected, _engine.Paths);
+        Assert.All((await service.GetAsync(job.JobId, default)).Files, file => Assert.Equal(SubtitleFilePhase.Completed, file.Phase));
+    }
+
+    [Fact]
+    public async Task Restored_batch_revalidates_missing_files_and_continues_after_engine_failure()
+    {
+        var missing = _directory.Write("media/Missing.mkv", "video");
+        _directory.Write("media/Fail.mkv", "video");
+        _directory.Write("media/Last.mp4", "video");
+        _directory.Write("media/Unselected.mkv", "video");
+        _engine.FailPath = "/Fail.mkv";
+        string[] selected = ["/Missing.mkv", "/Fail.mkv", "/Last.mp4"];
+        Guid id;
+        using (var service = CreateService())
+            id = (await service.SubmitAsync(new("media", selected[0], false, true, Paths: selected), default)).JobId;
+        File.Delete(missing);
+
+        using var restarted = CreateService();
+        var queued = await restarted.GetAsync(id, default);
+        Assert.Equal(SubtitleJobPhase.Queued, queued.Phase);
+        Assert.Equal(selected, queued.Files.Select(file => file.Path));
+        Assert.True(await restarted.ProcessNextAsync(default));
+
+        var completed = await restarted.GetAsync(id, default);
+        Assert.Equal(SubtitleJobPhase.Completed, completed.Phase);
+        Assert.Equal("Completed with errors", completed.Stage);
+        Assert.Equal(selected, completed.Files.Select(file => file.Path));
+        Assert.Equal(new[] { SubtitleFilePhase.Failed, SubtitleFilePhase.Failed, SubtitleFilePhase.Completed },
+            completed.Files.Select(file => file.Phase));
+        Assert.Equal(selected[1..], _engine.Paths);
+        Assert.Equal((false, true), Assert.Single(_installer.Installed));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task Restored_batch_detects_changed_video_before_generating_or_skipping(bool changeLength, bool alreadyGenerated)
+    {
+        _directory.Write("media/First.mkv", "video");
+        var changed = _directory.Write("media/Changed.mkv", "video");
+        _directory.Write("media/Last.mp4", "video");
+        _installer.AlreadyGenerated = alreadyGenerated;
+        string[] selected = ["/First.mkv", "/Changed.mkv", "/Last.mp4"];
+        var originalWriteTime = File.GetLastWriteTimeUtc(changed);
+        Guid id;
+        using (var service = CreateService())
+            id = (await service.SubmitAsync(new("media", selected[0], Paths: selected), default)).JobId;
+        if (changeLength) File.AppendAllText(changed, "new bytes");
+        File.SetLastWriteTimeUtc(changed, changeLength ? originalWriteTime : originalWriteTime.AddMinutes(1));
+
+        using var restarted = CreateService();
+        Assert.True(await restarted.ProcessNextAsync(default));
+
+        var completed = await restarted.GetAsync(id, default);
+        var unchanged = alreadyGenerated ? SubtitleFilePhase.Skipped : SubtitleFilePhase.Completed;
+        Assert.Equal("Completed with errors", completed.Stage);
+        Assert.Equal(new[] { unchanged, SubtitleFilePhase.Failed, unchanged }, completed.Files.Select(file => file.Phase));
+        Assert.Contains("changed", completed.Files[1].Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(alreadyGenerated ? [] : new[] { selected[0], selected[2] }, _engine.Paths);
+    }
+
+    [Fact]
+    public async Task Batch_with_read_only_video_is_rejected_before_enqueue()
+    {
+        _directory.Write("media/First.mkv", "video");
+        var readOnly = _directory.Write("media/ReadOnly.mp4", "video");
+        File.SetAttributes(readOnly, File.GetAttributes(readOnly) | FileAttributes.ReadOnly);
+        using var service = CreateService();
+        string[] selected = ["/First.mkv", "/ReadOnly.mp4"];
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<SubtitleGenerationException>(() =>
+                service.SubmitAsync(new("media", selected[0], Paths: selected), default));
+            Assert.Equal("subtitle_selection_invalid", error.Code);
+            Assert.Contains("read-only", error.PublicDetail, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(await service.ListAsync(default));
+        }
+        finally { File.SetAttributes(readOnly, File.GetAttributes(readOnly) & ~FileAttributes.ReadOnly); }
+    }
+
+    [Fact]
+    public async Task Batch_continues_after_a_selected_video_becomes_read_only()
+    {
+        var readOnly = _directory.Write("media/ReadOnly.mp4", "video");
+        _directory.Write("media/Last.mkv", "video");
+        using var service = CreateService();
+        string[] selected = ["/ReadOnly.mp4", "/Last.mkv"];
+        var job = await service.SubmitAsync(new("media", selected[0], Paths: selected), default);
+        File.SetAttributes(readOnly, File.GetAttributes(readOnly) | FileAttributes.ReadOnly);
+
+        try
+        {
+            Assert.True(await service.ProcessNextAsync(default));
+            var completed = await service.GetAsync(job.JobId, default);
+            Assert.Equal(new[] { SubtitleFilePhase.Failed, SubtitleFilePhase.Completed }, completed.Files.Select(file => file.Phase));
+            Assert.Contains("read-only", completed.Files[0].Error, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(selected[1], Assert.Single(_engine.Paths));
+        }
+        finally { File.SetAttributes(readOnly, File.GetAttributes(readOnly) & ~FileAttributes.ReadOnly); }
+    }
+
+    [Fact]
+    public async Task Legacy_read_only_video_still_generates_subtitles_beside_the_video()
+    {
+        var readOnly = _directory.Write("media/ReadOnly.mp4", "video");
+        File.SetAttributes(readOnly, File.GetAttributes(readOnly) | FileAttributes.ReadOnly);
+        using var service = CreateService();
+
+        try
+        {
+            var job = await service.SubmitAsync(new("media", "/ReadOnly.mp4"), default);
+            Assert.True(await service.ProcessNextAsync(default));
+            Assert.Equal(SubtitleFilePhase.Completed, Assert.Single((await service.GetAsync(job.JobId, default)).Files).Phase);
+        }
+        finally { File.SetAttributes(readOnly, File.GetAttributes(readOnly) & ~FileAttributes.ReadOnly); }
+    }
+
+    [Fact]
+    public async Task Restored_batch_without_saved_snapshots_can_still_run()
+    {
+        _directory.Write("media/First.mkv", "video");
+        _directory.Write("media/Last.mp4", "video");
+        string[] selected = ["/First.mkv", "/Last.mp4"];
+        var paths = AuthenticationDataPaths.ForRoot(_directory.CreateDirectory("data"));
+        var store = new SubtitleJobStore(paths, Options.Create(new SubtitleGenerationOptions()));
+        var job = await store.EnqueueAsync(new("media", selected[0], Paths: selected), default);
+
+        using var restarted = CreateService();
+        Assert.True(await restarted.ProcessNextAsync(default));
+        Assert.Equal(selected, _engine.Paths);
+        Assert.All((await restarted.GetAsync(job.JobId, default)).Files, file => Assert.Equal(SubtitleFilePhase.Completed, file.Phase));
+    }
+
+    [Fact]
+    public async Task Queued_batch_cancellation_marks_all_pending_files_cancelled_after_restart()
+    {
+        _directory.Write("media/First.mkv", "video");
+        _directory.Write("media/Second.mp4", "video");
+        string[] selected = ["/First.mkv", "/Second.mp4"];
+        Guid id;
+        using (var service = CreateService())
+        {
+            id = (await service.SubmitAsync(new("media", selected[0], Paths: selected), default)).JobId;
+            Assert.Equal(SubtitleJobPhase.Cancelled, (await service.CancelAsync(id, default)).Phase);
+        }
+
+        using var restarted = CreateService();
+        Assert.False(await restarted.ProcessNextAsync(default));
+        var cancelled = await restarted.GetAsync(id, default);
+        Assert.Equal(SubtitleJobPhase.Cancelled, cancelled.Phase);
+        Assert.Equal(selected, cancelled.Files.Select(file => file.Path));
+        Assert.All(cancelled.Files, file => Assert.Equal(SubtitleFilePhase.Cancelled, file.Phase));
+        Assert.Empty(_engine.Paths);
+    }
+
+    [Theory]
+    [InlineData("empty", "subtitle_selection_invalid")]
+    [InlineData("null-entry", "subtitle_selection_invalid")]
+    [InlineData("mismatch", "subtitle_selection_invalid")]
+    [InlineData("folder", "subtitle_selection_invalid")]
+    [InlineData("unsupported", "video_format_unsupported")]
+    [InlineData("count", "subtitle_selection_too_large")]
+    [InlineData("length", "subtitle_selection_too_large")]
+    [InlineData("metadata", "subtitle_selection_too_large")]
+    public async Task Invalid_batch_is_rejected_before_enqueue(string selection, string expectedCode)
+    {
+        _directory.Write("media/First.mkv", "video");
+        _directory.Write("media/Second.mp4", "video");
+        _directory.Write("media/notes.txt", "text");
+        const string path = "/First.mkv";
+        const string second = "/Second.mp4";
+        string[] selected = selection switch
+        {
+            "empty" => [],
+            "null-entry" => [path, null!],
+            "mismatch" => [second, path],
+            "folder" => [path, "/"],
+            "unsupported" => [path, "/notes.txt"],
+            "count" => [path, second, path],
+            "length" => [path, new string('x', 4097)],
+            "metadata" => [path, .. Enumerable.Repeat("/" + new string('ü', 4000) + ".mkv", 50)],
+            _ => throw new ArgumentOutOfRangeException(nameof(selection)),
+        };
+        using var service = CreateService(maxFiles: selection == "count" ? 2 : 10000);
+
+        var error = await Assert.ThrowsAsync<SubtitleGenerationException>(() =>
+            service.SubmitAsync(new("media", path, Paths: selected), default));
+
+        Assert.Equal(expectedCode, error.Code);
+        Assert.Empty(await service.ListAsync(default));
+        Assert.Empty(_engine.Paths);
+    }
+
+    [Fact]
+    public async Task A_missing_batch_entry_does_not_enqueue_any_selected_video()
+    {
+        _directory.Write("media/First.mkv", "video");
+        using var service = CreateService();
+        const string path = "/First.mkv";
+
+        await Assert.ThrowsAsync<EntryNotFoundException>(() =>
+            service.SubmitAsync(new("media", path, Paths: [path, "/Missing.mkv"]), default));
+
+        Assert.Empty(await service.ListAsync(default));
+    }
+
+    [Fact]
     public async Task Rerunning_skips_successful_videos_before_calling_engine()
     {
         _directory.Write("media/Movie.mkv", "video");
@@ -111,18 +348,25 @@ public sealed class SubtitleJobTests : IDisposable
         Assert.Empty(_engine.Paths);
     }
 
-    [Fact]
-    public async Task Running_cancellation_stops_engine_without_installing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Running_cancellation_stops_engine_without_installing(bool batch)
     {
         _directory.Write("media/Movie.mkv", "video");
+        _directory.Write("media/Next.mp4", "video");
         _engine.Block = true;
         using var service = CreateService();
-        var job = await service.SubmitAsync(new("media", "/Movie.mkv"), default);
+        var job = await service.SubmitAsync(new("media", "/Movie.mkv", Paths: batch ? ["/Movie.mkv", "/Next.mp4"] : null), default);
         var execution = service.ProcessNextAsync(default);
         await _engine.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await service.CancelAsync(job.JobId, default);
         await execution.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(SubtitleJobPhase.Cancelled, (await service.GetAsync(job.JobId, default)).Phase);
+        var cancelled = await service.GetAsync(job.JobId, default);
+        Assert.Equal(SubtitleJobPhase.Cancelled, cancelled.Phase);
+        Assert.Equal(batch ? 2 : 1, cancelled.Files.Count);
+        Assert.All(cancelled.Files, file => Assert.Equal(SubtitleFilePhase.Cancelled, file.Phase));
+        Assert.Equal("/Movie.mkv", Assert.Single(_engine.Paths));
         Assert.Empty(_installer.Installed);
     }
 
@@ -257,7 +501,7 @@ public sealed class SubtitleJobTests : IDisposable
         Assert.Equal(SubtitleJobPhase.Completed, (await service.GetAsync(second.JobId, default)).Phase);
     }
 
-    private SubtitleGenerationService CreateService(bool readOnly = false, int maxJobs = 8)
+    private SubtitleGenerationService CreateService(bool readOnly = false, int maxJobs = 8, int maxFiles = 10000)
     {
         var root = _directory.CreateDirectory("media");
         var shared = _directory.CreateDirectory("worker");
@@ -265,7 +509,10 @@ public sealed class SubtitleJobTests : IDisposable
         {
             version = 1, updatedAt = DateTimeOffset.UtcNow, englishAvailable = true, romanianAvailable = true,
         }));
-        var options = Options.Create(new SubtitleGenerationOptions { Enabled = true, MaximumQueuedJobs = maxJobs, SharedPath = shared });
+        var options = Options.Create(new SubtitleGenerationOptions
+        {
+            Enabled = true, MaximumQueuedJobs = maxJobs, MaximumFiles = maxFiles, SharedPath = shared,
+        });
         var paths = new PathSecurityService(new Catalog(new("media", "Media", root, readOnly, true, false)));
         var store = new SubtitleJobStore(AuthenticationDataPaths.ForRoot(_directory.CreateDirectory("data")), options);
         return new SubtitleGenerationService(new SubtitleDiscovery(paths, options), store,
@@ -290,6 +537,7 @@ public sealed class SubtitleJobTests : IDisposable
         public bool Block { get; set; }
         public bool Romanian { get; private set; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReapedAfterStartup { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _reaps;
         public int? FailReapNumber { get; set; }
@@ -306,7 +554,7 @@ public sealed class SubtitleJobTests : IDisposable
             Paths.Add(video.LogicalPath);
             Romanian = romanian;
             Entered.TrySetResult();
-            if (Block) await Task.Delay(Timeout.Infinite, token);
+            if (Block) await Release.Task.WaitAsync(token);
             if (video.LogicalPath == FailPath) throw new SubtitleGenerationException("no_audio", "The video has no audio stream.");
             await progress(new("Transcribing", 50));
             return new("1\n00:00:00,000 --> 00:00:01,000\nHello.\n", romanian ? "1\n00:00:00,000 --> 00:00:01,000\nSalut.\n" : null);

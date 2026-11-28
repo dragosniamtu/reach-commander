@@ -107,7 +107,12 @@ export class SubtitleGenerationStore {
 
   open(context: SubtitleContext): void {
     if (this.submitting()) return;
-    this.context.set(Object.freeze({ ...context }));
+    this.context.set(
+      Object.freeze({
+        ...context,
+        ...(context.paths ? { paths: Object.freeze([...context.paths]) } : {}),
+      }),
+    );
     this.english.set(true);
     this.romanian.set(false);
     this.skipExisting.set(true);
@@ -190,6 +195,7 @@ export class SubtitleGenerationStore {
       const job = await this.api.create({
         sourceId: context.sourceId,
         path: context.path,
+        ...(context.paths ? { paths: context.paths } : {}),
         english: this.english(),
         romanian: this.romanian(),
         skipExisting: this.skipExisting(),

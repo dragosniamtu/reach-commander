@@ -73,7 +73,8 @@ test.describe.serial('text encoding conversion', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const left = await openEncodingLab(page);
     await left.locator('tr[data-path="/Encoding Lab/notes.txt"]').click();
-    await page.getByTestId('toolbar-text-encoding').dispatchEvent('click');
+    await openApplicationMenu(page);
+    await page.getByTestId('toolbar-text-encoding').click();
     await expect(page.getByTestId('text-encoding-dialog')).toBeVisible();
 
     const documentOverflow = await page.evaluate(

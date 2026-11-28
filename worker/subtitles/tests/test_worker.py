@@ -93,6 +93,30 @@ class WorkerTests(unittest.TestCase):
             with self.subTest(cues=cues), self.assertRaises(worker.WorkerError):
                 worker.render_subtitles(cues)
 
+    def test_generated_captions_extend_one_second_without_overlapping_the_next(self):
+        cues = [worker.Cue(1.125, 2.25, "First"), worker.Cue(5, 6, "Second"),
+                worker.Cue(6.4, 7, "Third"), worker.Cue(7, 8, "Fourth")]
+        english, romanian = worker.render_subtitles(cues, ["Primul", "Al doilea", "Al treilea", "Al patrulea"])
+        expected = ["00:00:01,125 --> 00:00:03,250",
+                    "00:00:05,000 --> 00:00:06,400",
+                    "00:00:06,400 --> 00:00:07,000",
+                    "00:00:07,000 --> 00:00:09,000"]
+        for subtitles in (english, romanian):
+            self.assertEqual([line for line in subtitles.splitlines() if " --> " in line], expected)
+        self.assertEqual(cues[0].end, 2.25)
+
+    def test_reading_buffer_preserves_split_caption_start_times(self):
+        # Exactly four 42-character lines split into two consecutive captions.
+        text = " ".join(["a" * 20] * 8)
+        subtitles, _ = worker.render_subtitles([worker.Cue(1, 5, text)])
+        self.assertEqual([line for line in subtitles.splitlines() if " --> " in line],
+                         ["00:00:01,000 --> 00:00:03,000",
+                          "00:00:03,000 --> 00:00:06,000"])
+
+    def test_reading_buffer_stays_within_supported_timestamp_range(self):
+        subtitles, _ = worker.render_subtitles([worker.Cue(359998, 359999.5, "Final")])
+        self.assertIn("99:59:58,000 --> 99:59:59,999", subtitles)
+
     def test_english_transcribes_and_nonenglish_translates_into_english(self):
         for language, task in (("en", "transcribe"), ("fr", "translate")):
             calls = []
